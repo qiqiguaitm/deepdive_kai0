@@ -1,0 +1,74 @@
+# ===== Python =====
+__pycache__/
+*.py[codz]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+wheels/
+MANIFEST
+
+# Virtual environments
+.venv/
+.venv_*/
+venv/
+env/
+
+# ===== Project-specific large files =====
+# Model checkpoints (22GB+)
+kai0/checkpoints/
+# Training data (LeRobot datasets)
+kai0/data/
+# Cached downloads
+openpi_cache/
+# Validation data
+validation_data/
+
+# ===== ROS2 build artifacts =====
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# ===== JAX / XLA =====
+/tmp/xla_cache/
+*.hlo_snapshot/
+
+# ===== IDE / Editor =====
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+
+# ===== Testing / Coverage =====
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# ===== Linting =====
+.ruff_cache/
+.mypy_cache/
+
+# ===== Misc =====
+*.log
+.env
+.envrc
+
+# ===== Docker =====
+docker/*.tar
+
+# ===== External SDKs (separate git repos) =====
+piper_sdk/
+
+# ===== Claude Code =====
+.claude/

@@ -1,0 +1,42 @@
+# RealSense 相机配置 — sim01 部署
+# 通过 pyrealsense2 枚举获取, 2026-04-01
+
+cameras:
+  top_head:
+    model: Intel RealSense D435
+    serial_number: "254622070889"
+    firmware: "5.15.1.55"
+    product_id: "0B07"
+    usb_type: "3.2"
+    physical_port: usb2/2-1.2
+    role: 俯视全局相机
+    resolution: 640x480
+    fps: 30
+    ros2_topic_color: /camera_f/camera_f/color/image_raw
+    ros2_topic_depth: /camera_f/camera_f/depth/image_rect_raw
+
+  hand_left:
+    model: Intel RealSense D405
+    serial_number: "409122273074"
+    firmware: "5.17.0.10"
+    product_id: "0B5B"
+    usb_type: "3.2"
+    physical_port: usb2/2-1.1
+    role: 左手腕相机
+    resolution: 640x480
+    fps: 30
+    ros2_topic_color: /camera_l/camera_l/color/image_rect_raw
+    ros2_topic_depth: /camera_l/camera_l/depth/image_rect_raw
+
+  hand_right:
+    model: Intel RealSense D405
+    serial_number: "409122271568"
+    firmware: "5.15.1.55"
+    product_id: "0B5B"
+    usb_type: "3.2"
+    physical_port: usb2/2-1.3
+    role: 右手腕相机
+    resolution: 640x480
+    fps: 30
+    ros2_topic_color: /camera_r/camera_r/color/image_rect_raw
+    ros2_topic_depth: /camera_r/camera_r/depth/image_rect_raw
