@@ -129,11 +129,13 @@ def generate_launch_description():
         default_value=_DEFAULT_CALIB,
         description='Calibration YAML path (for FK visualization in Rerun)')
 
-    # ── Piper 左臂 (can1, mode=0 只读) ──
+    # ── Piper 左臂 (mode=1 控制从臂, auto_enable 上电) ──
+    # mode=1: subscribe to /master/joint_left and drive the slave arm hardware
+    # mode=0: read-only (for data collection / visualization only, no motion)
     piper_left = Node(
         package='piper', executable='piper_start_ms_node.py',
         name='piper_left', output='screen',
-        parameters=[{'can_port': _LEFT_CAN, 'mode': 0, 'auto_enable': False}],
+        parameters=[{'can_port': _LEFT_CAN, 'mode': 1, 'auto_enable': True}],
         remappings=[
             ('/puppet/joint_states', '/puppet/joint_left'),
             ('/master/joint_states', '/master/joint_left'),
@@ -143,11 +145,11 @@ def generate_launch_description():
         ],
     )
 
-    # ── Piper 右臂 (mode=0 只读) ──
+    # ── Piper 右臂 (mode=1 控制从臂) ──
     piper_right = Node(
         package='piper', executable='piper_start_ms_node.py',
         name='piper_right', output='screen',
-        parameters=[{'can_port': _RIGHT_CAN, 'mode': 0, 'auto_enable': False}],
+        parameters=[{'can_port': _RIGHT_CAN, 'mode': 1, 'auto_enable': True}],
         remappings=[
             ('/puppet/joint_states', '/puppet/joint_right'),
             ('/master/joint_states', '/master/joint_right'),
