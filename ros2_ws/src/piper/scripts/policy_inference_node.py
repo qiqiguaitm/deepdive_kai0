@@ -600,7 +600,7 @@ class PolicyInferenceNode(Node):
                 rr.set_time("ros_time", timestamp=stamp)
                 rr.set_time("frame_left", sequence=frame_idx)
                 for i in range(min(7, len(q))):
-                    rr.log(f"timeseries/left_j{i}", rr.Scalar(float(q[i])))
+                    rr.log(f"timeseries/left_j{i}", rr.Scalars([float(q[i])]))
                 # Queue FK work for the visualization timer (avoid blocking callback)
                 if self._fk is not None and len(q) >= 7 and frame_idx % self._rr_fk_skip == 0:
                     self._rr_fk_queue.append(('left', q[:7].copy(), self._T_world_baseL, stamp))
@@ -620,7 +620,7 @@ class PolicyInferenceNode(Node):
                 rr.set_time("ros_time", timestamp=stamp)
                 rr.set_time("frame_right", sequence=frame_idx)
                 for i in range(min(7, len(q))):
-                    rr.log(f"timeseries/right_j{i}", rr.Scalar(float(q[i])))
+                    rr.log(f"timeseries/right_j{i}", rr.Scalars([float(q[i])]))
                 if self._fk is not None and len(q) >= 7 and frame_idx % self._rr_fk_skip == 0:
                     self._rr_fk_queue.append(('right', q[:7].copy(), self._T_world_baseR, stamp))
             except Exception as e:
@@ -673,7 +673,7 @@ class PolicyInferenceNode(Node):
         # Capture val in closure to avoid late-binding issues
         self._rr_event_queue.append((
             "timeseries/execute_mode",
-            lambda v=val: self._rr.Scalar(v),
+            lambda v=val: self._rr.Scalars([v]),
             stamp_sec,
         ))
 
@@ -947,7 +947,7 @@ class PolicyInferenceNode(Node):
 
         # Log initial execute mode
         rr.log("timeseries/execute_mode",
-               rr.Scalar(1.0 if self._execution_enabled else 0.0))
+               rr.Scalars([1.0 if self._execution_enabled else 0.0]))
 
         self.get_logger().info('Rerun viewer initialized')
 
@@ -1386,13 +1386,13 @@ class PolicyInferenceNode(Node):
                             if self._rr_infer_thread:
                                 self._rr.set_time("ros_time", timestamp=ros_now_sec)
                                 self._rr.log("timeseries/inference_ms",
-                                             self._rr.Scalar(float(infer_ms)))
+                                             self._rr.Scalars([float(infer_ms)]))
                             else:
                                 # Fallback: route through event queue for executor thread
                                 ms = float(infer_ms)
                                 self._rr_event_queue.append((
                                     "timeseries/inference_ms",
-                                    lambda v=ms: self._rr.Scalar(v),
+                                    lambda v=ms: self._rr.Scalars([v]),
                                     ros_now_sec,
                                 ))
                         except Exception as e:

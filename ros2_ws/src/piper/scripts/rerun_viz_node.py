@@ -151,7 +151,7 @@ class RerunVizNode(Node):
                                '/camera_r/camera/aligned_depth_to_color/image_raw')
         self.declare_parameter('puppet_left_topic', '/puppet/joint_left')
         self.declare_parameter('puppet_right_topic', '/puppet/joint_right')
-        self.declare_parameter('depth_step', 2)
+        self.declare_parameter('depth_step', 1)
         self.declare_parameter('depth_min', 0.05)
         self.declare_parameter('depth_max', 1.5)
 
@@ -216,27 +216,36 @@ class RerunVizNode(Node):
             self.get_logger().warn(f'No display, saving to {rrd_path}')
             rr.save(rrd_path)
 
-        # Log origin entities before blueprint to avoid "Unknown entity" warnings
-        rr.log("world", rr.Transform3D(), static=True)
-        rr.log("images/top_head", rr.Clear(recursive=False), static=True)
-        rr.log("images/hand_left", rr.Clear(recursive=False), static=True)
-        rr.log("images/hand_right", rr.Clear(recursive=False), static=True)
-        rr.log("timeseries", rr.Clear(recursive=False), static=True)
+        # Identity transform at world root so the 3D view has a valid origin.
+        # An empty rr.Transform3D() is dropped on 0.31 ("chunk without
+        # components"), so set an explicit zero translation.
+        rr.log("world", rr.Transform3D(translation=[0, 0, 0]), static=True)
+        # Do NOT pre-log static placeholder images — on rerun 0.31 a static
+        # 1x1 image locks the 2D view size and prevents real-sized dynamic
+        # frames from displaying. The views will populate once the first
+        # real frame arrives from the cameras.
 
+        # Layout:
+        #   top (~70%): 3D scene | telemetry plot
+        #   bottom (~30%): head | hand_left | hand_right (full-width horizontal)
+        # Giving the 2D image row its own full-width strip ensures each of the
+        # 3 image views is wide enough that Rerun doesn't collapse them.
         rr.send_blueprint(rrb.Blueprint(
-            rrb.Horizontal(
-                rrb.Spatial3DView(origin="world", contents="world/**", name="3D Scene"),
-                rrb.Vertical(
-                    rrb.Horizontal(
-                        rrb.Spatial2DView(origin="images/top_head", name="Head"),
-                        rrb.Spatial2DView(origin="images/hand_left", name="Left"),
-                        rrb.Spatial2DView(origin="images/hand_right", name="Right"),
-                    ),
-                    rrb.TimeSeriesView(origin="timeseries", contents="timeseries/**",
-                                       name="Telemetry"),
-                    row_shares=[1, 1],
+            rrb.Vertical(
+                rrb.Horizontal(
+                    rrb.Spatial3DView(origin="world", contents="world/**",
+                                       name="3D Scene"),
+                    rrb.TimeSeriesView(origin="timeseries",
+                                        contents="timeseries/**",
+                                        name="Telemetry"),
+                    column_shares=[3, 1],
                 ),
-                column_shares=[3, 2],
+                rrb.Horizontal(
+                    rrb.Spatial2DView(origin="images/top_head", name="Head"),
+                    rrb.Spatial2DView(origin="images/hand_left", name="Left"),
+                    rrb.Spatial2DView(origin="images/hand_right", name="Right"),
+                ),
+                row_shares=[7, 3],
             ),
         ))
 
@@ -366,7 +375,8 @@ class RerunVizNode(Node):
         for label, T_key in [('baseL', 'T_world_baseL'), ('baseR', 'T_world_baseR')]:
             pos = transforms[T_key][:3, 3]
             rr.log(f"world/{label}", rr.Points3D(
-                [pos], colors=[[255, 255, 0]], radii=[0.0075], labels=[label]),
+                [pos], colors=[[255, 255, 0]], radii=[0.0075],
+                labels=[label], show_labels=False),
                 static=True)
 
         # Head camera frustum
@@ -385,7 +395,8 @@ class RerunVizNode(Node):
             rr.log("world/head_cam_frustum", rr.LineStrips3D(
                 lines, colors=[[255, 50, 50]], radii=[0.001]), static=True)
             rr.log("world/head_cam_pos", rr.Points3D(
-                [o], colors=[[255, 50, 50]], radii=[0.005], labels=["D435 (head)"]),
+                [o], colors=[[255, 50, 50]], radii=[0.005],
+                labels=["D435 (head)"], show_labels=False),
                 static=True)
 
         # Arm meshes
@@ -393,18 +404,38 @@ class RerunVizNode(Node):
 
     @staticmethod
     def _load_binary_stl(path):
-        """Load a binary STL file using only numpy. Returns (vertices [N,3], faces [M,3])."""
+        """Load a binary STL file. Returns (vertices [N,3], faces [M,3], vertex_normals [N,3]).
+
+        Computes per-vertex normals by area-weighted averaging of adjacent face
+        normals. Rerun's Mesh3D shader needs vertex_normals to use its PBR
+        render path, which is what actually honors albedo_factor alpha —
+        without normals the mesh renders fully opaque.
+        """
         with open(path, 'rb') as f:
             f.read(80)  # header
             n_tri = np.frombuffer(f.read(4), dtype=np.uint32)[0]
-            # Each triangle: 12 floats (normal + 3 vertices) + 2 bytes attribute
             dt = np.dtype([('normal', np.float32, 3), ('v', np.float32, (3, 3)), ('attr', np.uint16)])
             data = np.frombuffer(f.read(n_tri * dt.itemsize), dtype=dt)
-        all_verts = data['v'].reshape(-1, 3)  # (n_tri*3, 3)
-        # Deduplicate vertices for compact mesh
+        all_verts = data['v'].reshape(-1, 3)
         verts_unique, inverse = np.unique(all_verts, axis=0, return_inverse=True)
         faces = inverse.reshape(-1, 3)
-        return verts_unique, faces
+
+        # Per-face normals (un-normalized = area-weighted)
+        v0 = verts_unique[faces[:, 0]]
+        v1 = verts_unique[faces[:, 1]]
+        v2 = verts_unique[faces[:, 2]]
+        face_normals = np.cross(v1 - v0, v2 - v0)  # (M, 3)
+
+        # Accumulate face normals onto each vertex they touch
+        vert_normals = np.zeros_like(verts_unique)
+        for i in range(3):
+            np.add.at(vert_normals, faces[:, i], face_normals)
+
+        # Normalize
+        lens = np.linalg.norm(vert_normals, axis=1, keepdims=True)
+        lens[lens == 0] = 1.0
+        vert_normals /= lens
+        return verts_unique, faces, vert_normals.astype(np.float32)
 
     def _load_meshes(self, transforms):
         rr = self._rr
@@ -426,18 +457,24 @@ class RerunVizNode(Node):
         if os.path.isdir(mesh_dir):
             try:
                 for arm_label in ('left', 'right'):
-                    arm_rgba = ([100, 100, 255, 10] if arm_label == 'left'
-                                else [100, 255, 100, 10])
+                    arm_rgb = [100, 100, 255] if arm_label == 'left' else [100, 255, 100]
                     for mesh_name in mesh_names:
                         stl_path = os.path.join(mesh_dir, f'{mesh_name}.STL')
                         if os.path.exists(stl_path):
-                            verts, faces = self._load_binary_stl(stl_path)
-                            # Rgba32 vertex colors (alpha in the 4th channel).
-                            rr.log(f"world/{arm_label}/{mesh_name}/mesh", rr.Mesh3D(
+                            verts, faces, normals = self._load_binary_stl(stl_path)
+                            # Mesh at the same entity as the dynamic Transform3D
+                            # (like verify_calibration.py). vertex_normals is
+                            # REQUIRED for Rerun to use its lit/PBR render path,
+                            # which is the one that actually honors alpha in
+                            # albedo_factor. Without normals, Rerun falls back
+                            # to an unlit shader that draws fully opaque.
+                            rr.log(f"world/{arm_label}/{mesh_name}", rr.Mesh3D(
                                 vertex_positions=verts,
                                 triangle_indices=faces,
-                                vertex_colors=np.full((len(verts), 4),
-                                                      arm_rgba, dtype=np.uint8),
+                                vertex_normals=normals,
+                                vertex_colors=np.full((len(verts), 3),
+                                                      arm_rgb, dtype=np.uint8),
+                                albedo_factor=arm_rgb + [20],
                             ), static=True)
                 self._arm_mesh_loaded = True
                 self.get_logger().info(f'Loaded arm meshes from {mesh_dir}')
@@ -733,7 +770,7 @@ class RerunVizNode(Node):
                 # Timeseries at 1/3 of FK rate (5Hz) — still smooth for plots.
                 if self._tick_arms_count % 3 == 0:
                     for i in range(min(7, len(q))):
-                        rr.log(f"timeseries/{arm}_j{i}", rr.Scalar(float(q[i])))
+                        rr.log(f"timeseries/{arm}_j{i}", rr.Scalars([float(q[i])]))
                 ee_pos = self._log_arm_fk(arm, q, T_base)
                 if ee_pos is not None:
                     trail.append(ee_pos.copy())
@@ -748,7 +785,7 @@ class RerunVizNode(Node):
     def _cb_execute(self, msg):
         rr = self._rr
         rr.set_time("ros_time", timestamp=self.get_clock().now().nanoseconds * 1e-9)
-        rr.log("timeseries/execute_mode", rr.Scalar(1.0 if msg.data else 0.0))
+        rr.log("timeseries/execute_mode", rr.Scalars([1.0 if msg.data else 0.0]))
 
     def _log_master_arm(self, arm_label, msg, T_base, trail):
         """Log commanded (master) joint state: time series + EE marker + trail.
@@ -773,7 +810,7 @@ class RerunVizNode(Node):
 
             # Time series (7 joints)
             for i in range(min(7, len(q))):
-                rr.log(f"timeseries/master_{arm_label}_j{i}", rr.Scalar(float(q[i])))
+                rr.log(f"timeseries/master_{arm_label}_j{i}", rr.Scalars([float(q[i])]))
 
             # FK → world EE position
             q6 = q[:6]
@@ -858,10 +895,10 @@ class RerunVizNode(Node):
                 [right_arr], colors=[[50, 255, 150]], radii=[0.004]))
             rr.log("world/predicted/left_endpoints", rr.Points3D(
                 [left_arr[0], left_arr[-1]], colors=[[50, 150, 255]],
-                radii=[0.005], labels=["start", "end"]))
+                radii=[0.005], labels=["start", "end"], show_labels=False))
             rr.log("world/predicted/right_endpoints", rr.Points3D(
                 [right_arr[0], right_arr[-1]], colors=[[50, 255, 150]],
-                radii=[0.005], labels=["start", "end"]))
+                radii=[0.005], labels=["start", "end"], show_labels=False))
         except Exception as e:
             self.get_logger().warn(f'action_chunk error: {e}')
 
@@ -939,13 +976,12 @@ class RerunVizNode(Node):
                 translation=T_w[:3, 3], mat3x3=T_w[:3, :3]))
 
         ee_pos = T_world_link6[:3, 3]
-        base_pos = T_base[:3, 3]
         ee_color = [50, 100, 255] if arm_label == 'left' else [50, 255, 100]
         cam_color = [100, 100, 255] if arm_label == 'left' else [100, 255, 100]
         rr.log(f"world/{arm_label}/ee", rr.Points3D(
             [ee_pos], colors=[ee_color], radii=[0.008]))
 
-        # Wrist camera frustum + EE-to-base line (like verify_calibration.py)
+        # Wrist camera frustum only (no link6->base line — visually noisy)
         T_link6_cam = self._T_link6_camL if arm_label == 'left' else self._T_link6_camR
         if T_link6_cam is not None:
             T_world_cam = T_world_link6 @ T_link6_cam
@@ -958,13 +994,12 @@ class RerunVizNode(Node):
             rr.log(f"world/{arm_label}_cam", rr.LineStrips3D(
                 [[fc[0], fc[1]], [fc[0], fc[2]], [fc[0], fc[3]], [fc[0], fc[4]],
                  [fc[1], fc[2]], [fc[2], fc[3]], [fc[3], fc[4]], [fc[4], fc[1]],
-                 [cam_pos.tolist(), ee_pos.tolist()],
-                 [ee_pos.tolist(), base_pos.tolist()]],
+                 [cam_pos.tolist(), ee_pos.tolist()]],
                 colors=[cam_color], radii=[0.002],
             ))
             rr.log(f"world/{arm_label}_cam_label", rr.Points3D(
                 [cam_pos.tolist()], colors=[cam_color], radii=[0.002],
-                labels=[f"D405 ({arm_label})"],
+                labels=[f"D405 ({arm_label})"], show_labels=False,
             ))
 
         return ee_pos
