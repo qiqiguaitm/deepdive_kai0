@@ -13,6 +13,8 @@ import rospy
 import torch
 from cv_bridge import CvBridge
 from geometry_msgs.msg import Twist
+
+from action_safety import ActionSafety, add_safety_args, create_safety_pair
 from nav_msgs.msg import Odometry
 from openpi_client import image_tools, websocket_client_policy
 from piper_msgs.msg import PosCmd
@@ -203,6 +205,9 @@ def model_inference(args, config, ros_operator):
     left0 = [0, 0.32, -0.36, 0, 0.24, 0, 0.07]
     right0 = [0, 0.32, -0.36, 0, 0.24, 0, 0.07]
 
+    # [deepdive_kai0 增强] 创建关节安全限位器 — 官方 kai0 无此功能
+    safety_left, safety_right = create_safety_pair(args)
+
     ros_operator.puppet_arm_publish_continuous(left0, right0)
     input("Press enter to continue")
     ros_operator.puppet_arm_publish_continuous(left0, right0)
@@ -269,6 +274,10 @@ def model_inference(args, config, ros_operator):
                         left_action = act[:7].copy()
                         right_action = act[7:14].copy()
                         right_action[6] = max(0.0, right_action[6]-RIGHT_OFFSET)
+                        # [deepdive_kai0 增强] 关节安全 clamp — 官方 kai0 无此功能
+                        if safety_left is not None:
+                            left_action = safety_left(left_action)
+                            right_action = safety_right(right_action)
                         ros_operator.puppet_arm_publish(left_action, right_action)
                         try:
                             published_actions_history.append(np.concatenate([left_action, right_action], axis=0).astype(float))
@@ -934,6 +943,9 @@ def get_arguments():
         default=3.0,
         required=False,
     )
+
+    # [deepdive_kai0 增强] 关节安全限位参数 — 官方 kai0 无此功能
+    add_safety_args(parser)
 
     args = parser.parse_args()
     return args

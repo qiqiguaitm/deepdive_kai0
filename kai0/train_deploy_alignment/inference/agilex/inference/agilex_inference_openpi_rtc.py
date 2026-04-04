@@ -23,6 +23,8 @@ import torch
 from cv_bridge import CvBridge
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
+
+from action_safety import ActionSafety, add_safety_args, create_safety_pair
 from openpi_client import image_tools, websocket_client_policy
 from piper_msgs.msg import PosCmd
 from sensor_msgs.msg import Image, JointState
@@ -50,8 +52,8 @@ def start_inference_thread(target, args):
     t.start()
     return t
 
-# lang_embeddings = "fold the cloth"
-lang_embeddings = "fold the sleeve"
+# Must match training config (pi05_flatten_fold_normal: "Flatten and fold the cloth.")
+lang_embeddings = "Flatten and fold the cloth."
 
 RIGHT_OFFSET = 0.003
 delay_buffer = deque(maxlen=20)  # RTT sliding window (seconds)
@@ -69,6 +71,7 @@ shutdown_event = threading.Event()
 
 
 def joint_actions_clip(action: np.ndarray):
+    # [deepdive_kai0] 官方原始空实现保留；实际限位由 ActionSafety 模块处理
     pass
 
 def inference_fn_non_blocking_fast(args, config, policy, ros_operator):
@@ -613,6 +616,9 @@ def model_inference(args, config, ros_operator):
     # right0 = [0.0042737800000000005, -0.020549032000000002, 0.005773964, 0.020392036000000002, 0.413108808, 0.08352187200000001, 0.0975]
     # right0 = [0, 0.32, -0.36, 0, 0.24, 0, 0.0]
 
+    # [deepdive_kai0 增强] 创建关节安全限位器 — 官方 kai0 无此功能
+    safety_left, safety_right = create_safety_pair(args)
+
     ros_operator.puppet_arm_publish_continuous(left0, right0)
     input("Press enter to continue")
     ros_operator.puppet_arm_publish_continuous(left0, right0)
@@ -771,6 +777,10 @@ def model_inference(args, config, ros_operator):
                                 left_action = act[:7].copy()
                                 right_action = act[7:14].copy()
                                 right_action[6] = max(0.0, right_action[6]-RIGHT_OFFSET)
+                                # [deepdive_kai0 增强] 关节安全 clamp — 官方 kai0 无此功能
+                                if safety_left is not None:
+                                    left_action = safety_left(left_action)
+                                    right_action = safety_right(right_action)
                                 ros_operator.puppet_arm_publish(left_action, right_action)
                                 try:
                                     published_actions_history.append(np.concatenate([left_action, right_action], axis=0).astype(float))
@@ -821,6 +831,10 @@ def model_inference(args, config, ros_operator):
                             right_action = act[7:14].copy()
                             left_action[6] = max(0.0, left_action[6]-RIGHT_OFFSET)
                             right_action[6] = max(0.0, right_action[6]-RIGHT_OFFSET)
+                            # [deepdive_kai0 增强] 关节安全 clamp — 官方 kai0 无此功能
+                            if safety_left is not None:
+                                left_action = safety_left(left_action)
+                                right_action = safety_right(right_action)
                             ros_operator.puppet_arm_publish(left_action, right_action)
                             try:
                                 published_actions_history.append(np.concatenate([left_action, right_action], axis=0).astype(float))
@@ -1638,6 +1652,9 @@ def get_arguments():
         default=False,
         required=False,
     )
+
+    # [deepdive_kai0 增强] 关节安全限位参数 — 官方 kai0 无此功能
+    add_safety_args(parser)
 
     args = parser.parse_args()
     return args

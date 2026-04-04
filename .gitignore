@@ -72,3 +72,7 @@ piper_sdk/
 
 # ===== Claude Code =====
 .claude/
+
+# Calibration data (large binary npz files)
+calib/data/
+calib/piper_local.urdf

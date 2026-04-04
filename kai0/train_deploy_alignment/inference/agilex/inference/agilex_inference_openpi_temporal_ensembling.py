@@ -21,6 +21,8 @@ from collections import deque
 
 import cv2
 import numpy as np
+
+from action_safety import ActionSafety, add_safety_args, create_safety_pair
 import rospy
 import torch
 from cv_bridge import CvBridge
@@ -44,7 +46,8 @@ action_buffer = None   # type: TemporalEnsemblingBuffer or NaiveAsyncBuffer
 
 observation_window = None
 
-lang_embeddings = "fold the sleeve"
+# Must match training config (pi05_flatten_fold_normal: "Flatten and fold the cloth.")
+lang_embeddings = "Flatten and fold the cloth."
 
 RIGHT_OFFSET = 0.003
 published_actions_history = []  # list[np.ndarray(shape=(14,))]
@@ -465,6 +468,9 @@ def model_inference(args, config, ros_operator):
     left0 = [0, 0.32, -0.36, 0, 0.24, 0, 0.07]
     right0 = [0, 0.32, -0.36, 0, 0.24, 0, 0.07]
 
+    # [deepdive_kai0 增强] 创建关节安全限位器 — 官方 kai0 无此功能
+    safety_left, safety_right = create_safety_pair(args)
+
     ros_operator.puppet_arm_publish_continuous(left0, right0)
     input("Press enter to continue")
     ros_operator.puppet_arm_publish_continuous(left0, right0)
@@ -542,6 +548,10 @@ def model_inference(args, config, ros_operator):
                         right_action = act[7:14].copy()
                         left_action[6] = max(0.0, left_action[6] - RIGHT_OFFSET)
                         right_action[6] = max(0.0, right_action[6] - RIGHT_OFFSET)
+                        # [deepdive_kai0 增强] 关节安全 clamp — 官方 kai0 无此功能
+                        if safety_left is not None:
+                            left_action = safety_left(left_action)
+                            right_action = safety_right(right_action)
                         ros_operator.puppet_arm_publish(left_action, right_action)
                         published_actions_history.append(
                             np.concatenate([left_action, right_action], axis=0).astype(float)
@@ -1212,6 +1222,9 @@ def get_arguments():
         default=0.01,
         required=False,
     )
+
+    # [deepdive_kai0 增强] 关节安全限位参数 — 官方 kai0 无此功能
+    add_safety_args(parser)
 
     args = parser.parse_args()
     return args

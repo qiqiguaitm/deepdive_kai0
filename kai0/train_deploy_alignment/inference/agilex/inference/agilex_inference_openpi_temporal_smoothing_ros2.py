@@ -9,6 +9,8 @@ from collections import deque
 
 import cv2
 import numpy as np
+
+from action_safety import ActionSafety, add_safety_args, create_safety_pair
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
@@ -464,6 +466,9 @@ def model_inference(args, config, ros_operator):
     # right0 = [0.0042737800000000005, -0.020549032000000002, 0.005773964, 0.020392036000000002, 0.413108808, 0.08352187200000001, 0.0975]
     # right0 = [0, 0.32, -0.36, 0, 0.24, 0, 0.0]
 
+    # [deepdive_kai0 增强] 创建关节安全限位器 — 官方 kai0 无此功能
+    safety_left, safety_right = create_safety_pair(args)
+
     ros_operator.puppet_arm_publish_continuous(left0, right0)
     input("Press enter to continue")
     ros_operator.puppet_arm_publish_continuous(left0, right0)
@@ -529,6 +534,10 @@ def model_inference(args, config, ros_operator):
                             right_action = act[7:14].copy()
                             left_action[6] = max(0.0, left_action[6]-RIGHT_OFFSET)
                             right_action[6] = max(0.0, right_action[6]-RIGHT_OFFSET)
+                            # [deepdive_kai0 增强] 关节安全 clamp — 官方 kai0 无此功能
+                            if safety_left is not None:
+                                left_action = safety_left(left_action)
+                                right_action = safety_right(right_action)
                             ros_operator.puppet_arm_publish(left_action, right_action)
                             published_actions_history.append(np.concatenate([left_action, right_action], axis=0).astype(float))
 
@@ -585,15 +594,17 @@ class RosOperator(Node):
 
     def init(self):
         self.bridge = CvBridge()
-        self.img_left_deque = deque()
-        self.img_right_deque = deque()
-        self.img_front_deque = deque()
-        self.img_left_depth_deque = deque()
-        self.img_right_depth_deque = deque()
-        self.img_front_depth_deque = deque()
-        self.puppet_arm_left_deque = deque()
-        self.puppet_arm_right_deque = deque()
-        self.robot_base_deque = deque()
+        # [deepdive_kai0 优化] 使用 maxlen 替代手动 popleft，C 层原子操作更线程安全
+        # 官方 kai0 使用 deque() + 手动 if len >= 2000: popleft()
+        self.img_left_deque = deque(maxlen=2000)
+        self.img_right_deque = deque(maxlen=2000)
+        self.img_front_deque = deque(maxlen=2000)
+        self.img_left_depth_deque = deque(maxlen=2000)
+        self.img_right_depth_deque = deque(maxlen=2000)
+        self.img_front_depth_deque = deque(maxlen=2000)
+        self.puppet_arm_left_deque = deque(maxlen=2000)
+        self.puppet_arm_right_deque = deque(maxlen=2000)
+        self.robot_base_deque = deque(maxlen=2000)
         self.puppet_arm_publish_lock = threading.Lock()
         self.puppet_arm_publish_lock.acquire()
 
@@ -864,49 +875,32 @@ class RosOperator(Node):
             robot_base,
         )
 
+    # [deepdive_kai0 优化] maxlen 自动丢弃旧帧，无需手动 popleft
     def img_left_callback(self, msg):
-        if len(self.img_left_deque) >= 2000:
-            self.img_left_deque.popleft()
         self.img_left_deque.append(msg)
 
     def img_right_callback(self, msg):
-        if len(self.img_right_deque) >= 2000:
-            self.img_right_deque.popleft()
         self.img_right_deque.append(msg)
 
     def img_front_callback(self, msg):
-        if len(self.img_front_deque) >= 2000:
-            self.img_front_deque.popleft()
         self.img_front_deque.append(msg)
 
     def img_left_depth_callback(self, msg):
-        if len(self.img_left_depth_deque) >= 2000:
-            self.img_left_depth_deque.popleft()
         self.img_left_depth_deque.append(msg)
 
     def img_right_depth_callback(self, msg):
-        if len(self.img_right_depth_deque) >= 2000:
-            self.img_right_depth_deque.popleft()
         self.img_right_depth_deque.append(msg)
 
     def img_front_depth_callback(self, msg):
-        if len(self.img_front_depth_deque) >= 2000:
-            self.img_front_depth_deque.popleft()
         self.img_front_depth_deque.append(msg)
 
     def puppet_arm_left_callback(self, msg):
-        if len(self.puppet_arm_left_deque) >= 2000:
-            self.puppet_arm_left_deque.popleft()
         self.puppet_arm_left_deque.append(msg)
 
     def puppet_arm_right_callback(self, msg):
-        if len(self.puppet_arm_right_deque) >= 2000:
-            self.puppet_arm_right_deque.popleft()
         self.puppet_arm_right_deque.append(msg)
 
     def robot_base_callback(self, msg):
-        if len(self.robot_base_deque) >= 2000:
-            self.robot_base_deque.popleft()
         self.robot_base_deque.append(msg)
 
     def init_ros(self):
@@ -1231,6 +1225,9 @@ def get_arguments():
         default=False,
         required=False,
     )
+
+    # [deepdive_kai0 增强] 关节安全限位参数 — 官方 kai0 无此功能
+    add_safety_args(parser)
 
     args = parser.parse_args()
     return args
