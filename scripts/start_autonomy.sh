@@ -241,6 +241,8 @@ echo ""
 exec ros2 launch piper autonomy_launch.py \
     mode:="$MODE" \
     enable_rerun:="$ENABLE_RERUN" \
+    fg_enable:=false \
+    bg_enable:=false \
     execute_mode:="$EXECUTE_MODE" \
     gpu_id:="$GPU_ID" \
     "${EXTRA_ARGS[@]}"
