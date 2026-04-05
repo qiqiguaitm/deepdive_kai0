@@ -62,6 +62,12 @@ import yaml
 # GPU projection via JAX. The policy inference node owns GPU 0; initializing
 # a second JAX context on the same device segfaults at first use. Pin this
 # process to GPU 1 (sim01 has 2x RTX 5090) so it has its own CUDA context.
+#
+# autonomy_launch.py sets these explicitly via additional_env when the node
+# is spawned by the launch file (the authoritative source). The setdefault
+# here is a fallback for standalone `ros2 run piper rerun_viz_node.py`
+# invocations outside the launch file — if you change either side, keep
+# them in sync.
 os.environ.setdefault('CUDA_VISIBLE_DEVICES', '1')
 os.environ.setdefault('XLA_PYTHON_CLIENT_PREALLOCATE', 'false')
 os.environ.setdefault('XLA_PYTHON_CLIENT_MEM_FRACTION', '0.20')
@@ -105,6 +111,26 @@ from sensor_msgs.msg import Image, JointState
 from std_msgs.msg import Bool
 from collections import deque
 from scipy.spatial.transform import Rotation as R_
+
+# Optional background-mesh builder. Open3D is a heavy dependency so import
+# failure must not crash the node — Step 5 is gracefully disabled instead.
+try:
+    import _bg_builder  # type: ignore
+except Exception:
+    # rerun_viz_node.py ships alongside _bg_builder.py in the same scripts
+    # directory, but the ROS2 ament install sometimes places them under a
+    # sibling lib/ dir. Adding __file__'s dir to sys.path is a no-op in the
+    # normal case and lets `import _bg_builder` succeed post-install.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        import _bg_builder  # type: ignore
+    except Exception as _bg_err:
+        _bg_builder = None
+        _BG_IMPORT_ERROR = f'{type(_bg_err).__name__}: {_bg_err}'
+    else:
+        _BG_IMPORT_ERROR = ''
+else:
+    _BG_IMPORT_ERROR = ''
 
 
 def _stamp_to_sec(stamp):
@@ -154,6 +180,41 @@ class RerunVizNode(Node):
         self.declare_parameter('depth_step', 1)
         self.declare_parameter('depth_min', 0.05)
         self.declare_parameter('depth_max', 1.5)
+        # Time sync tolerances (used to pair depth with the correct RGB frame
+        # and interpolate joint state at the depth timestamp). Setting these
+        # loosely only delays drop-outs; real-time drift normally stays below
+        # 20 ms on sim01 with reliable QoS.
+        self.declare_parameter('sync_rgb_tol_s', 0.03)
+        self.declare_parameter('sync_joint_max_gap_s', 0.1)
+        # Foreground mesh (Step 1–4 of docs/inference_visualization_mesh.md).
+        # When fg_enable=True, _tick_point_clouds emits rr.Mesh3D per camera
+        # instead of the legacy rr.Points3D path. Kept off by default so the
+        # old behaviour is preserved until the mesh path is validated live.
+        self.declare_parameter('fg_enable', False)
+        self.declare_parameter('fg_edge_thresh_m', 0.02)
+        # World-frame AABB of the dynamic workspace. Head camera pixels
+        # outside this box are dropped (they belong to the static background
+        # mesh in Step 5). Wrist cameras ignore the AABB — their field of
+        # view is inherently inside the workspace.
+        self.declare_parameter('fg_bbox_min', [-0.6, -0.6, 0.0])
+        self.declare_parameter('fg_bbox_max', [0.6, 0.6, 0.8])
+        # Optional downsample step for wrist cameras; head stays at depth_step.
+        # Bump to 2 if rerun serialisation becomes the bottleneck.
+        self.declare_parameter('fg_wrist_step', 1)
+        # Static background mesh (Step 5). Built once via TSDF fusion of N
+        # head-camera frames, then logged as a static rerun entity. A cache
+        # file lets node restarts reuse the last rebuild without re-running
+        # the fusion. Set bg_enable=True and call /rerun_viz/rebuild_bg (or
+        # have a valid cache file on disk) to populate the mesh.
+        self.declare_parameter('bg_enable', False)
+        self.declare_parameter('bg_num_frames', 30)
+        self.declare_parameter('bg_voxel_size', 0.005)
+        self.declare_parameter('bg_sdf_trunc', 0.04)
+        self.declare_parameter('bg_depth_trunc', 2.0)
+        self.declare_parameter('bg_device', 'CUDA:0')
+        self.declare_parameter(
+            'bg_cache_path',
+            os.path.expanduser('~/.cache/kai0_viz/bg_mesh.npz'))
 
         self._bridge = CvBridge()
 
@@ -179,6 +240,21 @@ class RerunVizNode(Node):
         self._latest_depth_front = None   # (depth_u16, stamp)
         self._latest_depth_left = None
         self._latest_depth_right = None
+
+        # ── Time-aligned ring buffers ──
+        # Unlike the single-slot _latest_* fields above (which feed legacy
+        # per-tick snapshots), these deques keep a short history so we can
+        # pair depth frames with the RGB and joint state that actually
+        # correspond to the depth timestamp. This is the prerequisite for
+        # stable point-cloud / mesh rendering when the arms are moving:
+        # otherwise wrist-camera FK uses "now" joints while depth is tens of
+        # milliseconds old, visibly throwing the projection off.
+        self._q_left_buf = deque(maxlen=200)    # list of (stamp, q[7])
+        self._q_right_buf = deque(maxlen=200)
+        self._rgb_front_buf = deque(maxlen=10)  # list of (stamp, rgb_hwc)
+        self._rgb_left_buf = deque(maxlen=10)
+        self._rgb_right_buf = deque(maxlen=10)
+        self._sync_drop_count = 0  # diagnostic: frames dropped due to no sync match
 
         # ── FK state ──
         self._actual_trail_left = deque(maxlen=300)
@@ -305,6 +381,21 @@ class RerunVizNode(Node):
         from std_msgs.msg import Float32MultiArray
         self.create_subscription(Float32MultiArray, '/policy/action_chunk',
                                  self._cb_action_chunk, 5)
+
+        # ── Static background mesh (Step 5) ──
+        # Service lets the user trigger a rebuild after repositioning cameras
+        # or the workspace. The handler returns immediately; a daemon thread
+        # does the fusion so the ROS spin loop isn't blocked. Mesh is logged
+        # once built and cached to disk for instant reload on node restart.
+        self._bg_building = False
+        self._bg_thread = None
+        if self.get_parameter('bg_enable').value:
+            from std_srvs.srv import Trigger  # local import: optional path
+            self.create_service(
+                Trigger, '/rerun_viz/rebuild_bg', self._srv_rebuild_bg)
+            # Try to restore the last build from disk so the user sees the
+            # background mesh immediately on restart.
+            self._try_load_cached_bg()
 
         # Fixed-rate timers always process the NEWEST cached data.
         self._tick_arms_count = 0
@@ -488,25 +579,28 @@ class RerunVizNode(Node):
     def _cb_img_front(self, msg):
         # Cache only; logging happens in _tick_images timer.
         try:
-            self._latest_front_rgb = (
-                self._bridge.imgmsg_to_cv2(msg, 'rgb8'),
-                _stamp_to_sec(msg.header.stamp))
+            img = self._bridge.imgmsg_to_cv2(msg, 'rgb8')
+            stamp = _stamp_to_sec(msg.header.stamp)
+            self._latest_front_rgb = (img, stamp)
+            self._rgb_front_buf.append((stamp, img))
         except Exception as e:
             self.get_logger().debug(f'img_front error: {e}')
 
     def _cb_img_left(self, msg):
         try:
-            self._latest_left_rgb = (
-                self._bridge.imgmsg_to_cv2(msg, 'rgb8'),
-                _stamp_to_sec(msg.header.stamp))
+            img = self._bridge.imgmsg_to_cv2(msg, 'rgb8')
+            stamp = _stamp_to_sec(msg.header.stamp)
+            self._latest_left_rgb = (img, stamp)
+            self._rgb_left_buf.append((stamp, img))
         except Exception as e:
             self.get_logger().debug(f'img_left error: {e}')
 
     def _cb_img_right(self, msg):
         try:
-            self._latest_right_rgb = (
-                self._bridge.imgmsg_to_cv2(msg, 'rgb8'),
-                _stamp_to_sec(msg.header.stamp))
+            img = self._bridge.imgmsg_to_cv2(msg, 'rgb8')
+            stamp = _stamp_to_sec(msg.header.stamp)
+            self._latest_right_rgb = (img, stamp)
+            self._rgb_right_buf.append((stamp, img))
         except Exception as e:
             self.get_logger().debug(f'img_right error: {e}')
 
@@ -525,7 +619,9 @@ class RerunVizNode(Node):
             f'ticks/2s: arms={self._tick_arms_count}(compute={arms_ms_avg:.1f}ms '
             f'data_age_avg={arms_age_avg:.0f}ms max={arms_age_max:.0f}ms) '
             f'pc={self._tick_pc_count} img={self._tick_img_count} | '
-            f'cb/2s: jl={self._cb_jl_count} jr={self._cb_jr_count}')
+            f'cb/2s: jl={self._cb_jl_count} jr={self._cb_jr_count} | '
+            f'sync_drops={self._sync_drop_count}')
+        self._sync_drop_count = 0
         self._tick_arms_count = 0
         self._tick_arms_ms_sum = 0.0
         self._tick_arms_age_sum = 0.0
@@ -555,6 +651,67 @@ class RerunVizNode(Node):
                 rr.log(entity, rr.Image(img_small))
             except Exception as e:
                 self.get_logger().debug(f'img tick error ({entity}): {e}')
+
+    # ── Time sync helpers ────────────────────────────────────────
+
+    @staticmethod
+    def _interp_q(buf, t, max_gap):
+        """Linearly interpolate joint state at timestamp t from a deque of
+        (stamp, q) entries sorted ascending by stamp. Returns None if t falls
+        outside the buffer range by more than max_gap on either side, or if
+        the two bracketing samples are farther apart than max_gap (gap in data).
+
+        buf : collections.deque[(float, np.ndarray)]
+        t   : float, target timestamp (seconds)
+        max_gap : float, maximum allowed time gap (seconds)
+        """
+        n = len(buf)
+        if n == 0:
+            return None
+        if n == 1:
+            s0, q0 = buf[0]
+            return q0 if abs(s0 - t) <= max_gap else None
+        # buf is small (≤200 entries @ 200 Hz ≈ 1 s); linear scan from the
+        # end is fine and avoids converting to a list for bisect.
+        s_last, _ = buf[-1]
+        s_first, _ = buf[0]
+        if t >= s_last:
+            return buf[-1][1] if (t - s_last) <= max_gap else None
+        if t <= s_first:
+            return buf[0][1] if (s_first - t) <= max_gap else None
+        # Walk back to find bracketing pair (hi is first entry with stamp > t).
+        hi = n - 1
+        while hi > 0 and buf[hi - 1][0] > t:
+            hi -= 1
+        s_hi, q_hi = buf[hi]
+        s_lo, q_lo = buf[hi - 1]
+        if (s_hi - s_lo) > max_gap:
+            return None
+        alpha = (t - s_lo) / max(s_hi - s_lo, 1e-9)
+        return q_lo * (1.0 - alpha) + q_hi * alpha
+
+    @staticmethod
+    def _nearest_rgb(buf, t, tol):
+        """Return the RGB frame whose stamp is closest to t, if within tol.
+        Returns None (caller should skip) when no frame qualifies — do NOT
+        fall back to the latest frame, that would reintroduce the misalignment
+        the ring buffer exists to fix.
+        """
+        if not buf:
+            return None
+        best = None
+        best_dt = tol
+        # Search from newest to oldest — depth stamps are usually very recent.
+        for stamp, img in reversed(buf):
+            dt = abs(stamp - t)
+            if dt <= best_dt:
+                best_dt = dt
+                best = img
+            # Buffer is ordered ascending, so once dt starts growing past tol
+            # we can stop. Guard with a tight bound to avoid worst-case scan.
+            if stamp + tol < t:
+                break
+        return best
 
     # ── Depth → point cloud ──────────────────────────────────────
 
@@ -627,6 +784,258 @@ class RerunVizNode(Node):
                 depth_u16, step, fx, fy, cx, cy,
                 T_world_cam, depth_min, depth_max, rgb_img)
 
+    # ── Depth → screen-space triangle mesh (foreground) ─────────────
+
+    def _build_fg_mesh(self, depth_u16, rgb_img, step, fx, fy, cx, cy,
+                       T_world_cam, depth_min, depth_max, edge_thresh,
+                       bbox_min=None, bbox_max=None):
+        """Build a screen-space triangle mesh from a depth frame.
+
+        Mesh is expressed in world frame. Pixels outside [depth_min, depth_max]
+        or (optionally) outside the world-frame AABB are masked out. Triangles
+        whose four corner depths span more than ``edge_thresh`` metres are
+        dropped — this kills the "rubber sheet" artefacts that would otherwise
+        connect foreground and background across occlusion boundaries.
+
+        Returns (verts, tris, colors) or None if no valid triangles. On first
+        JAX failure falls back to None (caller simply skips this tick for that
+        camera — the mesh path does not use CPU projection by design, because
+        the CPU fallback is ~40× slower and would blow the 200 ms budget).
+        """
+        if not _GPU_OK or _jax_project_fn is None:
+            return None
+
+        h, w = depth_u16.shape
+        try:
+            # Stride on CPU, upload strided slice to GPU. This reuses the
+            # JIT-compiled projection core and its shape-keyed compile cache
+            # shared with _project_depth_gpu.
+            depth_strided = np.ascontiguousarray(depth_u16[0:h:step, 0:w:step])
+            T_wc_f32 = np.ascontiguousarray(T_world_cam, dtype=np.float32)
+            pts_world_dev, depth_m_dev = _jax_project_fn(
+                depth_strided, float(fx), float(fy), float(cx), float(cy),
+                int(step), T_wc_f32)
+            pts_world = np.asarray(pts_world_dev)  # (H, W, 3) strided
+            depth_m   = np.asarray(depth_m_dev)    # (H, W)
+        except Exception as e:
+            if not hasattr(self, '_jax_mesh_err_logged'):
+                self._jax_mesh_err_logged = True
+                self.get_logger().warn(f'JAX mesh projection failed: {e}')
+            return None
+
+        H, W = depth_m.shape
+
+        # Per-pixel validity: depth range + optional world-frame AABB.
+        valid = (depth_m > depth_min) & (depth_m < depth_max)
+        if bbox_min is not None and bbox_max is not None:
+            xyz = pts_world
+            valid &= (
+                (xyz[..., 0] >= bbox_min[0]) & (xyz[..., 0] <= bbox_max[0]) &
+                (xyz[..., 1] >= bbox_min[1]) & (xyz[..., 1] <= bbox_max[1]) &
+                (xyz[..., 2] >= bbox_min[2]) & (xyz[..., 2] <= bbox_max[2]))
+        if not valid.any():
+            return None
+
+        # Quad validity: all four corners valid AND corner depths agree within
+        # edge_thresh. This runs on numpy — 2×(H-1)×(W-1) booleans at 640×480
+        # is ~600k elements, vectorised reductions take <10 ms on modern CPUs.
+        vq = valid[:-1, :-1] & valid[1:, :-1] & valid[:-1, 1:] & valid[1:, 1:]
+        if not vq.any():
+            return None
+        d = depth_m
+        dstack = np.stack([d[:-1, :-1], d[1:, :-1], d[:-1, 1:], d[1:, 1:]])
+        vq &= (dstack.max(0) - dstack.min(0)) < edge_thresh
+        if not vq.any():
+            return None
+
+        # Emit 2 triangles per valid quad. Vertex indices reference a flat
+        # (H*W, 3) vertex array so winding stays consistent for lit shading.
+        ii, jj = np.nonzero(vq)
+        v00 = (ii * W + jj).astype(np.int32)
+        v10 = ((ii + 1) * W + jj).astype(np.int32)
+        v01 = (ii * W + (jj + 1)).astype(np.int32)
+        v11 = ((ii + 1) * W + (jj + 1)).astype(np.int32)
+        tris = np.concatenate([
+            np.stack([v00, v10, v11], axis=-1),
+            np.stack([v00, v11, v01], axis=-1),
+        ], axis=0)
+
+        # Compress to only the referenced vertices — rerun serialises the
+        # full vertex array, so this shrinks the log payload 2–5× vs sending
+        # the whole H*W grid.
+        used, inverse = np.unique(tris, return_inverse=True)
+        tris_c = inverse.reshape(-1, 3).astype(np.int32)
+        verts = pts_world.reshape(-1, 3)[used].astype(np.float32)
+
+        colors = None
+        if (rgb_img is not None and rgb_img.shape[0] == h
+                and rgb_img.shape[1] == w):
+            rgb_strided = rgb_img[0:h:step, 0:w:step]
+            colors = np.ascontiguousarray(
+                rgb_strided.reshape(-1, 3)[used])
+
+        return verts, tris_c, colors
+
+    def _log_mesh3d(self, entity, verts, tris, colors):
+        """Thin wrapper around rr.Mesh3D that handles optional colors."""
+        rr = self._rr
+        if colors is not None:
+            rr.log(entity, rr.Mesh3D(
+                vertex_positions=verts,
+                triangle_indices=tris,
+                vertex_colors=colors))
+        else:
+            rr.log(entity, rr.Mesh3D(
+                vertex_positions=verts,
+                triangle_indices=tris))
+
+    # ── Static background mesh (Step 5) ─────────────────────────────
+
+    def _log_bg_mesh(self, verts, tris, colors, normals):
+        """Log the static background mesh. Logged once with static=True so
+        it shows at every point on the rerun timeline without re-sending."""
+        rr = self._rr
+        kwargs = dict(vertex_positions=verts, triangle_indices=tris)
+        if colors is not None:
+            kwargs['vertex_colors'] = colors
+        if normals is not None:
+            kwargs['vertex_normals'] = normals
+        rr.log('world/bg_mesh', rr.Mesh3D(**kwargs), static=True)
+
+    def _try_load_cached_bg(self):
+        """Load a previously-built background mesh from disk, if present."""
+        if _bg_builder is None:
+            self.get_logger().warn(
+                f'bg_enable=True but _bg_builder import failed '
+                f'({_BG_IMPORT_ERROR}); background mesh disabled')
+            return
+        path = self.get_parameter('bg_cache_path').value
+        cached = _bg_builder.load_mesh_npz(path)
+        if cached is None:
+            self.get_logger().info(
+                f'no cached bg mesh at {path} — call '
+                f'/rerun_viz/rebuild_bg to build one')
+            return
+        verts, tris, colors, normals = cached
+        self._log_bg_mesh(verts, tris, colors, normals)
+        self.get_logger().info(
+            f'loaded cached bg mesh ({len(verts)} verts, {len(tris)} tris) '
+            f'from {path}')
+
+    def _srv_rebuild_bg(self, request, response):
+        """std_srvs/Trigger: spawn a worker thread to rebuild the bg mesh.
+
+        Returns immediately. Progress is reported via get_logger(); the mesh
+        appears in rerun once the worker finishes and writes the disk cache.
+        """
+        del request  # std_srvs/Trigger has no fields
+        if _bg_builder is None or not _bg_builder.open3d_available():
+            response.success = False
+            err = (_BG_IMPORT_ERROR if _bg_builder is None
+                   else _bg_builder.open3d_error())
+            response.message = f'open3d unavailable: {err}'
+            return response
+        if self._bg_building:
+            response.success = False
+            response.message = 'background rebuild already in progress'
+            return response
+        if self._T_world_camF is None or self._cam_f_fx is None:
+            response.success = False
+            response.message = 'head camera calibration not loaded'
+            return response
+        import threading
+        self._bg_building = True
+        self._bg_thread = threading.Thread(
+            target=self._bg_rebuild_worker, daemon=True)
+        self._bg_thread.start()
+        response.success = True
+        response.message = 'background rebuild started'
+        return response
+
+    def _bg_rebuild_worker(self):
+        """Daemon thread: collect N head-camera frames, fuse via TSDF, log.
+
+        Runs on a background thread, so reads of the _latest_* caches must
+        tolerate concurrent writes from the ROS callbacks. Python tuple
+        assignment is atomic under GIL so grabbing `self._latest_depth_front`
+        by reference is safe — we immediately copy the arrays to be sure
+        nothing mutates them during integration.
+        """
+        try:
+            N = int(self.get_parameter('bg_num_frames').value)
+            rgb_tol = float(self.get_parameter('sync_rgb_tol_s').value)
+            frames = []
+            last_stamp = -1.0
+            deadline = time.monotonic() + max(15.0, N * 0.5)
+            self.get_logger().info(
+                f'[bg] collecting {N} head-camera frames (timeout '
+                f'{deadline - time.monotonic():.0f}s)')
+            while len(frames) < N and time.monotonic() < deadline:
+                dep = self._latest_depth_front
+                if dep is None:
+                    time.sleep(0.05)
+                    continue
+                depth_u16, stamp = dep
+                if stamp <= last_stamp:  # haven't received a new frame yet
+                    time.sleep(0.02)
+                    continue
+                rgb = self._nearest_rgb(self._rgb_front_buf, stamp, rgb_tol)
+                if rgb is None:
+                    time.sleep(0.02)
+                    continue
+                frames.append((depth_u16.copy(), rgb.copy()))
+                last_stamp = stamp
+                time.sleep(0.1)  # space frames out to decorrelate noise
+
+            if len(frames) < max(5, N // 2):
+                self.get_logger().warn(
+                    f'[bg] only collected {len(frames)}/{N} frames — '
+                    f'check camera topics')
+                return
+
+            K = np.array([
+                [self._cam_f_fx, 0.0, self._cam_f_cx],
+                [0.0, self._cam_f_fy, self._cam_f_cy],
+                [0.0, 0.0, 1.0],
+            ], dtype=np.float64)
+            bbox_min = list(self.get_parameter('fg_bbox_min').value)
+            bbox_max = list(self.get_parameter('fg_bbox_max').value)
+            self.get_logger().info(
+                f'[bg] fusing {len(frames)} frames via TSDF '
+                f'(voxel={self.get_parameter("bg_voxel_size").value} m, '
+                f'device={self.get_parameter("bg_device").value})')
+            t_fuse0 = time.monotonic()
+            result = _bg_builder.build_bg_mesh_gpu(
+                frames,
+                K=K,
+                T_world_cam=self._T_world_camF,
+                bbox_exclude_min=bbox_min,
+                bbox_exclude_max=bbox_max,
+                voxel_size=float(self.get_parameter('bg_voxel_size').value),
+                sdf_trunc=float(self.get_parameter('bg_sdf_trunc').value),
+                depth_trunc=float(self.get_parameter('bg_depth_trunc').value),
+                device_str=self.get_parameter('bg_device').value,
+            )
+            fuse_ms = (time.monotonic() - t_fuse0) * 1000.0
+            if result is None:
+                self.get_logger().warn('[bg] TSDF produced empty mesh')
+                return
+            verts, tris, colors, normals = result
+            self.get_logger().info(
+                f'[bg] built mesh: {len(verts)} verts, {len(tris)} tris '
+                f'in {fuse_ms:.0f} ms')
+            self._log_bg_mesh(verts, tris, colors, normals)
+            try:
+                path = self.get_parameter('bg_cache_path').value
+                _bg_builder.save_mesh_npz(path, verts, tris, colors, normals)
+                self.get_logger().info(f'[bg] cached to {path}')
+            except Exception as e:
+                self.get_logger().warn(f'[bg] cache save failed: {e}')
+        except Exception as e:
+            self.get_logger().error(f'[bg] rebuild failed: {e}')
+        finally:
+            self._bg_building = False
+
     # ── Depth callbacks: cache-only (lightweight) ────────────────────
 
     def _cache_depth(self, msg):
@@ -657,17 +1066,115 @@ class RerunVizNode(Node):
     # ── Point cloud timer: process latest cached depth + color ───────
 
     def _tick_point_clouds(self):
-        """Runs at ~15 Hz from a timer; always uses the newest cached data."""
+        """5 Hz timer. Dispatches to the mesh or legacy Points3D path.
+
+        Step 0 added time-aligned ring buffers for RGB + joint state.
+        Step 1–4 adds the mesh path (fg_enable=True); the legacy path is
+        kept for A/B comparison and fallback when JAX is unavailable.
+        """
         self._tick_pc_count += 1
+        if self.get_parameter('fg_enable').value:
+            self._tick_fg_mesh()
+        else:
+            self._tick_pcd_legacy()
+
+    def _tick_fg_mesh(self):
+        """Dynamic foreground: screen-space triangle mesh per camera.
+
+        See docs/inference_visualization_mesh.md §6. Head camera is bbox
+        clipped; wrist cameras use the full FOV (they are inherently inside
+        the workspace). All three cameras pair depth/RGB/joint state via the
+        Step 0 ring buffers; unpaired frames are dropped, never rendered
+        with mismatched data.
+        """
+        rr = self._rr
+        step_head = self.get_parameter('depth_step').value
+        step_wrist = self.get_parameter('fg_wrist_step').value
+        depth_min = self.get_parameter('depth_min').value
+        depth_max = self.get_parameter('depth_max').value
+        edge_thresh = self.get_parameter('fg_edge_thresh_m').value
+        rgb_tol = self.get_parameter('sync_rgb_tol_s').value
+        q_gap = self.get_parameter('sync_joint_max_gap_s').value
+        bbox_min = np.asarray(
+            self.get_parameter('fg_bbox_min').value, dtype=np.float32)
+        bbox_max = np.asarray(
+            self.get_parameter('fg_bbox_max').value, dtype=np.float32)
+
+        # Head camera: bbox-clipped dynamic region only. Pixels outside the
+        # workspace AABB belong to the static background mesh (Step 5).
+        if self._latest_depth_front is not None and self._T_world_camF is not None:
+            depth_u16, stamp = self._latest_depth_front
+            rgb = self._nearest_rgb(self._rgb_front_buf, stamp, rgb_tol)
+            try:
+                result = self._build_fg_mesh(
+                    depth_u16, rgb, step_head,
+                    self._cam_f_fx, self._cam_f_fy,
+                    self._cam_f_cx, self._cam_f_cy,
+                    self._T_world_camF,
+                    depth_min, depth_max, edge_thresh,
+                    bbox_min, bbox_max)
+                if result is not None:
+                    verts, tris, colors = result
+                    rr.set_time("ros_time", timestamp=stamp)
+                    self._log_mesh3d(
+                        "world/dynamic/head_fg_mesh", verts, tris, colors)
+            except Exception as e:
+                self.get_logger().debug(f'head mesh error: {e}')
+
+        # Wrist cameras: FK transform with joint state interpolated to the
+        # depth timestamp. No bbox clipping — wrist FOV is fully inside the
+        # workspace and depth/FK errors grow quickly outside ~0.5 m anyway.
+        for arm, dep_cache, q_buf, rgb_buf, T_base, T_l6_cam, \
+                fx, fy, cx, cy in [
+            ('left', self._latest_depth_left, self._q_left_buf,
+             self._rgb_left_buf, self._T_world_baseL, self._T_link6_camL,
+             self._cam_l_fx, self._cam_l_fy, self._cam_l_cx, self._cam_l_cy),
+            ('right', self._latest_depth_right, self._q_right_buf,
+             self._rgb_right_buf, self._T_world_baseR, self._T_link6_camR,
+             self._cam_r_fx, self._cam_r_fy, self._cam_r_cx, self._cam_r_cy),
+        ]:
+            if dep_cache is None or self._fk is None or T_l6_cam is None:
+                continue
+            depth_u16, stamp = dep_cache
+            q = self._interp_q(q_buf, stamp, q_gap)
+            if q is None:
+                self._sync_drop_count += 1
+                continue
+            rgb = self._nearest_rgb(rgb_buf, stamp, rgb_tol)
+            try:
+                T_base_ee = self._fk.fk_homogeneous(q[:6])
+                T_world_cam = np.array(T_base) @ T_base_ee @ np.array(T_l6_cam)
+                result = self._build_fg_mesh(
+                    depth_u16, rgb, step_wrist, fx, fy, cx, cy,
+                    T_world_cam,
+                    0.01, depth_max, edge_thresh,
+                    bbox_min=None, bbox_max=None)
+                if result is not None:
+                    verts, tris, colors = result
+                    rr.set_time("ros_time", timestamp=stamp)
+                    self._log_mesh3d(
+                        f'world/dynamic/{arm}_fg_mesh', verts, tris, colors)
+            except Exception as e:
+                self.get_logger().debug(f'{arm} mesh error: {e}')
+
+    def _tick_pcd_legacy(self):
+        """Legacy Points3D path (fg_enable=False). Each camera pairs its
+        depth frame with the RGB frame and (for wrist cameras) the joint
+        state at that depth's timestamp. Frames that cannot be paired within
+        the configured tolerance are skipped rather than rendered with
+        mismatched data — see _interp_q / _nearest_rgb.
+        """
         rr = self._rr
         step = self.get_parameter('depth_step').value
         depth_min = self.get_parameter('depth_min').value
         depth_max = self.get_parameter('depth_max').value
+        rgb_tol = self.get_parameter('sync_rgb_tol_s').value
+        q_gap = self.get_parameter('sync_joint_max_gap_s').value
 
         # Head camera (fixed transform)
         if self._latest_depth_front is not None and self._T_world_camF is not None:
             depth_u16, stamp = self._latest_depth_front
-            rgb_img = self._latest_front_rgb[0] if self._latest_front_rgb else None
+            rgb_img = self._nearest_rgb(self._rgb_front_buf, stamp, rgb_tol)
             try:
                 pts, colors = self._project_depth_gpu(
                     depth_u16, step, self._cam_f_fx, self._cam_f_fy,
@@ -681,23 +1188,25 @@ class RerunVizNode(Node):
             except Exception as e:
                 self.get_logger().debug(f'head pc error: {e}')
 
-        # Wrist cameras (FK-transformed per latest joint state)
-        _lrgb = self._latest_left_rgb[0] if self._latest_left_rgb else None
-        _rrgb = self._latest_right_rgb[0] if self._latest_right_rgb else None
-        for arm, dep_cache, q, T_base, T_l6_cam, fx, fy, cx, cy, rgb in [
-            ('left', self._latest_depth_left, self._latest_q_left,
-             self._T_world_baseL, self._T_link6_camL,
-             self._cam_l_fx, self._cam_l_fy, self._cam_l_cx, self._cam_l_cy,
-             _lrgb),
-            ('right', self._latest_depth_right, self._latest_q_right,
-             self._T_world_baseR, self._T_link6_camR,
-             self._cam_r_fx, self._cam_r_fy, self._cam_r_cx, self._cam_r_cy,
-             _rrgb),
+        # Wrist cameras: interpolate joint state to the depth timestamp, pair
+        # RGB by stamp. Dropping a tick is cheaper than rendering wrong data.
+        for arm, dep_cache, q_buf, rgb_buf, T_base, T_l6_cam, \
+                fx, fy, cx, cy in [
+            ('left', self._latest_depth_left, self._q_left_buf,
+             self._rgb_left_buf, self._T_world_baseL, self._T_link6_camL,
+             self._cam_l_fx, self._cam_l_fy, self._cam_l_cx, self._cam_l_cy),
+            ('right', self._latest_depth_right, self._q_right_buf,
+             self._rgb_right_buf, self._T_world_baseR, self._T_link6_camR,
+             self._cam_r_fx, self._cam_r_fy, self._cam_r_cx, self._cam_r_cy),
         ]:
-            if (dep_cache is None or self._fk is None or
-                    T_l6_cam is None or q is None):
+            if (dep_cache is None or self._fk is None or T_l6_cam is None):
                 continue
             depth_u16, stamp = dep_cache
+            q = self._interp_q(q_buf, stamp, q_gap)
+            if q is None:
+                self._sync_drop_count += 1
+                continue
+            rgb = self._nearest_rgb(rgb_buf, stamp, rgb_tol)
             try:
                 T_base_ee = self._fk.fk_homogeneous(q[:6])
                 T_world_cam = np.array(T_base) @ T_base_ee @ np.array(T_l6_cam)
@@ -725,8 +1234,11 @@ class RerunVizNode(Node):
         try:
             q = np.array(msg.position, dtype=np.float32)
             if len(q) >= 6:
-                self._latest_q_left = q[:7] if len(q) >= 7 else np.append(q[:6], 0.0)
-                self._latest_q_left_stamp = _stamp_to_sec(msg.header.stamp)
+                q7 = q[:7] if len(q) >= 7 else np.append(q[:6], 0.0)
+                stamp = _stamp_to_sec(msg.header.stamp)
+                self._latest_q_left = q7
+                self._latest_q_left_stamp = stamp
+                self._q_left_buf.append((stamp, q7))
                 self._last_q_left_rx = time.monotonic()
                 self._cb_jl_count += 1
         except Exception as e:
@@ -736,8 +1248,11 @@ class RerunVizNode(Node):
         try:
             q = np.array(msg.position, dtype=np.float32)
             if len(q) >= 6:
-                self._latest_q_right = q[:7] if len(q) >= 7 else np.append(q[:6], 0.0)
-                self._latest_q_right_stamp = _stamp_to_sec(msg.header.stamp)
+                q7 = q[:7] if len(q) >= 7 else np.append(q[:6], 0.0)
+                stamp = _stamp_to_sec(msg.header.stamp)
+                self._latest_q_right = q7
+                self._latest_q_right_stamp = stamp
+                self._q_right_buf.append((stamp, q7))
                 self._last_q_right_rx = time.monotonic()
                 self._cb_jr_count += 1
         except Exception as e:
@@ -790,7 +1305,7 @@ class RerunVizNode(Node):
     def _log_master_arm(self, arm_label, msg, T_base, trail):
         """Log commanded (master) joint state: time series + EE marker + trail.
 
-        Note: piper_start_ms_node ALSO publishes to /master/joint_* with all zeros
+        Note: arm_reader_node ALSO publishes to /master/joint_* with all zeros
         (no physical master arm hardware). Filter those out so only real policy
         commands are visualized.
         """
@@ -800,7 +1315,7 @@ class RerunVizNode(Node):
             q = np.array(msg.position, dtype=np.float32)
             if len(q) < 6:
                 return
-            # Skip piper_start_ms_node stub publishes (all zeros)
+            # Skip arm_reader_node stub publishes (all zeros)
             if not np.any(np.abs(q[:6]) > 1e-6):
                 return
             rr = self._rr
