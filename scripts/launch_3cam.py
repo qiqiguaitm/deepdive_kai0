@@ -1,9 +1,12 @@
 """
 Launch 3 RealSense cameras via ROS2 realsense2_camera nodes.
 
-  D435 (top)    → namespace: camera_f  | RGB 640x480   + Depth 640x480  @ 30fps
-  D405-A (left) → namespace: camera_l  | RGB 640x480   + Depth 640x480  @ 30fps
-  D405-B (right)→ namespace: camera_r  | RGB 640x480   + Depth 640x480  @ 30fps
+  D435 (top)    → namespace: camera_f  | RGB 640x480   + Depth 640x480  @ 15fps
+  D405-A (left) → namespace: camera_l  | RGB 640x480   + Depth 640x480  @ 15fps
+  D405-B (right)→ namespace: camera_r  | RGB 640x480   + Depth 640x480  @ 15fps
+
+  Note: 15fps (not 30) 以缓解 3 相机共享 USB 3 hub 的带宽压力;
+  之前 30fps 观察到 hand_left 触发 "Incomplete video frame" 频繁丢帧, 实际只有 1-10Hz.
 
 Usage:
   ros2 launch scripts/launch_3cam.py
@@ -13,7 +16,7 @@ from launch_ros.actions import Node
 
 
 def make_camera_node(name, namespace, serial,
-                     rgb_w, rgb_h, depth_w, depth_h, fps=30):
+                     rgb_w, rgb_h, depth_w, depth_h, fps=15):
     return Node(
         package='realsense2_camera',
         executable='realsense2_camera_node',
@@ -29,7 +32,12 @@ def make_camera_node(name, namespace, serial,
             'enable_infra2': False,
             'enable_gyro': False,
             'enable_accel': False,
+            # D435 has dedicated RGB module → 用 rgb_camera.color_profile
+            # D405 把 color 共享在 stereo (depth) 模块 → 用 depth_module.color_profile
+            # 同时设两个: 不适用的会被驱动忽略 (我们之前只设 rgb_camera.color_profile,
+            # 结果 D405 的 color 没人管, 默认跑成 848x480x30)
             'rgb_camera.color_profile': f'{rgb_w}x{rgb_h}x{fps}',
+            'depth_module.color_profile': f'{rgb_w}x{rgb_h}x{fps}',
             'depth_module.depth_profile': f'{depth_w}x{depth_h}x{fps}',
             'align_depth.enable': False,
         }],

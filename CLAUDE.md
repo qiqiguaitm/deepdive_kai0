@@ -26,9 +26,9 @@ GIT_LFS_SKIP_SMUDGE=1 uv sync
 GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
 ```
 
-Python version: 3.11. Package manager: `uv`. Virtual env at `kai0/.venv/`. The uv workspace includes `packages/openpi-client` as a member.
+Python version: 3.12 on sim01 (required for ROS2 Jazzy compatibility); `pyproject.toml` requires `>=3.11`. Package manager: `uv`. Virtual env at `kai0/.venv/`. The uv workspace includes `packages/openpi-client` as a member.
 
-The top-level `install.sh` handles full-stack installation (sys deps, ROS2, robot SDK, Python env, checkpoints). Supports `--skip-ros`, `--skip-venv`, `--skip-ckpt` flags to skip sections.
+The top-level `install.sh` handles full-stack installation (sys deps, ROS2 Jazzy, Piper SDK, Python env, checkpoints). Supports `--skip-ros`, `--skip-venv`, `--skip-ckpt` flags to skip sections.
 
 ### Linting
 ```bash
@@ -37,7 +37,7 @@ uv run ruff check --fix .    # lint + autofix
 uv run ruff format .         # format
 ```
 
-Ruff config: line-length=120, target py311. Excludes `docker/`, `third_party/`, `src/openpi/models_pytorch/transformers_replace/*`. Pre-commit hooks run ruff lint (with `--fix`) and ruff format automatically on commit. CI also runs these via `.github/workflows/pre-commit.yml`.
+Ruff config: line-length=120, target py311. Excludes `docker/`, `third_party/`, `src/openpi/models_pytorch/transformers_replace/*`. Pre-commit hooks (in `kai0/.pre-commit-config.yaml`) run `uv-lock`, ruff lint (with `--fix`), and ruff format; `third_party/` is excluded. CI also runs these via `.github/workflows/pre-commit.yml`.
 
 ### Testing
 ```bash
@@ -96,18 +96,33 @@ Local scripts for this specific deployment setup:
 - `start_autonomy.sh` — Launch full autonomy (policy rollout) stack: cameras + arms + policy node
 - `start_policy_node.sh` — Launch only policy_inference_node (--mode ros2/websocket/both), when other nodes already running
 - `start_server_xla_cache.sh` — Start policy server with XLA cache
+- `start_teleop.sh` — Launch teleoperation mode
+- `toggle_execute.sh` — Toggle execution mode on/off
+- `launch_3cam.py` — Launch 3-camera RealSense setup
 - `test_integration_ros2.py`, `test_inference_parity.py` — End-to-end and parity tests
-- `test_inference_server.py --check latency|quality|all` — Inference latency + quality benchmarking (merged from bench_inference_latency.py + verify_inference_quality.py)
+- `test_inference_server.py --check latency|quality|all` — Inference latency + quality benchmarking
+- `test_hardware.py` — Hardware verification (cameras + arms)
+- `test_cameras.py` — Camera diagnostics
+
+### Piper Tools (`piper_tools/`)
+
+CAN bus utilities for Agilex Piper arms: `setup_can.sh`, `activate_can.sh`, `find_all_can_port.sh`, `diagnose_can.sh`, `calibrate_can_mapping.py`, `verify_can_mapping.py`, `piper_ctrl_go_zero.py`, `piper_ctrl_gripper.py`.
 
 ### ROS2 Workspace (`ros2_ws/`)
 
-ROS2 packages for Piper robot control and message types. Built separately with `colcon build`.
+ROS2 packages for Piper robot control (`ros2_ws/src/piper/`) and message definitions (`ros2_ws/src/piper_msgs/`). Built separately with `colcon build`.
 
 ## Key Configuration
 
 - Training configs are all defined in `kai0/src/openpi/training/config.py` — this is the central place to set `repo_id` (dataset path), `weight_loader` (base checkpoint path), batch size, etc. Key dataclasses: `TrainConfig`, `DataConfig`, `AssetsConfig`
 - Policy configs (observation/action specs per robot) are in `kai0/src/openpi/policies/policy_config.py`
 - AWBC prompts must match training format exactly: `"<task>, Advantage: positive"` / `"<task>, Advantage: negative"`
+
+### Hardware Configuration (`config/`)
+
+- `config/pipers.yml` — Dual-arm CAN bus configuration: port mappings, feedback Hz, ROS2 topics for 4 Piper arms
+- `config/cameras.yml` — RealSense camera inventory (D435 + 2× D405): serial numbers, resolution (640×480), 30fps, ROS2 topics
+- `config/calibration.yml` — Hand-eye calibration transforms (T_world_camF, T_world_baseL/R, T_link6_camL/R) and camera intrinsics
 
 ### Data Transform Pipeline
 
@@ -138,7 +153,7 @@ checkpoints/<name>/
 | `OPENPI_DATA_HOME` | Cache dir for downloaded checkpoints/data | `~/.cache/openpi` |
 | `XLA_PYTHON_CLIENT_MEM_FRACTION` | JAX GPU memory fraction | `0.9` for training |
 | `XLA_PYTHON_CLIENT_PREALLOCATE` | JAX memory preallocation | `false` (set in data_loader, model_arithmetic) |
-| `JAX_COMPILATION_CACHE_DIR` | XLA compilation cache | `/tmp/xla_cache` |
+| `JAX_COMPILATION_CACHE_DIR` | XLA compilation cache | `.xla_cache` (project-local in start_policy_node.sh) |
 | `CUDA_VISIBLE_DEVICES` | GPU selection | Varies per script |
 | `GIT_LFS_SKIP_SMUDGE` | Skip Git LFS downloads during install | `1` |
 
@@ -153,3 +168,7 @@ Task_{A,B,C}/{base,dagger}/
 ```
 
 Camera keys: `top_head`, `hand_left`, `hand_right`. Observation state is 14-dim (dual arm joint angles + gripper open).
+
+## Documentation (`docs/`)
+
+Deployment and reproduction guides: `sim01_deployment.md` (full setup), `teleoperation_guide.md`, `inference_visualization.md`/`inference_visualization_mesh.md` (Rerun visualization), `taskA_master_plan.md` (Task A reproduction plan), `training_reproduction_log.md`.

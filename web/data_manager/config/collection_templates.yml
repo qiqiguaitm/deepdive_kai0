@@ -1,0 +1,37 @@
+templates:
+- id: tshirt_fold_pos
+  task_id: Task_A
+  subset: base
+  prompt: 'fold tshirt, Advantage: positive'
+  enabled: true
+  note: T-shirt 折叠 - 正样本
+- id: tshirt_fold_neg
+  task_id: Task_A
+  subset: base
+  prompt: 'fold tshirt, Advantage: negative'
+  enabled: true
+  note: T-shirt 折叠 - 反样本
+- id: tshirt_fold_dagger
+  task_id: Task_A
+  subset: dagger
+  prompt: fold tshirt
+  enabled: true
+  note: DAgger 修正数据
+- id: tshirt_sort
+  task_id: Task_B
+  subset: base
+  prompt: sort tshirts by color
+  enabled: false
+  note: Task B 占位
+- id: '555'
+  task_id: Task_A
+  subset: base
+  prompt: '5555'
+  enabled: true
+  note: '5555'
+- id: smoke
+  task_id: Task_A
+  subset: dagger
+  prompt: smoke
+  enabled: true
+  note: ''

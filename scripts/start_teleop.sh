@@ -12,6 +12,9 @@
 # 停止: Ctrl+C
 
 set -eo pipefail
+# 必须加 `|| true`: 无匹配时 pkill 返回 1, 配合 set -e 会让脚本在第一个
+# echo 之前就静默退出, 表现为 run.sh 报 "arms failed to start" + 空日志.
+pkill -f ros2 2>/dev/null || true
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"

@@ -1,0 +1,5 @@
+.pids/
+logs/
+backend/stats.sqlite3
+data/
+data_mock/

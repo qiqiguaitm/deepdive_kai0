@@ -11,7 +11,7 @@ cameras:
     physical_port: usb2/2-1.2
     role: 俯视全局相机
     resolution: 640x480
-    fps: 30
+    fps: 15
     ros2_topic_color: /camera_f/camera_f/color/image_raw
     ros2_topic_depth: /camera_f/camera_f/depth/image_rect_raw
 
@@ -24,7 +24,7 @@ cameras:
     physical_port: usb2/2-1.1
     role: 左手腕相机
     resolution: 640x480
-    fps: 30
+    fps: 15
     ros2_topic_color: /camera_l/camera_l/color/image_rect_raw
     ros2_topic_depth: /camera_l/camera_l/depth/image_rect_raw
 
@@ -37,6 +37,6 @@ cameras:
     physical_port: usb2/2-1.3
     role: 右手腕相机
     resolution: 640x480
-    fps: 30
+    fps: 15
     ros2_topic_color: /camera_r/camera_r/color/image_rect_raw
     ros2_topic_depth: /camera_r/camera_r/depth/image_rect_raw
