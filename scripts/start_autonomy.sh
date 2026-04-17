@@ -77,13 +77,15 @@ ros2 daemon start 2>/dev/null || true
 echo ""
 echo "--- Step 2: USB camera reset ---"
 
-# Reset USB ports to clear stale device state
+# Reset USB ports to clear stale device state.
+# Uses `sudo tee` (not `sudo bash -c`) so /etc/sudoers.d/kai0-autonomy can
+# grant NOPASSWD on an exact command pattern.
 for dev in 2-1 2-2 4-2.2; do
     auth="/sys/bus/usb/devices/$dev/authorized"
     if [ -e "$auth" ]; then
-        sudo bash -c "echo 0 > $auth" 2>/dev/null || true
+        echo 0 | sudo -n tee "$auth" >/dev/null 2>&1 || true
         sleep 0.5
-        sudo bash -c "echo 1 > $auth" 2>/dev/null || true
+        echo 1 | sudo -n tee "$auth" >/dev/null 2>&1 || true
     fi
 done
 sleep 3
@@ -104,9 +106,9 @@ echo "--- Step 3: CAN activation ---"
 CAN_UP=0
 for iface in can_left_mas can_left_slave can_right_mas can_right_slave; do
     if ip link show "$iface" &>/dev/null; then
-        sudo ip link set "$iface" down 2>/dev/null || true
-        sudo ip link set "$iface" type can bitrate 1000000 2>/dev/null || true
-        sudo ip link set "$iface" up 2>/dev/null || true
+        sudo -n ip link set "$iface" down 2>/dev/null || true
+        sudo -n ip link set "$iface" type can bitrate 1000000 2>/dev/null || true
+        sudo -n ip link set "$iface" up 2>/dev/null || true
         CAN_UP=$((CAN_UP + 1))
         ok "$iface up"
     fi
@@ -226,7 +228,11 @@ FREE_MB=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits -i "$
 info "using GPU $GPU_ID (free: ${FREE_MB}MB)"
 
 # Unset proxy vars that can interfere with JAX/gRPC
-unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY XLA_FLAGS 2>/dev/null || true
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY 2>/dev/null || true
+# Blackwell (RTX 5090 / sm_120) workaround: jax/jaxlib 0.5.3's XLA autotuner
+# SIGSEGVs during π₀ backend_compile. Disabling autotune costs ~5-20% infer
+# speed but is the only fix short of upgrading jax to ≥0.6.x.
+export XLA_FLAGS="--xla_gpu_autotune_level=0"
 
 echo ""
 echo "  Mode:    $MODE"

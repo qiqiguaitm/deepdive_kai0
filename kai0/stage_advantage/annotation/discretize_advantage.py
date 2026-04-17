@@ -175,30 +175,34 @@ def compute_reward_statistics(rewards: List[float]) -> dict:
     return stats
 
 
-def update_tasks_jsonl(base_path: str, discretion_type: str, n_slices: int = 10) -> None:
+def update_tasks_jsonl(base_path: str, discretion_type: str, n_slices: int = 10,
+                       prompt: str = "Flatten and fold the cloth.") -> None:
     """
     Update the tasks.jsonl file based on discretization type.
-    
+
     Args:
         base_path: Base directory path containing meta/tasks.jsonl
         discretion_type: Type of discretization ("binary" or "n_slices")
         n_slices: Number of slices for n_slices mode
+        prompt: Base task prompt — must match the training config's default_prompt
+                exactly so AWBC conditioning is consistent at inference time.
     """
     tasks_file = os.path.join(base_path, "meta", "tasks.jsonl")
-    
+
     # Ensure meta directory exists
     meta_dir = os.path.join(base_path, "meta")
     os.makedirs(meta_dir, exist_ok=True)
-    
+
+    base = prompt.rstrip(".,")
     tasks = []
     if discretion_type == "binary":
         tasks = [
-            {"task_index": 0, "task": "fold the cloth, Advantage: negative"},
-            {"task_index": 1, "task": "fold the cloth, Advantage: positive"},
+            {"task_index": 0, "task": f"{base}, Advantage: negative"},
+            {"task_index": 1, "task": f"{base}, Advantage: positive"},
         ]
     elif discretion_type == "n_slices":
         for i in range(n_slices):
-            tasks.append({"task_index": i, "task": f"fold the cloth, Advantage: {i}"})
+            tasks.append({"task_index": i, "task": f"{base}, Advantage: {i}"})
     
     # Write tasks to jsonl file
     with open(tasks_file, 'w') as f:
@@ -368,6 +372,13 @@ def main():
              "Each stage calculates its own reward percentiles independently. (default: 1)"
     )
     parser.add_argument(
+        "--prompt",
+        type=str,
+        default="Flatten and fold the cloth.",
+        help="Base task prompt for tasks.jsonl. Must match the training config's "
+             "default_prompt exactly (default: 'Flatten and fold the cloth.')"
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Only compute statistics without modifying files"
@@ -476,7 +487,7 @@ def main():
         return
     
     # Step 3: Update tasks.jsonl
-    update_tasks_jsonl(args.data_path, args.discretion_type, args.n_slices)
+    update_tasks_jsonl(args.data_path, args.discretion_type, args.n_slices, args.prompt)
     
     # Step 4: Assign task_index to all parquet files
     print(f"\nAssigning task_index to {len(parquet_files)} files...")

@@ -1,37 +1,37 @@
 templates:
-- id: tshirt_fold_pos
+- id: task_a_base
   task_id: Task_A
   subset: base
-  prompt: 'fold tshirt, Advantage: positive'
+  prompt: "Flatten and fold the cloth."
   enabled: true
-  note: T-shirt 折叠 - 正样本
-- id: tshirt_fold_neg
-  task_id: Task_A
-  subset: base
-  prompt: 'fold tshirt, Advantage: negative'
-  enabled: true
-  note: T-shirt 折叠 - 反样本
-- id: tshirt_fold_dagger
+  note: "Task A base demo — prompt must match training config pi05_flatten_fold_normal"
+- id: task_a_dagger
   task_id: Task_A
   subset: dagger
-  prompt: fold tshirt
+  prompt: "Flatten and fold the cloth."
   enabled: true
-  note: DAgger 修正数据
-- id: tshirt_sort
+  note: "Task A DAgger correction — same prompt as base"
+- id: task_b_base
   task_id: Task_B
   subset: base
-  prompt: sort tshirts by color
-  enabled: false
-  note: Task B 占位
-- id: '555'
-  task_id: Task_A
-  subset: base
-  prompt: '5555'
+  prompt: "Fetch the clothes, fold the tee shirts and hand-over the collared shirts."
   enabled: true
-  note: '5555'
-- id: smoke
-  task_id: Task_A
+  note: "Task B TeeShirtSort base"
+- id: task_b_dagger
+  task_id: Task_B
   subset: dagger
-  prompt: smoke
+  prompt: "Fetch the clothes, fold the tee shirts and hand-over the collared shirts."
   enabled: true
-  note: ''
+  note: "Task B TeeShirtSort DAgger"
+- id: task_c_base
+  task_id: Task_C
+  subset: base
+  prompt: "Fetch and hang the cloth."
+  enabled: true
+  note: "Task C HangCloth base"
+- id: task_c_dagger
+  task_id: Task_C
+  subset: dagger
+  prompt: "Fetch and hang the cloth."
+  enabled: true
+  note: "Task C HangCloth DAgger"

@@ -33,7 +33,11 @@ export LD_LIBRARY_PATH=$(find $VENV/nvidia -name 'lib' -type d 2>/dev/null | tr 
 export PYTHONPATH="${VENV}:/data1/tim/workspace/deepdive_kai0/kai0/src:${PYTHONPATH}"
 export JAX_COMPILATION_CACHE_DIR=/data1/tim/workspace/deepdive_kai0/.xla_cache
 export CUDA_VISIBLE_DEVICES=0
-unset http_proxy https_proxy XLA_FLAGS
+unset http_proxy https_proxy
+# Blackwell (RTX 5090 / sm_120) workaround: jax/jaxlib 0.5.3's XLA autotuner
+# SIGSEGVs during π₀ backend_compile. Disabling autotune costs ~5-20% infer
+# speed but is the only fix short of upgrading jax to ≥0.6.x.
+export XLA_FLAGS="--xla_gpu_autotune_level=0"
 
 echo "=== Launching policy_inference_node (mode=${MODE}) ==="
 

@@ -117,7 +117,7 @@ class InsertAdvantageIntoPrompt(DataTransformFn):
         assert "advantage" in data, f"advantage is not in data, data_keys: {data.keys()}"
         assert "prompt" in data, f"prompt is not in data, data_keys: {data.keys()}"
         advantage = data["advantage"]
-        data["prompt"] = data["prompt"] + f", Advantage: {advantage:.4f}"
+        data["prompt"] = data["prompt"].rstrip(".,") + f", Advantage: {advantage:.4f}"
         return data
 
 
