@@ -11,12 +11,15 @@ Launch 3 RealSense cameras via ROS2 realsense2_camera nodes.
 Usage:
   ros2 launch scripts/launch_3cam.py
 """
+import os
 from launch import LaunchDescription
 from launch_ros.actions import Node
 
+_DEFAULT_FPS = int(os.environ.get('CAM_FPS', '15'))
+
 
 def make_camera_node(name, namespace, serial,
-                     rgb_w, rgb_h, depth_w, depth_h, fps=15):
+                     rgb_w, rgb_h, depth_w, depth_h, fps=_DEFAULT_FPS):
     return Node(
         package='realsense2_camera',
         executable='realsense2_camera_node',

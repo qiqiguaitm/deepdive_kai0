@@ -47,7 +47,7 @@ class MockBridge:
 
     def get_camera_health(self) -> dict[str, dict]:
         return {
-            cam: {"fps": round(14.5 + random.random(), 1), "target_fps": 15, "dropped": 0, "latency_ms": 35}
+            cam: {"fps": round(29.0 + random.random(), 1), "target_fps": 30, "dropped": 0, "latency_ms": 35}
             for cam in ("top_head", "hand_left", "hand_right")
         }
 

@@ -97,5 +97,8 @@ fi
 # SETUP_CAN=1: let run.sh activate CAN (start_teleop.sh handles it too,
 #              but run.sh's activate_can path is the explicit toggle)
 export SETUP_CAN=1
+# Data collection needs 30 fps to match training data (launch_3cam.py defaults
+# to 15 fps to ease USB bandwidth; override here for full-rate recording).
+export CAM_FPS=30
 
 exec bash "$RUN_SH" "$ACTION" "${@:2}"
