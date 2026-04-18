@@ -57,7 +57,19 @@ class TransformedDataset(Dataset[T_co]):
         self._transform = _transforms.compose(transforms)
 
     def __getitem__(self, index: SupportsIndex) -> T_co:
-        return self._transform(self._dataset[index])
+        import random, logging
+        # Higher retry budget: the Task_A/advantage dataset has ~311/3055 episodes (≈10%)
+        # with missing videos, so occasional runs of bad samples are expected.
+        MAX_ATTEMPTS = 50
+        for attempt in range(MAX_ATTEMPTS):
+            try:
+                idx = index if attempt == 0 else random.randint(0, len(self._dataset) - 1)
+                return self._transform(self._dataset[idx])
+            except Exception as e:
+                if attempt < MAX_ATTEMPTS - 1:
+                    logging.warning(f'DataLoader: skipping index {idx} due to {type(e).__name__}: {e}')
+                    continue
+                raise
 
     def __len__(self) -> int:
         return len(self._dataset)
@@ -129,9 +141,17 @@ class FakeDataset(Dataset):
 
 
 def create_torch_dataset(
-    data_config: _config.DataConfig, action_horizon: int, model_config: _model.BaseModelConfig
+    data_config: _config.DataConfig,
+    action_horizon: int,
+    model_config: _model.BaseModelConfig,
+    episodes: list[int] | None = None,
 ) -> Dataset:
-    """Create a dataset for training."""
+    """Create a dataset for training.
+
+    Args:
+        episodes: Optional list of meta.episodes keys (positions) to include.
+            If None (default), uses all episodes. Used for train/val split.
+    """
     repo_id = data_config.repo_id
     if repo_id is None:
         raise ValueError("Repo ID is not set. Cannot create dataset.")
@@ -141,6 +161,7 @@ def create_torch_dataset(
     dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
     dataset = lerobot_dataset.LeRobotDataset(
         data_config.repo_id,
+        episodes=episodes,
         delta_timestamps={
             key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
         },
@@ -289,6 +310,7 @@ def create_data_loader(
     num_batches: int | None = None,
     skip_norm_stats: bool = False,
     framework: Literal["jax", "pytorch"] = "jax",
+    episodes: list[int] | None = None,
 ) -> DataLoader[tuple[_model.Observation, _model.Actions]]:
     """Create a data loader for training.
 
@@ -327,6 +349,7 @@ def create_data_loader(
         skip_norm_stats=skip_norm_stats,
         framework=framework,
         config=config,
+        episodes=episodes,
     )
 
 
@@ -344,6 +367,7 @@ def create_torch_data_loader(
     seed: int = 0,
     framework: str = "jax",
     config: _config.TrainConfig = None,
+    episodes: list[int] | None = None,
 ) -> DataLoader[tuple[_model.Observation, _model.Actions]]:
     """Create a data loader for training.
 
@@ -366,7 +390,7 @@ def create_torch_data_loader(
     if config is not None and getattr(config, "advantage_estimator", False):
         dataset = create_advantage_torch_dataset(data_config, action_horizon, model_config, config)
     else:
-        dataset = create_torch_dataset(data_config, action_horizon, model_config)
+        dataset = create_torch_dataset(data_config, action_horizon, model_config, episodes=episodes)
     dataset = transform_dataset(dataset, data_config, skip_norm_stats=skip_norm_stats)
 
     # Use TorchDataLoader for both frameworks
@@ -445,6 +469,36 @@ def create_rlds_data_loader(
     return DataLoaderImpl(data_config, data_loader)
 
 
+class _JAXProcessSampler(torch.utils.data.Sampler):
+    """Sampler that selects different indices for each JAX process (multi-node data sharding)."""
+
+    def __init__(self, dataset, num_replicas: int, rank: int, shuffle: bool = True, seed: int = 0):
+        import math
+        self._len = len(dataset)
+        self.num_replicas = num_replicas
+        self.rank = rank
+        self.shuffle = shuffle
+        self.seed = seed
+        self.num_samples = math.ceil(self._len / num_replicas)
+        self.total_size = self.num_samples * num_replicas
+
+    def __iter__(self):
+        if self.shuffle:
+            g = torch.Generator()
+            g.manual_seed(self.seed)
+            indices = torch.randperm(self._len, generator=g).tolist()
+        else:
+            indices = list(range(self._len))
+        # Pad to total_size so every replica gets the same count
+        indices += indices[: self.total_size - len(indices)]
+        # Take every num_replicas-th element starting at rank
+        indices = indices[self.rank : self.total_size : self.num_replicas]
+        return iter(indices)
+
+    def __len__(self):
+        return self.num_samples
+
+
 class TorchDataLoader:
     """Torch data loader implementation."""
 
@@ -476,9 +530,6 @@ class TorchDataLoader:
                 execute in the main process.
             seed: The seed to use for shuffling the data.
         """
-        if jax.process_count() > 1:
-            raise NotImplementedError("Data loading with multiple processes is not supported.")
-
         if len(dataset) < local_batch_size:
             raise ValueError(f"Local batch size ({local_batch_size}) is larger than the dataset size ({len(dataset)}).")
 
@@ -487,10 +538,21 @@ class TorchDataLoader:
         if sharding is None and framework == "jax":
             # Use data parallel sharding by default for JAX only.
             self._sharding = jax.sharding.NamedSharding(
-                jax.sharding.Mesh(jax.devices(), ("B",)),
+                jax.sharding.Mesh(jax.local_devices(), ("B",)),
                 jax.sharding.PartitionSpec("B"),
             )
         self._num_batches = num_batches
+
+        # Multi-process JAX: use process-rank-aware sampler so each process loads different samples
+        if jax.process_count() > 1 and sampler is None:
+            sampler = _JAXProcessSampler(
+                dataset,
+                num_replicas=jax.process_count(),
+                rank=jax.process_index(),
+                shuffle=shuffle,
+                seed=seed,
+            )
+            shuffle = False  # Sampler handles shuffling
 
         mp_context = None
         if num_workers > 0:
@@ -510,6 +572,10 @@ class TorchDataLoader:
             worker_init_fn=_worker_init_fn,
             drop_last=True,
             generator=generator,
+            # Larger prefetch (default is 2): absorbs periodic MP4-decode/vePFS-IO stalls so GPU doesn't idle.
+            # Value chosen based on resource check (1.3 TB /dev/shm, 1.7 TB RAM available).
+            # 16 × num_workers batches buffered; e.g. 16 × 16 = 256 batches cushion.
+            prefetch_factor=16 if num_workers > 0 else None,
         )
 
     @property

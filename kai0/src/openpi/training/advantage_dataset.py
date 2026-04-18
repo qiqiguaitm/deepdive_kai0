@@ -3,6 +3,9 @@ import random
 from pathlib import Path
 from typing import Callable
 
+import numpy as np
+import torch
+
 
 class AdvantageLerobotDataset(LeRobotDataset):
     """LeRobot dataset for advantage estimator training: history frames, timestep-difference mode, stage progress."""
@@ -33,7 +36,37 @@ class AdvantageLerobotDataset(LeRobotDataset):
             download_videos,
             video_backend
         )
-        self.ep_idx_to_arr_idx = {ep_idx: arr_idx for arr_idx, ep_idx in enumerate(episodes)} if episodes else {}
+        # Rebuild episode_data_index from the ACTUAL hf_dataset row order.
+        # The released Task_A/advantage dataset has inconsistent meta <-> data episode_index:
+        # meta.episodes lists ep_idx 0..3054, but the parquet rows contain ep_idx values in
+        # a different range (0..3365 with gaps). The default LeRobotDataset.episode_data_index
+        # is built from meta (wrong), so resampling a "same-episode" frame routinely lands
+        # on the wrong episode and loops forever. Reindex from real data here.
+        ep_col = np.asarray(self.hf_dataset.data.column("episode_index").to_numpy(zero_copy_only=False))
+        n = len(ep_col)
+        # Find contiguous runs; each unique episode occupies exactly one contiguous block.
+        ep_to_range: dict[int, tuple[int, int]] = {}
+        if n > 0:
+            run_start = 0
+            for i in range(1, n):
+                if ep_col[i] != ep_col[run_start]:
+                    ep_to_range[int(ep_col[run_start])] = (run_start, i)
+                    run_start = i
+            ep_to_range[int(ep_col[run_start])] = (run_start, n)
+
+        # Use only episodes that actually exist in the data (ignore missing meta entries).
+        eps_list = sorted(ep_to_range.keys())
+        self.data_episode_indices = eps_list
+        self.ep_idx_to_arr_idx = {ep_idx: arr_idx for arr_idx, ep_idx in enumerate(eps_list)}
+
+        from_arr = np.zeros(len(eps_list), dtype=np.int64)
+        to_arr = np.zeros(len(eps_list), dtype=np.int64)
+        for arr_idx, ep_idx in enumerate(eps_list):
+            from_arr[arr_idx], to_arr[arr_idx] = ep_to_range[ep_idx]
+        self.episode_data_index = {
+            "from": torch.from_numpy(from_arr),
+            "to": torch.from_numpy(to_arr),
+        }
 
     def get_sample_with_imgs_from_idx(self, idx: int) -> dict:
         """Return one sample with decoded video frames at index idx."""
@@ -48,13 +81,13 @@ class AdvantageLerobotDataset(LeRobotDataset):
         if len(self.meta.video_keys) > 0:
             current_ts = item["timestamp"].item()
             query_timestamps = self._get_query_timestamps(current_ts, query_indices)
-            
+
             try:
                 video_frames = self._query_videos(query_timestamps, ep_idx)
             except Exception as e:
-                print(f"Error decoding video frames for ep_idx {ep_idx} at idx {idx}: {e}")
-                import pdb; pdb.set_trace()
-            
+                # Bad video/timestamp — raise IndexError so DataLoader skips this sample.
+                raise IndexError(f"Video decode failed for ep_idx {ep_idx} at idx {idx}: {e}") from e
+
             item = {**video_frames, **item}
         
         if self.image_transforms is not None:
@@ -79,7 +112,12 @@ class AdvantageLerobotDataset(LeRobotDataset):
         _EP_IDX = ep_idx
         _CUR_TIMESTAMP = cur_timestamp
         
-        episode_level_dict['episode_length'] = self.meta.episodes[ep_idx]["length"]
+        # Compute length from actual data (meta.episodes[ep_idx] may not exist for all ep_idx in hf_dataset).
+        arr_idx_for_len = self.ep_idx_to_arr_idx[ep_idx]
+        episode_level_dict['episode_length'] = int(
+            self.episode_data_index["to"][arr_idx_for_len].item()
+            - self.episode_data_index["from"][arr_idx_for_len].item()
+        )
         
         # Handle delta indices for action sequences
         if self.delta_indices is not None:
@@ -113,22 +151,23 @@ class AdvantageLerobotDataset(LeRobotDataset):
     def handle_timestep_difference_mode(self, idx, ep_idx, final_item, _EP_IDX, _CUR_TIMESTAMP) -> dict:
         """Add a random same-episode timestep sample with keys prefixed by his_-100_."""
         random_timestep_name = -100
-        arr_idx = self.ep_idx_to_arr_idx.get(ep_idx, ep_idx) if self.episodes else ep_idx
+        arr_idx = self.ep_idx_to_arr_idx[ep_idx]
         ep_start_idx = self.episode_data_index["from"][arr_idx].item()
         ep_end_idx = self.episode_data_index["to"][arr_idx].item()
-        while True:
+        # Single-episode edge case: if the episode has only 1 frame, we can't pick a different one.
+        if ep_end_idx - ep_start_idx <= 1:
+            raise IndexError(f"Episode {ep_idx} too short for timestep difference")
+        for _retry in range(16):
             random_idx = random.randint(ep_start_idx, ep_end_idx - 1)
             if random_idx == idx:
                 continue
-            
             random_item = self.get_sample_with_imgs_from_idx(random_idx)
-            
-            ep_idx_check = random_item["episode_index"].item()
             cur_timestamp_check = random_item["timestamp"].item()
-            if ep_idx_check != _EP_IDX or cur_timestamp_check == _CUR_TIMESTAMP:
-                print(f"Randomly selected invalid timestep, re-sampling. For global idx: {random_idx}, ep_idx: {ep_idx_check}, cur_timestamp: {cur_timestamp_check}")
+            if cur_timestamp_check == _CUR_TIMESTAMP:
                 continue
             break
+        else:
+            raise IndexError(f"Could not find valid timestep comparison for ep_idx {ep_idx}")
         
         _keys = list(random_item.keys())
         for key in _keys:
