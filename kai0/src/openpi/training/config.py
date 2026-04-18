@@ -1294,6 +1294,64 @@ _CONFIGS = [
         batch_size=4,
         fsdp_devices=1,
     ),
+    # Task E Phase-2 T1-1: MLP-only vision LoRA rank=16 (init from E2/14999, 15k steps).
+    # LoRA adapters on every SigLIP MlpBlock's 2 Dense layers. Vision main weights +
+    # LLM main frozen; trainable = AE (~700M) + vision MLP LoRA (~4-5M).
+    TrainConfig(
+        name="pi05_stand_box_vision_lora16",
+        model=pi0_config.Pi0Config(pi05=True, vision_mlp_lora_rank=16, vision_mlp_lora_alpha=16.0),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_stand_box_kai0init_lowlr/v3e_lowlr/14999/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),     # keep AE trainable
+            nnx.Not(nnx_utils.PathRegex(".*lora_[ab].*")),   # keep LoRA adapters trainable
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1.25e-5, decay_steps=15_000, decay_lr=1.25e-6
+        ),
+        ema_decay=None,
+        num_train_steps=15_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
+    # Task E Phase-2 T1-2: same as T1-1 but rank=32 (higher capacity LoRA).
+    TrainConfig(
+        name="pi05_stand_box_vision_lora32",
+        model=pi0_config.Pi0Config(pi05=True, vision_mlp_lora_rank=32, vision_mlp_lora_alpha=32.0),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_stand_box_kai0init_lowlr/v3e_lowlr/14999/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+            nnx.Not(nnx_utils.PathRegex(".*lora_[ab].*")),
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1.25e-5, decay_steps=15_000, decay_lr=1.25e-6
+        ),
+        ema_decay=None,
+        num_train_steps=15_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
     # Task E Phase-2 T1: Vision unfrozen + 2-GPU FSDP, init from E2/14999 (best so far
     # MAE@1=0.0262). Let SigLIP adapt to Task E camera distribution (box-on-desk views
     # differ from Task A flatten-fold which this vision was warmed up for).
@@ -1322,8 +1380,8 @@ _CONFIGS = [
         keep_period=5_000,
         save_interval=2_000,
         num_workers=2,
-        batch_size=4,   # 2 per-device when fsdp=2
-        fsdp_devices=2,
+        batch_size=2,        # fsdp=2 per-device=1; grad-ckpt (scan+remat) already max in pi0
+        fsdp_devices=2,      # retry FSDP=2 with MEM_FRACTION=0.95 (was 72MB short at 0.9)
     ),
     # Task E Phase-2 T2: E2/14999 + ultra-low LR 5e-6 + EMA continuation (5k steps).
     # Squeeze the last fine-tune off E2 using tiny step size, with EMA smoothing.

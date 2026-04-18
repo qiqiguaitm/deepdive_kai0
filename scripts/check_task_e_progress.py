@@ -32,10 +32,11 @@ WANDB_DIR = PROJECT_ROOT / "kai0/wandb"
 
 EXPERIMENTS = [
     # Phase 2 — training-side levers beyond Phase 1 best (E2/14999 @1=0.0262)
-    # (label, exp_name,           gpu,   pretty,           config_name)
-    ("T1", "t1_vision_fsdp",     "0,3", "vision+FSDP",    "pi05_stand_box_vision_fsdp"),
-    ("T2", "t2_e2_ft",           1,     "E2+ultralowLR",  "pi05_stand_box_e2_ft"),
-    ("T6", "t6_kai0_allgood",    2,     "kai0+allgood",   "pi05_stand_box_kai0_allgood"),
+    # (label,  exp_name,             gpu, pretty,            config_name)
+    ("T1-1", "t1_lora16",           0,   "visionLoRA r16",  "pi05_stand_box_vision_lora16"),
+    ("T1-2", "t1_lora32",           3,   "visionLoRA r32",  "pi05_stand_box_vision_lora32"),
+    ("T2",   "t2_e2_ft",            1,   "E2+ultralowLR",   "pi05_stand_box_e2_ft"),
+    ("T6",   "t6_kai0_allgood",     2,   "kai0+allgood",    "pi05_stand_box_kai0_allgood"),
 ]
 
 CKPT_ROOT = PROJECT_ROOT / "kai0/checkpoints"

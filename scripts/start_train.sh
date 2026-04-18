@@ -59,7 +59,7 @@ LOG="$LOGS/train_${EXP_NAME}.log"
 # ------ JAX / XLA env ------
 export CUDA_VISIBLE_DEVICES="$GPU"
 export XLA_FLAGS="--xla_gpu_autotune_level=0"
-export XLA_PYTHON_CLIENT_MEM_FRACTION=0.9
+export XLA_PYTHON_CLIENT_MEM_FRACTION="${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.9}"
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export JAX_COMPILATION_CACHE_DIR=$KAI0/.xla_cache
 export OPENPI_DATA_HOME=$PROJECT_ROOT/openpi_cache
@@ -86,17 +86,6 @@ if command -v numactl >/dev/null 2>&1; then
   # AND abort loudly (ENOMEM traceback) on any allocation that *can't* land on
   # {0,3}. Converts silent SIGBUS into a visible failure we can then diagnose.
   NUMACTL_CMD="numactl --interleave=0,3 --strict"
-fi
-
-# --- cgroup v2 defense: kernel-level cpuset.mems enforcement ---
-# /sys/fs/cgroup/good-numa (one-time created as root, chown tim) restricts the
-# process tree to nodes 0,3 at the kernel syscall level. Any mbind/numa_alloc
-# to bad nodes is denied by kernel immediately (unlike numactl which can be
-# bypassed by CUDA driver's direct syscalls with explicit NUMA hints).
-CGROUP_PROCS="/sys/fs/cgroup/good-numa/cgroup.procs"
-CGROUP_WRAPPER=""
-if [ -w "$CGROUP_PROCS" ]; then
-  CGROUP_WRAPPER="bash -c 'echo \$\$ > $CGROUP_PROCS; exec \"\$@\"' --"
 fi
 
 # ------ inline eval env ------
@@ -126,7 +115,6 @@ cat <<EOF
 │ exp_name: $EXP_NAME
 │ GPU:      $GPU
 │ numactl:  ${NUMACTL_CMD:-(disabled - numactl not found)}
-│ cgroup:   ${CGROUP_WRAPPER:+good-numa (cpuset.mems=0,3)}${CGROUP_WRAPPER:-(disabled - $CGROUP_PROCS not writable)}
 │ inline eval: $ENABLE_EVAL${ENABLE_EVAL:+ (val=$VAL_ROOT, N_FRAMES=$N_FRAMES, EVERY=$EVAL_EVERY)}
 │ args:     ${ARGS[@]}
 │ log:      $LOG
@@ -135,17 +123,7 @@ EOF
 
 cd "$KAI0"
 : > "$LOG"
-# Subshell: join cgroup first (if writable), then exec the trainer. All forked
-# data-loader workers inherit the cgroup restriction.
-(
-  # Migrate self into good-numa cgroup (cpuset.mems=0,3). Kernel-level enforce.
-  # /etc/sudoers.d/good-numa allows passwordless `sudo tee` on cgroup.procs only.
-  # $BASHPID = current subshell (not $$ which is parent shell, already exited).
-  if [ -e "$CGROUP_PROCS" ]; then
-    sudo -n tee "$CGROUP_PROCS" <<< "$BASHPID" > /dev/null 2>&1 || true
-  fi
-  exec $NUMACTL_CMD uv run scripts/train.py "$CONFIG" "${ARGS[@]}"
-) > "$LOG" 2>&1 &
+nohup $NUMACTL_CMD uv run scripts/train.py "$CONFIG" "${ARGS[@]}" > "$LOG" 2>&1 &
 PID=$!
 disown
 echo "PID=$PID  $(date)"

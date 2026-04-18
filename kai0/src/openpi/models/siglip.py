@@ -21,6 +21,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+import openpi.models.lora as lora
 import openpi.training.sharding as sharding
 
 
@@ -51,25 +52,43 @@ def get_posemb(self, typ, seqshape, width, name, dtype=jnp.float32):
 
 
 class MlpBlock(nn.Module):
-    """Transformer MLP / feed-forward block."""
+    """Transformer MLP / feed-forward block. Optional LoRA on both Dense layers."""
 
     mlp_dim: int | None = None  # Defaults to 4x input dim
     dropout: float = 0.0
     dtype_mm: str = "float32"
+    lora_config: lora.LoRAConfig | None = None
 
     @nn.compact
     def __call__(self, x, deterministic=True):  # noqa: FBT002
-        """Applies Transformer MlpBlock module."""
+        """Applies Transformer MlpBlock module, optionally with LoRA adapters."""
         inits = {
             "kernel_init": nn.initializers.xavier_uniform(),
             "bias_init": nn.initializers.normal(stddev=1e-6),
         }
 
         _, _, d = x.shape  # n,l,d
-        x = nn.Dense(self.mlp_dim or 4 * d, dtype=self.dtype_mm, **inits)(x)
+        h = self.mlp_dim or 4 * d
+
+        x_in = x
+        x = nn.Dense(h, dtype=self.dtype_mm, **inits)(x)
+        if self.lora_config:
+            r = self.lora_config.rank
+            w_a = self.param("Dense_0_lora_a", self.lora_config.init_fn, (d, r))
+            w_b = self.param("Dense_0_lora_b", self.lora_config.init_fn, (r, h))
+            x = x + (x_in @ w_a.astype(x.dtype)) @ w_b.astype(x.dtype) * self.lora_config.scaling_value
+
         x = nn.gelu(x)
         x = nn.Dropout(rate=self.dropout)(x, deterministic)
-        return nn.Dense(d, dtype=self.dtype_mm, **inits)(x)
+
+        x_mid = x
+        x = nn.Dense(d, dtype=self.dtype_mm, **inits)(x)
+        if self.lora_config:
+            r = self.lora_config.rank
+            w_a = self.param("Dense_1_lora_a", self.lora_config.init_fn, (h, r))
+            w_b = self.param("Dense_1_lora_b", self.lora_config.init_fn, (r, d))
+            x = x + (x_mid @ w_a.astype(x.dtype)) @ w_b.astype(x.dtype) * self.lora_config.scaling_value
+        return x
 
 
 class Encoder1DBlock(nn.Module):
@@ -79,6 +98,7 @@ class Encoder1DBlock(nn.Module):
     num_heads: int = 12
     dropout: float = 0.0
     dtype_mm: str = "float32"
+    mlp_lora_config: lora.LoRAConfig | None = None
 
     @nn.compact
     def __call__(self, x, deterministic=True):  # noqa: FBT002
@@ -100,6 +120,7 @@ class Encoder1DBlock(nn.Module):
             mlp_dim=self.mlp_dim,
             dropout=self.dropout,
             dtype_mm=self.dtype_mm,
+            lora_config=self.mlp_lora_config,
         )(y, deterministic)
         y = sharding.activation_sharding_constraint(y)
         y = nn.Dropout(rate=self.dropout)(y, deterministic)
@@ -118,6 +139,7 @@ class Encoder(nn.Module):
     scan: bool = False
     remat_policy: str = "nothing_saveable"
     dtype_mm: str = "float32"
+    mlp_lora_config: lora.LoRAConfig | None = None
 
     @nn.compact
     def __call__(self, x, deterministic=True):  # noqa: FBT002
@@ -142,6 +164,7 @@ class Encoder(nn.Module):
                 mlp_dim=self.mlp_dim,
                 num_heads=self.num_heads,
                 dropout=self.dropout,
+                mlp_lora_config=self.mlp_lora_config,
             )(x, deterministic)
             for lyr in range(self.depth):
                 out[f"block{lyr:02d}"] = jax.tree.map(lambda o, lyr=lyr: o[lyr], scan_out)
@@ -154,6 +177,7 @@ class Encoder(nn.Module):
                     mlp_dim=self.mlp_dim,
                     num_heads=self.num_heads,
                     dropout=self.dropout,
+                    mlp_lora_config=self.mlp_lora_config,
                 )
                 x, out[f"block{lyr:02d}"] = block_cur(x, deterministic)
             out["pre_ln"] = x  # Alias for last block, but without the number in it.
@@ -203,6 +227,7 @@ class _Module(nn.Module):
     # or "dots_with_no_batch_dims_saveable" for more speed (memory costly)
     remat_policy: str = "nothing_saveable"
     dtype_mm: str = "float32"
+    mlp_lora_config: lora.LoRAConfig | None = None
 
     @nn.compact
     def __call__(self, image, *, train=False):
@@ -246,6 +271,7 @@ class _Module(nn.Module):
             scan=self.scan,
             remat_policy=self.remat_policy,
             dtype_mm=self.dtype_mm,
+            mlp_lora_config=self.mlp_lora_config,
             name="Transformer",
         )(x, deterministic=not train)
         encoded = out["encoded"] = x

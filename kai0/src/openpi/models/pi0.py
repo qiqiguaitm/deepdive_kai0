@@ -78,6 +78,13 @@ class Pi0(_model.BaseModel):
             )
         )
         llm.lazy_init(rngs=rngs, method="init", use_adarms=[False, True] if config.pi05 else [False, False])
+        vision_mlp_lora_config = None
+        if getattr(config, "vision_mlp_lora_rank", None):
+            import openpi.models.lora as _lora
+            vision_mlp_lora_config = _lora.LoRAConfig(
+                rank=config.vision_mlp_lora_rank,
+                alpha=config.vision_mlp_lora_alpha,
+            )
         img = nnx_bridge.ToNNX(
             _siglip.Module(
                 num_classes=paligemma_config.width,
@@ -85,6 +92,7 @@ class Pi0(_model.BaseModel):
                 pool_type="none",
                 scan=True,
                 dtype_mm=config.dtype,
+                mlp_lora_config=vision_mlp_lora_config,
             )
         )
         img.lazy_init(next(iter(config.fake_obs().images.values())), train=False, rngs=rngs)

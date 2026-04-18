@@ -32,6 +32,11 @@ class Pi0Config(_model.BaseModelConfig):
     pi05: bool = False
     # This config option is not used directly by the model, but it is read by the ModelTransformFactory.
     discrete_state_input: bool = None  # type: ignore
+    # Vision MLP LoRA: add rank-r LoRA adapters to both Dense layers of every
+    # SigLIP MlpBlock. None/0 disables. Trainable adds ~(2 * 1152 + 2 * 4096) * rank
+    # per block × 27 blocks ≈ 283K × rank params.
+    vision_mlp_lora_rank: int | None = None
+    vision_mlp_lora_alpha: float = 16.0
 
     def __post_init__(self):
         if self.max_token_len is None:
