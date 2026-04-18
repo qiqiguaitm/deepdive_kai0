@@ -197,12 +197,12 @@ def update_tasks_jsonl(base_path: str, discretion_type: str, n_slices: int = 10,
     tasks = []
     if discretion_type == "binary":
         tasks = [
-            {"task_index": 0, "task": f"{base}, Advantage: negative"},
-            {"task_index": 1, "task": f"{base}, Advantage: positive"},
+            {"task_index": 0, "task": f"{base}. Advantage: negative"},
+            {"task_index": 1, "task": f"{base}. Advantage: positive"},
         ]
     elif discretion_type == "n_slices":
         for i in range(n_slices):
-            tasks.append({"task_index": i, "task": f"{base}, Advantage: {i}"})
+            tasks.append({"task_index": i, "task": f"{base}. Advantage: {i}"})
     
     # Write tasks to jsonl file
     with open(tasks_file, 'w') as f:

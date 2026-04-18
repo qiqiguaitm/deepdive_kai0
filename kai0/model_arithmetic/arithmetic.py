@@ -77,6 +77,7 @@ def load_jax_params(checkpoint_path: str):
 def save_jax_params(flat_params, output_dir):
     """Save mixed parameters to OCDBT checkpoint format (step 0)."""
     nested = flax.traverse_util.unflatten_dict(flat_params, sep="/")
+    output_dir = os.path.abspath(output_dir)
     os.makedirs(output_dir, exist_ok=True)
     # Write as Orbax checkpoint so JAX can load it
     mngr = ocp.CheckpointManager(
