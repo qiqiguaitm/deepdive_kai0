@@ -31,11 +31,12 @@ LOGS_DIR = PROJECT_ROOT / "logs"
 WANDB_DIR = PROJECT_ROOT / "kai0/wandb"
 
 EXPERIMENTS = [
-    # (label,  exp_name,         gpu, pretty,         config_name)
-    ("v3", "v3_kai0_base",    1, "kai0+base",      "pi05_stand_box_kai0init"),
-    ("v4", "v4_pi05_aug",     2, "pi05+aug",       "pi05_stand_box_aug"),
-    ("v5", "v5_kai0_aug",     3, "kai0+aug",       "pi05_stand_box_kai0_aug"),
-    ("v8", "v8_pi05_mirror",  0, "pi05+mirror",    "pi05_stand_box_mirror"),
+    # Phase 1 — v3 continuation optimization experiments (from v3/12000 init, 15k more steps)
+    # (label, exp_name,   gpu, pretty,        config_name)
+    ("E1", "v3e_ema",    0, "v3+EMA",       "pi05_stand_box_kai0init_ema"),
+    ("E2", "v3e_lowlr",  3, "v3+lowLR",     "pi05_stand_box_kai0init_lowlr"),
+    ("E3", "v3e_combo",  1, "v3+EMA+LR",    "pi05_stand_box_kai0init_combo"),
+    ("E4", "v3e_long",   2, "v3+long",      "pi05_stand_box_kai0init_long"),
 ]
 
 CKPT_ROOT = PROJECT_ROOT / "kai0/checkpoints"

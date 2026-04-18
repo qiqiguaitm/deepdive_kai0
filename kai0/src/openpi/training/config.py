@@ -1294,6 +1294,111 @@ _CONFIGS = [
         batch_size=4,
         fsdp_devices=1,
     ),
+    # Task E Phase-1 optimization experiments: start from v3/12000 (best so far, MAE@1=0.0333)
+    # and try different tricks for 15k additional steps to push MAE@1 toward 0.02.
+    # All 4 share the same freeze filter (AE-only) as v3; differ only in {ema, lr, combo}.
+    # Task E E1: v3 + EMA(0.9999) — shadow-average AE weights, reduces per-step noise.
+    TrainConfig(
+        name="pi05_stand_box_kai0init_ema",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_stand_box_kai0init/v3_kai0_base/12000/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+        ),
+        ema_decay=0.9999,
+        num_train_steps=15_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
+    # Task E E2: v3 + lowLR (peak_lr 2.5e-5 → 1.25e-5) — reduce late-stage step size on small data.
+    TrainConfig(
+        name="pi05_stand_box_kai0init_lowlr",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_stand_box_kai0init/v3_kai0_base/12000/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1.25e-5, decay_steps=15_000, decay_lr=1.25e-6
+        ),
+        ema_decay=None,
+        num_train_steps=15_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
+    # Task E E3: v3 + EMA + lowLR combined (both tricks — test if 1+1>2).
+    TrainConfig(
+        name="pi05_stand_box_kai0init_combo",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_stand_box_kai0init/v3_kai0_base/12000/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1.25e-5, decay_steps=15_000, decay_lr=1.25e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=15_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
+    # Task E E4: v3 long training — 25k steps from v3/12000 init (simplest "keep training" baseline).
+    TrainConfig(
+        name="pi05_stand_box_kai0init_long",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_stand_box_kai0init/v3_kai0_base/12000/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+        ),
+        ema_decay=None,
+        num_train_steps=15_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
     # Task E v8: pi05_base init + abs + freeze + mirror-only data (base + mirror, 128 eps).
     # Ablation of v4: isolates space-mirroring gain from time-scaling gain.
     TrainConfig(
