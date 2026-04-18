@@ -76,10 +76,16 @@ export WANDB_MODE=offline
 # traceback) instead of silently crashing on the 0-byte NUMA node.
 NUMACTL_CMD=""
 if command -v numactl >/dev/null 2>&1; then
-  # --membind is already strict-by-default (allocation failure -> kernel OOM kill,
-  # surfaces as traceback instead of silent 0-MB-NUMA SIGBUS). --strict flag only
-  # matters for --interleave so we skip it (numactl 2.0.18 warns otherwise).
-  NUMACTL_CMD="numactl --membind=0,3 --cpunodebind=0,3"
+  # Previously --membind=0,3 --cpunodebind=0,3: survived the first inline-eval
+  # on GPU1/2 but E3 (EMA+lowLR, extra ~6 GB host pinned state) still silently
+  # died after step 4000 inline-eval. --membind redirects generic mallocs but
+  # some JAX/XLA code path does a NUMA-node-explicit pinned-memory call that
+  # --membind can't trap.
+  #
+  # --interleave=0,3 --strict: spread pages round-robin across the good nodes
+  # AND abort loudly (ENOMEM traceback) on any allocation that *can't* land on
+  # {0,3}. Converts silent SIGBUS into a visible failure we can then diagnose.
+  NUMACTL_CMD="numactl --interleave=0,3 --strict"
 fi
 
 # ------ inline eval env ------
