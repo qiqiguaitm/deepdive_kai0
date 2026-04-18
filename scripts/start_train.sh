@@ -30,6 +30,7 @@ NUM_STEPS=""
 SEED="42"
 NUM_WORKERS="2"
 ENABLE_EVAL="true"
+RESUME="false"
 EXTRA_ARGS=()
 
 while [ $# -gt 0 ]; do
@@ -39,6 +40,7 @@ while [ $# -gt 0 ]; do
     --seed)      SEED="$2"; shift 2 ;;
     --workers)   NUM_WORKERS="$2"; shift 2 ;;
     --no-eval)   ENABLE_EVAL="false"; shift ;;
+    --resume)    RESUME="true"; shift ;;
     *)           EXTRA_ARGS+=("$1"); shift ;;
   esac
 done
@@ -63,6 +65,23 @@ export JAX_COMPILATION_CACHE_DIR=$KAI0/.xla_cache
 export OPENPI_DATA_HOME=$PROJECT_ROOT/openpi_cache
 export WANDB_MODE=offline
 
+# ------ NUMA-bad-node defense (sim01 socket 1/2 have 0 MB RAM) ------
+# GPU-to-NUMA mapping (nvidia-smi topo -m):
+#   GPU 0 → NUMA 3 (good, 32 GB)
+#   GPU 1 → NUMA 2 (BAD, 0 MB)
+#   GPU 2 → NUMA 1 (BAD, 0 MB)
+#   GPU 3 → NUMA 0 (good, 32 GB)
+# Pin *all* host-side memory and CPU threads to the healthy NUMA nodes {0,3}
+# regardless of which GPU we use. --strict makes malloc() fail loudly (ENOMEM
+# traceback) instead of silently crashing on the 0-byte NUMA node.
+NUMACTL_CMD=""
+if command -v numactl >/dev/null 2>&1; then
+  # --membind is already strict-by-default (allocation failure -> kernel OOM kill,
+  # surfaces as traceback instead of silent 0-MB-NUMA SIGBUS). --strict flag only
+  # matters for --interleave so we skip it (numactl 2.0.18 warns otherwise).
+  NUMACTL_CMD="numactl --membind=0,3 --cpunodebind=0,3"
+fi
+
 # ------ inline eval env ------
 if [ "$ENABLE_EVAL" = "true" ]; then
   export INLINE_EVAL_VAL_ROOT="$VAL_ROOT"
@@ -73,7 +92,12 @@ else
 fi
 
 # ------ build train.py args ------
-ARGS=(--exp_name="$EXP_NAME" --overwrite --seed "$SEED" --num_workers "$NUM_WORKERS")
+# --resume and --overwrite are mutually exclusive (see config.py:760).
+if [ "$RESUME" = "true" ]; then
+  ARGS=(--exp_name="$EXP_NAME" --resume --seed "$SEED" --num_workers "$NUM_WORKERS")
+else
+  ARGS=(--exp_name="$EXP_NAME" --overwrite --seed "$SEED" --num_workers "$NUM_WORKERS")
+fi
 [ -n "$BATCH_SIZE" ] && ARGS+=(--batch_size "$BATCH_SIZE")
 [ -n "$NUM_STEPS" ]  && ARGS+=(--num_train_steps "$NUM_STEPS")
 ARGS+=("${EXTRA_ARGS[@]}")
@@ -84,6 +108,7 @@ cat <<EOF
 │ config:   $CONFIG
 │ exp_name: $EXP_NAME
 │ GPU:      $GPU
+│ numactl:  ${NUMACTL_CMD:-(disabled - numactl not found)}
 │ inline eval: $ENABLE_EVAL${ENABLE_EVAL:+ (val=$VAL_ROOT, N_FRAMES=$N_FRAMES, EVERY=$EVAL_EVERY)}
 │ args:     ${ARGS[@]}
 │ log:      $LOG
@@ -92,7 +117,7 @@ EOF
 
 cd "$KAI0"
 : > "$LOG"
-nohup uv run scripts/train.py "$CONFIG" "${ARGS[@]}" > "$LOG" 2>&1 &
+nohup $NUMACTL_CMD uv run scripts/train.py "$CONFIG" "${ARGS[@]}" > "$LOG" 2>&1 &
 PID=$!
 disown
 echo "PID=$PID  $(date)"
