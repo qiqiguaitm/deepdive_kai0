@@ -5,6 +5,7 @@ from collections.abc import Sequence
 import dataclasses
 import difflib
 import logging
+import os
 import pathlib
 from typing import Any, Literal, Protocol, TypeAlias
 
@@ -36,6 +37,13 @@ import openpi.policies.arx_policy as arx_policy
 ModelType: TypeAlias = _model.ModelType
 # Work around a tyro issue with using nnx.filterlib.Filter directly.
 Filter: TypeAlias = nnx.filterlib.Filter
+
+# Per-host paths, configured by setup_env.sh at the repo root.
+#   KAI0_DATA_ROOT     — base dir of deepdive_kai0/kai0 (holds data/ and local checkpoints/)
+#   PYTORCH_CKPT_BASE  — root for ADVANTAGE_TORCH PyTorch pretrained weights
+# gs:// paths are resolved via OPENPI_DATA_HOME by openpi.shared.download.
+_KAI0_DATA_ROOT = os.environ.get("KAI0_DATA_ROOT", "/data1/tim/workspace/deepdive_kai0/kai0")
+_PYTORCH_CKPT_BASE = os.environ.get("PYTORCH_CKPT_BASE", "/path/to/pytorch_ckpt_base")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -404,6 +412,14 @@ class LerobotAgilexDataConfig(DataConfigFactory):
     # if insert progress into prompt
     insert_advantage_into_prompt: bool = False
 
+    # π0.7-style metadata dropout: probability of stripping `prompt_suffix_marker`
+    # (and everything after) from the prompt during training. 0.0 = disabled (default).
+    # Reference: π0.7 paper Sec V-E.
+    prompt_suffix_dropout_rate: float = 0.0
+    # Suffix marker used by DropPromptSuffix transform. Text from this marker onward is dropped.
+    # Default matches "...Quality: X/5" format used by AWBC Quality-style prompts.
+    prompt_suffix_marker: str = ". Quality:"
+
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
 
@@ -434,6 +450,15 @@ class LerobotAgilexDataConfig(DataConfigFactory):
         )
         if self.insert_advantage_into_prompt:
             data_transforms.inputs.insert(0, _transforms.InsertAdvantageIntoPrompt())
+        # π0.7-style prompt-suffix dropout: only inserted when rate > 0; otherwise no-op.
+        if self.prompt_suffix_dropout_rate > 0.0:
+            data_transforms.inputs.insert(
+                0,
+                _transforms.DropPromptSuffix(
+                    dropout_rate=self.prompt_suffix_dropout_rate,
+                    suffix_marker=self.prompt_suffix_marker,
+                ),
+            )
 
         # Apply delta action transform if enabled
         if self.use_delta_joint_actions:
@@ -709,7 +734,31 @@ class TrainConfig:
     log_interval: int = 100
     # How often (in steps) to save checkpoints.
     save_interval: int = 1000
-    
+
+    # ===== In-training eval configuration =====
+    # --- Tensor-based eval (uses train dataloader episode split) ---
+    # Fraction of episodes held out for eval (0.0 = disabled, uses all for train).
+    val_ratio: float = 0.0
+    # Early-phase eval interval (steps). 0 = disabled.
+    eval_interval_early: int = 0
+    # Late-phase eval interval (steps). 0 = disabled.
+    eval_interval_late: int = 0
+    # Number of evals at early interval before switching to late.
+    eval_early_count: int = 3
+    # Number of eval batches averaged per eval call.
+    eval_batches: int = 4
+    # Diffusion steps for eval sample_actions (fewer = faster but less accurate).
+    eval_num_diffusion_steps: int = 10
+
+    # --- Inline eval (video-based, reads mp4 frames from a standalone val/ dir) ---
+    # Path to a val dataset root (contains data/chunk-000/episode_*.parquet + videos/).
+    # None = disabled. Orthogonal to val_ratio (different val source).
+    inline_eval_val_root: str | None = None
+    # Number of query frames sampled per val episode.
+    inline_eval_n_frames: int = 20
+    # Run inline eval every Nth save_interval boundary (1 = every save).
+    inline_eval_every: int = 1
+
 #************************advantage estimator***************************
     advantage_estimator: bool = False
     is_train: bool = True  # * Only use partial data in training
@@ -1181,7 +1230,7 @@ _CONFIGS = [
         name="pi05_flatten_fold_normal",
         model=pi0_config.Pi0Config(pi05=True),
         data = LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_A/base",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/base",
             default_prompt="Flatten and fold the cloth.",
             use_delta_joint_actions=False,
         ),
@@ -1191,17 +1240,137 @@ _CONFIGS = [
         num_workers=8,
         batch_size=256,
     ),
+
+    # ---- Model Arithmetic: split subset training (gf0/gf1) ----
+    # Task_A/base partitioned into 4 splits; each split trains an independent checkpoint,
+    # then merged via model_arithmetic/ (average / inverse_loss / gradient_descent / ...).
+    TrainConfig(
+        name="pi05_flatten_fold_split_0",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=25_000,
+        keep_period=5000,
+        num_workers=8,
+        batch_size=256,
+    ),
+    TrainConfig(
+        name="pi05_flatten_fold_split_1",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=25_000,
+        keep_period=5000,
+        num_workers=8,
+        batch_size=256,
+    ),
+    TrainConfig(
+        name="pi05_flatten_fold_split_2",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=25_000,
+        keep_period=5000,
+        num_workers=8,
+        batch_size=256,
+    ),
+    TrainConfig(
+        name="pi05_flatten_fold_split_3",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=25_000,
+        keep_period=5000,
+        num_workers=8,
+        batch_size=256,
+    ),
+
+    # ---- kai0_mixed_1: Model Arithmetic on base + dagger (6512 episodes total) ----
+    # Same 4-way split strategy applied to combined base+DAgger dataset.
+    TrainConfig(
+        name="kai0_mixed_1_split_0",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/kai0_mixed_1_data",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=25_000,
+        keep_period=5000,
+        num_workers=8,
+        batch_size=256,
+    ),
+    TrainConfig(
+        name="kai0_mixed_1_split_1",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/kai0_mixed_1_data",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=25_000,
+        keep_period=5000,
+        num_workers=8,
+        batch_size=256,
+    ),
+    TrainConfig(
+        name="kai0_mixed_1_split_2",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/kai0_mixed_1_data",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=25_000,
+        keep_period=5000,
+        num_workers=8,
+        batch_size=256,
+    ),
+    TrainConfig(
+        name="kai0_mixed_1_split_3",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/kai0_mixed_1_data",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=25_000,
+        keep_period=5000,
+        num_workers=8,
+        batch_size=256,
+    ),
+
     # Task E: stand up the fallen box — 73 ep, small dataset, sim01 local 5090s.
     # Clean init from pi05_base (not Task A ckpt) — gf0 packaged and transferred via TOS to sim01.
     # Freeze PaliGemma backbone (img + LLM main tower), train only Action Expert (llm.*_1) and top-level
     # projections (action_in_proj, action_out_proj, time_mlp_*). Shrinks train_state from ~65 GB to ~22 GB.
     # Single GPU batch=4 on sim01 (multi-GPU NCCL has orphan-worker pinned-memory issue; investigate in v2).
-    # See docs/taskE_master_plan.md.
+    # See docs/training/taskE_master_plan.md.
     TrainConfig(
         name="pi05_stand_box_normal",
         model=pi0_config.Pi0Config(pi05=True),
         data=LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_E/base",
             default_prompt="stand up the fallen box",
             use_delta_joint_actions=False,
         ),
@@ -1227,12 +1396,12 @@ _CONFIGS = [
         name="pi05_stand_box_kai0init",
         model=pi0_config.Pi0Config(pi05=True),
         data=LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_E/base",
             default_prompt="stand up the fallen box",
             use_delta_joint_actions=False,
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader(
-            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/Task_A/mixed_1/params"
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
         ),
         freeze_filter=nnx.All(
             nnx_utils.PathRegex(".*PaliGemma.*"),
@@ -1251,7 +1420,7 @@ _CONFIGS = [
         name="pi05_stand_box_aug",
         model=pi0_config.Pi0Config(pi05=True),
         data=LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base_full_aug",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_E/base_full_aug",
             default_prompt="stand up the fallen box",
             use_delta_joint_actions=False,
         ),
@@ -1275,12 +1444,12 @@ _CONFIGS = [
         name="pi05_stand_box_kai0_aug",
         model=pi0_config.Pi0Config(pi05=True),
         data=LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base_full_aug",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_E/base_full_aug",
             default_prompt="stand up the fallen box",
             use_delta_joint_actions=False,
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader(
-            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/Task_A/mixed_1/params"
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
         ),
         freeze_filter=nnx.All(
             nnx_utils.PathRegex(".*PaliGemma.*"),
@@ -1301,12 +1470,12 @@ _CONFIGS = [
         name="pi05_stand_box_vision_lora16",
         model=pi0_config.Pi0Config(pi05=True, vision_mlp_lora_rank=16, vision_mlp_lora_alpha=16.0),
         data=LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_E/base",
             default_prompt="stand up the fallen box",
             use_delta_joint_actions=False,
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader(
-            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_stand_box_kai0init_lowlr/v3e_lowlr/14999/params"
+            f"{_KAI0_DATA_ROOT}/checkpoints/pi05_stand_box_kai0init_lowlr/v3e_lowlr/14999/params"
         ),
         freeze_filter=nnx.All(
             nnx_utils.PathRegex(".*PaliGemma.*"),
@@ -1329,12 +1498,12 @@ _CONFIGS = [
         name="pi05_stand_box_vision_lora32",
         model=pi0_config.Pi0Config(pi05=True, vision_mlp_lora_rank=32, vision_mlp_lora_alpha=32.0),
         data=LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_E/base",
             default_prompt="stand up the fallen box",
             use_delta_joint_actions=False,
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader(
-            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_stand_box_kai0init_lowlr/v3e_lowlr/14999/params"
+            f"{_KAI0_DATA_ROOT}/checkpoints/pi05_stand_box_kai0init_lowlr/v3e_lowlr/14999/params"
         ),
         freeze_filter=nnx.All(
             nnx_utils.PathRegex(".*PaliGemma.*"),
@@ -1360,12 +1529,12 @@ _CONFIGS = [
         name="pi05_stand_box_vision_fsdp",
         model=pi0_config.Pi0Config(pi05=True),
         data=LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_E/base",
             default_prompt="stand up the fallen box",
             use_delta_joint_actions=False,
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader(
-            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_stand_box_kai0init_lowlr/v3e_lowlr/14999/params"
+            f"{_KAI0_DATA_ROOT}/checkpoints/pi05_stand_box_kai0init_lowlr/v3e_lowlr/14999/params"
         ),
         freeze_filter=nnx.All(
             nnx_utils.PathRegex(".*PaliGemma\\.llm.*"),     # freeze only LLM main tower
@@ -1389,12 +1558,12 @@ _CONFIGS = [
         name="pi05_stand_box_e2_ft",
         model=pi0_config.Pi0Config(pi05=True),
         data=LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_E/base",
             default_prompt="stand up the fallen box",
             use_delta_joint_actions=False,
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader(
-            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_stand_box_kai0init_lowlr/v3e_lowlr/14999/params"
+            f"{_KAI0_DATA_ROOT}/checkpoints/pi05_stand_box_kai0init_lowlr/v3e_lowlr/14999/params"
         ),
         freeze_filter=nnx.All(
             nnx_utils.PathRegex(".*PaliGemma.*"),
@@ -1418,12 +1587,12 @@ _CONFIGS = [
         name="pi05_stand_box_kai0_allgood",
         model=pi0_config.Pi0Config(pi05=True),
         data=LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_E/base",
             default_prompt="stand up the fallen box",
             use_delta_joint_actions=False,
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader(
-            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/Task_A/mixed_1/params"
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
         ),
         freeze_filter=nnx.All(
             nnx_utils.PathRegex(".*PaliGemma.*"),
@@ -1448,12 +1617,12 @@ _CONFIGS = [
         name="pi05_stand_box_kai0init_ema",
         model=pi0_config.Pi0Config(pi05=True),
         data=LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_E/base",
             default_prompt="stand up the fallen box",
             use_delta_joint_actions=False,
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader(
-            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_stand_box_kai0init/v3_kai0_base/12000/params"
+            f"{_KAI0_DATA_ROOT}/checkpoints/pi05_stand_box_kai0init/v3_kai0_base/12000/params"
         ),
         freeze_filter=nnx.All(
             nnx_utils.PathRegex(".*PaliGemma.*"),
@@ -1472,12 +1641,12 @@ _CONFIGS = [
         name="pi05_stand_box_kai0init_lowlr",
         model=pi0_config.Pi0Config(pi05=True),
         data=LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_E/base",
             default_prompt="stand up the fallen box",
             use_delta_joint_actions=False,
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader(
-            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_stand_box_kai0init/v3_kai0_base/12000/params"
+            f"{_KAI0_DATA_ROOT}/checkpoints/pi05_stand_box_kai0init/v3_kai0_base/12000/params"
         ),
         freeze_filter=nnx.All(
             nnx_utils.PathRegex(".*PaliGemma.*"),
@@ -1499,12 +1668,12 @@ _CONFIGS = [
         name="pi05_stand_box_kai0init_combo",
         model=pi0_config.Pi0Config(pi05=True),
         data=LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_E/base",
             default_prompt="stand up the fallen box",
             use_delta_joint_actions=False,
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader(
-            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_stand_box_kai0init/v3_kai0_base/12000/params"
+            f"{_KAI0_DATA_ROOT}/checkpoints/pi05_stand_box_kai0init/v3_kai0_base/12000/params"
         ),
         freeze_filter=nnx.All(
             nnx_utils.PathRegex(".*PaliGemma.*"),
@@ -1526,12 +1695,12 @@ _CONFIGS = [
         name="pi05_stand_box_kai0init_long",
         model=pi0_config.Pi0Config(pi05=True),
         data=LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_E/base",
             default_prompt="stand up the fallen box",
             use_delta_joint_actions=False,
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader(
-            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_stand_box_kai0init/v3_kai0_base/12000/params"
+            f"{_KAI0_DATA_ROOT}/checkpoints/pi05_stand_box_kai0init/v3_kai0_base/12000/params"
         ),
         freeze_filter=nnx.All(
             nnx_utils.PathRegex(".*PaliGemma.*"),
@@ -1551,7 +1720,7 @@ _CONFIGS = [
         name="pi05_stand_box_mirror",
         model=pi0_config.Pi0Config(pi05=True),
         data=LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base_merged",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_E/base_merged",
             default_prompt="stand up the fallen box",
             use_delta_joint_actions=False,
         ),
@@ -1577,7 +1746,7 @@ _CONFIGS = [
         name="pi05_stand_box_delta",
         model=pi0_config.Pi0Config(pi05=True),
         data=LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_E/base",
             default_prompt="stand up the fallen box",
             use_delta_joint_actions=True,
             assets=AssetsConfig(asset_id="stand_box_delta"),
@@ -1602,7 +1771,7 @@ _CONFIGS = [
         name="pi05_stand_box_v15_delta",
         model=pi0_config.Pi0Config(pi05=True),
         data=LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_E/base",
             default_prompt="stand up the fallen box",
             use_delta_joint_actions=True,
             assets=AssetsConfig(asset_id="stand_box_delta"),
@@ -1630,7 +1799,7 @@ _CONFIGS = [
         name="pi05_stand_box_normal_v15",
         model=pi0_config.Pi0Config(pi05=True),
         data=LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_E/base",
             default_prompt="stand up the fallen box",
             use_delta_joint_actions=False,
         ),
@@ -1654,11 +1823,11 @@ _CONFIGS = [
         name="pi05_tee_shirt_sort_normal",
         model=pi0_config.Pi0Config(pi05=True),
         data = LerobotAgilexDataConfig(
-            repo_id="<path_to_repo_root>/data/TeeShirtSort/base",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/TeeShirtSort/base",
             default_prompt="Fetch the clothes, fold the tee shirts and hand-over the collared shirts.",
             use_delta_joint_actions=False,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("<path/to/pi05_base/checkpoint>"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         num_train_steps=100_000,
         keep_period=5000,
         num_workers=8,
@@ -1668,11 +1837,11 @@ _CONFIGS = [
         name="pi05_hang_cloth_normal",
         model=pi0_config.Pi0Config(pi05=True),
         data = LerobotARXDataConfig(
-            repo_id="<path_to_repo_root>/data/HangCloth/base",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/HangCloth/base",
             default_prompt="Fetch and hang the cloth.",
             use_delta_joint_actions=False,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("<path/to/pi05_base/checkpoint>"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         num_train_steps=100_000,
         keep_period=5000,
         num_workers=8,
@@ -1690,10 +1859,10 @@ _CONFIGS = [
             discrete_state_input=False,
         ),
         data=LerobotAgilexDataConfig(
-            repo_id = "Path/to/your/advantage/dataset",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/advantage",
             assets=AssetsConfig(
-                assets_dir="Path/to/your/advantage/dataset/assets",
-                asset_id="Your_advantage_dataset_name",
+                assets_dir=f"{_KAI0_DATA_ROOT}/data/Task_A/advantage/assets",
+                asset_id="Task_A_advantage",
             ),
             default_prompt="Flatten and fold the cloth.",
             # * why removing "prompt" here will lead to an error in transforms.py
@@ -1724,7 +1893,7 @@ _CONFIGS = [
             ]
             )
         ),
-        pytorch_weight_path="Path/to/your/pi05_base/checkpoint",
+        pytorch_weight_path=f"{_PYTORCH_CKPT_BASE}/pi05_base",
         num_train_steps=100_000,
         keep_period=10000,
         save_interval=10000,
@@ -1743,11 +1912,10 @@ _CONFIGS = [
             discrete_state_input=False,  # Not using states into prompt like pi05
         ),
         data=LerobotAgilexDataConfig(
-            # repo_id = "/cpfs01/shared/filtered_cut_data/short_sleeve/flatten_fold/v9-3/1022_20_590_v9-3_2000_lerobot",
-            repo_id = "Path/to/your/advantage/dataset",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/advantage",
             assets=AssetsConfig(
-                assets_dir="Path/to/your/advantage/dataset/assets",
-                asset_id="Your_advantage_dataset_name",
+                assets_dir=f"{_KAI0_DATA_ROOT}/data/Task_A/advantage/assets",
+                asset_id="Task_A_advantage",
             ),
             default_prompt="Flatten and fold the cloth.",
             # * why removing "prompt" here will lead to an error in transforms.py
@@ -1775,7 +1943,7 @@ _CONFIGS = [
             ]
             )
         ),
-        pytorch_weight_path="Path/to/your/pi06_base/checkpoint",
+        pytorch_weight_path=f"{_PYTORCH_CKPT_BASE}/pi06_base",
         num_train_steps=100_000,
         keep_period=10000,
         save_interval=10000,
@@ -1791,28 +1959,65 @@ _CONFIGS = [
         name="pi05_flatten_fold_awbc",
         model=pi0_config.Pi0Config(pi05=True),
         data = LerobotAgilexDataConfig(
-            repo_id="<path_to_repo_root>/data/FlattenFold/advantage",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/advantage",
             default_prompt="Flatten and fold the cloth.",
             use_delta_joint_actions=False,
             base_config=DataConfig(prompt_from_task=True),
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("/cpfs01/shared/checkpoint/pi05_base/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         num_train_steps=100_000,
         keep_period=5000,
-        num_workers=8, 
-        batch_size=256, 
+        num_workers=16,
+        batch_size=256,
+        val_ratio=0.1,
+        eval_interval_early=100,
+        eval_interval_late=1000,
+        eval_early_count=3,
+        eval_batches=4,
+    ),
+    #**************************FlattenFold AWBC (Option A: 5-bin Quality, stage-aware, no dropout)*******************************
+    # Variant of pi05_flatten_fold_awbc using:
+    #   - n_slices=5 advantage discretization with "Quality: 1/5..5/5" prompt
+    #   - Stage-aware percentile (--stage-nums 2 for Task_A flat/fold stages)
+    #   - (Option A) dropout DISABLED (was 0.15). Rationale: demo-only data has weak
+    #     advantage variance (η²≈3%); dropout further dilutes an already weak signal.
+    #     gf0 baseline beat gf1 at Step 5000 across most metrics before this switch.
+    # Dataset must be pre-generated by stage_advantage/annotation/discretize_advantage.py
+    # with --n-slices 5 --stage-nums 2, then tasks.jsonl overridden to Quality 1-5 format.
+    # Config name retained as "_q5drop" to preserve checkpoint dir (resume-compatible).
+    TrainConfig(
+        name="pi05_flatten_fold_awbc_q5drop",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/advantage_q5",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+            prompt_suffix_dropout_rate=0.0,
+            prompt_suffix_marker=". Quality:",
+            base_config=DataConfig(prompt_from_task=True),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=100_000,
+        keep_period=5000,
+        num_workers=16,
+        batch_size=256,
+        val_ratio=0.1,
+        eval_interval_early=100,
+        eval_interval_late=1000,
+        eval_early_count=3,
+        eval_batches=4,
     ),
     #**************************TeeShirtSort AWBC*******************************
     TrainConfig(
         name="pi05_tee_shirt_sort_awbc",
         model=pi0_config.Pi0Config(pi05=True),
         data = LerobotAgilexDataConfig(
-            repo_id="<path_to_repo_root>/data/TeeShirtSort/advantage",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/TeeShirtSort/advantage",
             default_prompt="Fetch the clothes, fold the tee shirts and hand-over the collared shirts.",
             use_delta_joint_actions=False,
             base_config=DataConfig(prompt_from_task=True),
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("<path/to/pi05_base/checkpoint>"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         num_train_steps=100_000,
         keep_period=5000,
         num_workers=8,
@@ -1823,16 +2028,16 @@ _CONFIGS = [
         name="pi05_hang_cloth_awbc",
         model=pi0_config.Pi0Config(pi05=True),
         data = LerobotARXDataConfig(
-            repo_id="<path_to_repo_root>/data/HangCloth/advantage",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/HangCloth/advantage",
             default_prompt="Fetch and hang the cloth.",
             use_delta_joint_actions=False,
             base_config=DataConfig(prompt_from_task=True),
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("/cpfs01/shared/checkpoint/pi05_base/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         num_train_steps=100_000,
         keep_period=5000,
-        num_workers=8, 
-        batch_size=256, 
+        num_workers=8,
+        batch_size=256,
     ),
 
     #**************************FlattenFold RTC Inference*******************************
@@ -1841,11 +2046,11 @@ _CONFIGS = [
         name="pi05_rtc_flatten_fold_inference",
         model=pi0_config.Pi0RTCConfig(pi05=True),
         data=LerobotAgilexDataConfig(
-            repo_id="<path_to_repo_root>/data/FlattenFold/base",
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/base",
             default_prompt="Flatten and fold the cloth.",
             use_delta_joint_actions=False,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("<path_to/pi05_base/checkpoint>"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         num_train_steps=100_000,
         keep_period=5000,
         num_workers=8,

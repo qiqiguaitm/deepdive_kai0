@@ -122,6 +122,40 @@ class InsertAdvantageIntoPrompt(DataTransformFn):
 
 
 @dataclasses.dataclass(frozen=True)
+class DropPromptSuffix(DataTransformFn):
+    """Randomly strip a configurable suffix from the prompt during training.
+
+    Inspired by π0.7 (Sec V-E, "metadata dropout"): dropping the metadata part
+    of the prompt with some probability during training allows the model to
+    work both with and without the metadata at inference time.
+
+    For AWBC-style prompts like "Flatten and fold the cloth. Quality: 5/5",
+    setting suffix_marker=". Quality:" will drop everything from ". Quality:"
+    onwards (keeping the base task description).
+
+    Args:
+        dropout_rate: Probability of dropping the suffix (0.0 = disabled).
+        suffix_marker: Substring to split on. Text before marker is kept;
+            text from marker onwards is discarded (a trailing "." is appended).
+    """
+    dropout_rate: float = 0.0
+    suffix_marker: str = ". Quality:"
+
+    def __call__(self, data: DataDict) -> DataDict:
+        if self.dropout_rate <= 0.0 or "prompt" not in data:
+            return data
+        if np.random.random() >= self.dropout_rate:
+            return data
+        prompt = data["prompt"]
+        if not isinstance(prompt, str):
+            prompt = prompt.item() if hasattr(prompt, "item") else str(prompt)
+        if self.suffix_marker in prompt:
+            base = prompt.split(self.suffix_marker)[0]
+            return {**data, "prompt": np.asarray(base + ".")}
+        return data
+
+
+@dataclasses.dataclass(frozen=True)
 class Normalize(DataTransformFn):
     norm_stats: at.PyTree[NormStats] | None
     # If true, will use quantile normalization. Otherwise, normal z-score normalization will be used.
