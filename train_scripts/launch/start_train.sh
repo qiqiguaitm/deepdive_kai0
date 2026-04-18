@@ -88,15 +88,6 @@ if command -v numactl >/dev/null 2>&1; then
   NUMACTL_CMD="numactl --interleave=0,3 --strict"
 fi
 
-# ------ inline eval env ------
-if [ "$ENABLE_EVAL" = "true" ]; then
-  export INLINE_EVAL_VAL_ROOT="$VAL_ROOT"
-  export INLINE_EVAL_N_FRAMES="$N_FRAMES"
-  export INLINE_EVAL_EVERY="$EVAL_EVERY"
-else
-  unset INLINE_EVAL_VAL_ROOT INLINE_EVAL_N_FRAMES INLINE_EVAL_EVERY
-fi
-
 # ------ build train.py args ------
 # --resume and --overwrite are mutually exclusive (see config.py:760).
 if [ "$RESUME" = "true" ]; then
@@ -106,6 +97,15 @@ else
 fi
 [ -n "$BATCH_SIZE" ] && ARGS+=(--batch_size "$BATCH_SIZE")
 [ -n "$NUM_STEPS" ]  && ARGS+=(--num_train_steps "$NUM_STEPS")
+
+# Inline eval now reads from TrainConfig fields (not env vars). Pass via CLI so
+# tyro materializes them. train.py: config.inline_eval_val_root / _n_frames / _every.
+if [ "$ENABLE_EVAL" = "true" ]; then
+  ARGS+=(--inline_eval_val_root "$VAL_ROOT")
+  ARGS+=(--inline_eval_n_frames "$N_FRAMES")
+  ARGS+=(--inline_eval_every "$EVAL_EVERY")
+fi
+
 ARGS+=("${EXTRA_ARGS[@]}")
 
 # ------ report ------
