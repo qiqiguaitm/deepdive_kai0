@@ -19,8 +19,12 @@ export function Controls({ rec, status, connected, templateId, operator, onChang
   const [busy, setBusy] = useState(false);
 
   const state = rec?.state || "IDLE";
-  const canStart = state === "IDLE" && !!templateId && !!operator;
+  const hasMeta = !!templateId && !!operator;
+  const canStart = state === "IDLE" && hasMeta;
   const canEnd = state === "RECORDING";
+  // 开始按钮保持可点，即便 state===ERROR / 缺 meta / 系统红灯，
+  // 这样 onStart 里的弹窗校验才能触发（否则 disabled 按钮吃掉 click，看不到弹窗）。
+  const startDisabled = state === "RECORDING" || state === "SAVING" || busy;
 
   const wrap = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -30,13 +34,21 @@ export function Controls({ rec, status, connected, templateId, operator, onChang
   };
 
   const onStart = () => {
+    if (!hasMeta) {
+      alert("请先选择任务 + Prompt 并填写操作员姓名。");
+      return;
+    }
     if (!connected || !status) {
-      alert("系统异常：未连接到后端状态流，请修复后再采集。");
+      alert("系统异常：未连接到后端状态流，无法继续进行，请修复后再采集。");
       return;
     }
     const failures = collectFailures(status);
     if (failures.length > 0) {
-      alert(`系统异常，请修复后再采集：\n- ${failures.join("\n- ")}`);
+      alert(`系统异常，无法继续进行，请修复后再采集：\n- ${failures.join("\n- ")}`);
+      return;
+    }
+    if (state !== "IDLE") {
+      alert(`当前录制状态为 ${state}，无法开始新的录制。请先丢弃当前会话。`);
       return;
     }
     wrap(() => api.startRec(templateId, operator));
@@ -57,7 +69,7 @@ export function Controls({ rec, status, connected, templateId, operator, onChang
         <textarea value={note} onChange={e => setNote(e.target.value)} rows={2} style={{ gridColumn: "span 3" }} />
       </div>
       <div className="controls">
-        <button className="btn-start" disabled={!canStart || busy}
+        <button className="btn-start" disabled={startDisabled}
           onClick={onStart}>● 开始</button>
         <button className="btn-save" disabled={!canEnd || busy}
           onClick={() => wrap(() => api.saveRec(success, note, tags.split(",").map(s => s.trim()).filter(Boolean)))}>■ 保存</button>
