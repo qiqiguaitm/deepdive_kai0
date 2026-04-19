@@ -1463,14 +1463,15 @@ _CONFIGS = [
         batch_size=4,
         fsdp_devices=1,
     ),
-    # Task E Phase-2 T7: v2 of T1-1 with fixed LoRA init (w_b=zeros, identity start).
-    # First T1-1 run reached @1=0.0260 despite step 2-4k disruption from non-zero w_b.
-    # With proper zero init, step 0 is exactly E2 (0.0262), so LoRA only improves from there.
+    # Task E Phase-2 T7: v2 of T1-1 with fixed LoRA init (w_b=zeros, identity start)
+    # + base_merged data (128 ep, base + mirror) + 25k steps. Mirror aug only becomes
+    # useful once vision is LoRA-trainable — AE-only training on mirrored images was
+    # invisible to SigLIP (frozen). Expected to reach @1 ~ 0.022-0.025 by step 25k.
     TrainConfig(
         name="pi05_stand_box_vision_lora16_v2",
         model=pi0_config.Pi0Config(pi05=True, vision_mlp_lora_rank=16, vision_mlp_lora_alpha=16.0),
         data=LerobotAgilexDataConfig(
-            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base_merged",
             default_prompt="stand up the fallen box",
             use_delta_joint_actions=False,
         ),
@@ -1483,10 +1484,10 @@ _CONFIGS = [
             nnx.Not(nnx_utils.PathRegex(".*lora_[ab].*")),
         ),
         lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=500, peak_lr=1.25e-5, decay_steps=15_000, decay_lr=1.25e-6
+            warmup_steps=500, peak_lr=1.25e-5, decay_steps=25_000, decay_lr=1.25e-6
         ),
         ema_decay=None,
-        num_train_steps=15_000,
+        num_train_steps=25_000,
         keep_period=5_000,
         save_interval=2_000,
         num_workers=2,
