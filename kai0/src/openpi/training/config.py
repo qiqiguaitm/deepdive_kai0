@@ -1729,6 +1729,67 @@ _CONFIGS = [
         batch_size=4,
         fsdp_devices=1,
     ),
+    # Task E Phase-4 T21: T10 recipe with effective batch_size=64 via gradient accumulation.
+    # Per-device bs=4 * grad_accum=16 -> eff_bs=64. 25000 micro-steps (same wall-clock as T10)
+    # = 1562 optimizer updates. EMA adjusted: 0.9999^(1/16)≈0.99999375 so per-opt decay ≈ T10's.
+    # LR sqrt-scaled: 1.25e-5 * sqrt(16) = 5e-5 (larger batch -> less noise -> can take bigger steps).
+    TrainConfig(
+        name="pi05_stand_box_kai0_allgood_bs64",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/Task_A/mixed_1/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=5e-5, decay_steps=25_000, decay_lr=5e-6
+        ),
+        optimizer=_optimizer.AdamW(grad_accumulation_steps=16),
+        ema_decay=0.99999375,
+        num_train_steps=25_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
+    # Task E Phase-4 T22: same as T21 but eff_bs=128 (grad_accum=32).
+    # 25000 micro-steps = 781 optimizer updates. LR sqrt-scaled: 1.25e-5 * sqrt(32) ≈ 7e-5.
+    # EMA: 0.9999^(1/32) ≈ 0.999996875.
+    TrainConfig(
+        name="pi05_stand_box_kai0_allgood_bs128",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/Task_A/mixed_1/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=7e-5, decay_steps=25_000, decay_lr=7e-6
+        ),
+        optimizer=_optimizer.AdamW(grad_accumulation_steps=32),
+        ema_decay=0.999996875,
+        num_train_steps=25_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
     # Task E Phase-2 T6: kai0_mixed_1 init + base + lowLR + EMA from scratch (15k).
     # "All known-good tricks from source" — test if training from kai0 init with
     # EMA+lowLR throughout is better than E2's "default-LR then lowLR continuation".

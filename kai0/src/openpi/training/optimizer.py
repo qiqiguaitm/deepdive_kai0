@@ -64,7 +64,11 @@ class OptimizerConfig(Protocol):
 
 @dataclasses.dataclass(frozen=True)
 class AdamW(OptimizerConfig):
-    """AdamW optimizer."""
+    """AdamW optimizer. If grad_accumulation_steps > 1, wraps chain with optax.MultiSteps
+    so gradients are accumulated over k micro-steps before the AdamW update is applied.
+    Effective batch = batch_size * k. Note: EMA (applied in train.py outside the optimizer)
+    ticks every micro-step regardless, so for k>1 consider setting ema_decay closer to 1.
+    """
 
     b1: float = 0.9
     b2: float = 0.95
@@ -72,6 +76,7 @@ class AdamW(OptimizerConfig):
     # Changing this to 0 can cause out-of-memory errors for some reason, so we set it to a negligible value.
     weight_decay: float = 1e-10
     clip_gradient_norm: float = 1.0
+    grad_accumulation_steps: int = 1
 
     def create(
         self,
@@ -81,8 +86,10 @@ class AdamW(OptimizerConfig):
         tx = optax.adamw(
             lr, b1=self.b1, b2=self.b2, eps=self.eps, weight_decay=self.weight_decay, mask=weight_decay_mask
         )
-
-        return optax.chain(optax.clip_by_global_norm(self.clip_gradient_norm), tx)
+        chain = optax.chain(optax.clip_by_global_norm(self.clip_gradient_norm), tx)
+        if self.grad_accumulation_steps > 1:
+            chain = optax.MultiSteps(chain, every_k_schedule=self.grad_accumulation_steps)
+        return chain
 
 
 @dataclasses.dataclass(frozen=True)
