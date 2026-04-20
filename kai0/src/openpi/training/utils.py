@@ -10,7 +10,10 @@ from openpi.models import model as _model
 from openpi.shared import array_typing as at
 
 
-@at.typecheck
+# NOTE: @at.typecheck removed — when opt_state is optax.MultiStepsState (used by
+# grad_accumulation_steps > 1), beartype's recursive ArrayTree ForwardRef check
+# spuriously fails on the NamedTuple inside Union[Iterable[ArrayTree], ...].
+# Typecheck on this dataclass was a dev-only sanity check; correctness unaffected.
 @struct.dataclass
 class TrainState:
     step: at.Int[at.ArrayLike, ""]
