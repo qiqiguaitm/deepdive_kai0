@@ -1729,10 +1729,10 @@ _CONFIGS = [
         batch_size=4,
         fsdp_devices=1,
     ),
-    # Task E Phase-4 T21: T10 recipe with effective batch_size=64 via gradient accumulation.
-    # Per-device bs=4 * grad_accum=16 -> eff_bs=64. 25000 micro-steps (same wall-clock as T10)
-    # = 1562 optimizer updates. EMA adjusted: 0.9999^(1/16)≈0.99999375 so per-opt decay ≈ T10's.
-    # LR sqrt-scaled: 1.25e-5 * sqrt(16) = 5e-5 (larger batch -> less noise -> can take bigger steps).
+    # Task E Phase-4 T21 v2: linear LR scaling (not sqrt). Previous sqrt-scaled LR (5e-5)
+    # yielded only -0.7%/2k vs T10's -8%/2k -> under-trained. Linear scaling (LR * k)
+    # gives effective per-sample learning rate equivalent to T10.
+    # eff_bs=64 (bs=4 * accum=16), peak_lr = 1.25e-5 * 16 = 2e-4. EMA: 0.9999^(1/16).
     TrainConfig(
         name="pi05_stand_box_kai0_allgood_bs64",
         model=pi0_config.Pi0Config(pi05=True),
@@ -1749,7 +1749,7 @@ _CONFIGS = [
             nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
         ),
         lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=500, peak_lr=5e-5, decay_steps=25_000, decay_lr=5e-6
+            warmup_steps=500, peak_lr=2e-4, decay_steps=25_000, decay_lr=2e-5
         ),
         optimizer=_optimizer.AdamW(grad_accumulation_steps=16),
         ema_decay=0.99999375,
@@ -1760,9 +1760,8 @@ _CONFIGS = [
         batch_size=4,
         fsdp_devices=1,
     ),
-    # Task E Phase-4 T22: same as T21 but eff_bs=128 (grad_accum=32).
-    # 25000 micro-steps = 781 optimizer updates. LR sqrt-scaled: 1.25e-5 * sqrt(32) ≈ 7e-5.
-    # EMA: 0.9999^(1/32) ≈ 0.999996875.
+    # Task E Phase-4 T22 v2: same as T21 but eff_bs=128 (grad_accum=32).
+    # peak_lr = 1.25e-5 * 32 = 4e-4 (linear scaling). 781 opt updates.
     TrainConfig(
         name="pi05_stand_box_kai0_allgood_bs128",
         model=pi0_config.Pi0Config(pi05=True),
@@ -1779,7 +1778,7 @@ _CONFIGS = [
             nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
         ),
         lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=500, peak_lr=7e-5, decay_steps=25_000, decay_lr=7e-6
+            warmup_steps=500, peak_lr=4e-4, decay_steps=25_000, decay_lr=4e-5
         ),
         optimizer=_optimizer.AdamW(grad_accumulation_steps=32),
         ema_decay=0.999996875,
