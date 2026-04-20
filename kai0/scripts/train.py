@@ -243,15 +243,20 @@ def init_train_state(
         # Convert frozen params to bfloat16.
         params = nnx_utils.state_map(params, config.freeze_filter, lambda p: p.replace(p.value.astype(jnp.bfloat16)))
 
-        return training_utils.TrainState(
-            step=0,
-            params=params,
-            model_def=nnx.graphdef(model),
-            tx=tx,
-            opt_state=tx.init(params.filter(config.trainable_filter)),
-            ema_decay=config.ema_decay,
-            ema_params=None if config.ema_decay is None else params,
-        )
+        # Disable jaxtyping check on construction: optax.MultiStepsState (used when
+        # grad_accumulation_steps > 1) is a NamedTuple whose recursive ArrayTree
+        # ForwardRef doesn't resolve cleanly in beartype, causing a spurious TypeError
+        # even though the state is a valid pytree. Runtime behavior is unaffected.
+        with at.disable_typechecking():
+            return training_utils.TrainState(
+                step=0,
+                params=params,
+                model_def=nnx.graphdef(model),
+                tx=tx,
+                opt_state=tx.init(params.filter(config.trainable_filter)),
+                ema_decay=config.ema_decay,
+                ema_params=None if config.ema_decay is None else params,
+            )
 
     train_state_shape = jax.eval_shape(init, init_rng)
     state_sharding = sharding.fsdp_sharding(train_state_shape, mesh, log=True)
