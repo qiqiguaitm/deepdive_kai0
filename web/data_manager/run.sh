@@ -44,8 +44,8 @@ mkdir -p "$LOG_DIR" "$PID_DIR"
 ROS_SETUP="/opt/ros/jazzy/setup.bash"
 ROS2_WS_SETUP="$REPO_ROOT/ros2_ws/install/setup.bash"
 ACTIVATE_CAN="$REPO_ROOT/piper_tools/activate_can.sh"
-START_TELEOP="$REPO_ROOT/scripts/start_teleop.sh"
-LAUNCH_3CAM="$REPO_ROOT/scripts/launch_3cam.py"
+START_TELEOP="$REPO_ROOT/start_scripts/start_teleop.sh"
+LAUNCH_3CAM="$REPO_ROOT/start_scripts/launch_3cam.py"
 
 SERVICES=(arms cameras backend frontend)
 
