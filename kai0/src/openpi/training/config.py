@@ -1671,6 +1671,65 @@ _CONFIGS = [
         batch_size=4,
         fsdp_devices=1,
     ),
+    # ========================= Task P (pick and place in box) =========================
+    # Task P: 101 ep collected by gsy (pedal), 30.9k frames. 85 train / 16 val (seed=42).
+    # Strategy: skip all Task_E dead-ends (LoRA/aug/vision-unfreeze/wd), replicate only the
+    # proven T10 winning recipe + one ablation to confirm EMA+lowLR still dominant on Task_P.
+    #
+    # P-V3: equivalent of Task_E v3 baseline — kai0_mixed_1 + base + freeze + default LR 15k.
+    # Used as ablation: if P-T10 >> P-V3 then EMA+lowLR stack confirmed for Task_P too.
+    TrainConfig(
+        name="pi05_pick_place_box_kai0init",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_P/base",
+            default_prompt="pick and place in box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/Task_A/mixed_1/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+        ),
+        ema_decay=None,
+        num_train_steps=15_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
+    # P-T10: Task_P champion candidate. Direct port of Task_E T10 winning recipe.
+    # kai0_mixed_1 + Task_P/base + EMA(0.9999) + lowLR(1.25e-5) + 25k. From scratch.
+    TrainConfig(
+        name="pi05_pick_place_box_kai0_allgood_25k",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data1/tim/workspace/deepdive_kai0/kai0/data/Task_P/base",
+            default_prompt="pick and place in box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data1/tim/workspace/deepdive_kai0/kai0/checkpoints/Task_A/mixed_1/params"
+        ),
+        freeze_filter=nnx.All(
+            nnx_utils.PathRegex(".*PaliGemma.*"),
+            nnx.Not(nnx_utils.PathRegex(".*llm.*_1.*")),
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1.25e-5, decay_steps=25_000, decay_lr=1.25e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=25_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=2,
+        batch_size=4,
+        fsdp_devices=1,
+    ),
+    # ========================= (end Task P) =========================
     # Task E Phase-3 T15: T10 recipe (T6+25k) extended to 40k steps.
     # T10 @1 step 24999=0.0233 still trending down (-0.0001/1k). Linear extrap to 40k -> 0.021-0.022.
     TrainConfig(
