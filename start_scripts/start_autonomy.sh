@@ -251,4 +251,6 @@ exec ros2 launch piper autonomy_launch.py \
     bg_enable:=false \
     execute_mode:="$EXECUTE_MODE" \
     gpu_id:="$GPU_ID" \
+    config_name:=pi05_flatten_fold_normal \
+    checkpoint_dir:="$KAI0_DIR/checkpoints/Task_A/mixed_1" \
     "${EXTRA_ARGS[@]}"

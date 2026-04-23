@@ -7,11 +7,11 @@
 #
 # 映射由 calibrate_can_mapping.py 校准后自动更新。
 #
-# sim01 bus-info (2026-04-16 calibrate_can_mapping.py 校准):
-#   1-1.2:1.0 → can_left_mas  (左 master (示教左臂))
-#   1-1.1:1.0 → can_left_slave  (左 slave (执行左臂))
-#   1-1.3:1.0 → can_right_mas  (右 master (示教右臂))
-#   1-1.4:1.0 → can_right_slave  (右 slave (执行右臂))
+# sim01 bus-info (2026-04-23 calibrate_can_mapping.py 校准):
+#   3-2.2.2:1.0 → can_left_mas  (左 master (示教左臂))
+#   3-2.2.1:1.0 → can_left_slave  (左 slave (执行左臂))
+#   3-2.2.3:1.0 → can_right_mas  (右 master (示教右臂))
+#   3-2.2.4:1.0 → can_right_slave  (右 slave (执行右臂))
 
 set -eo pipefail
 
@@ -27,12 +27,12 @@ fi
 # ── 映射配置: "bus-info:symbolic_name" ───────────────────────────────────────
 # calibrate_can_mapping.py 会自动更新这两个数组
 SLAVE_MAPPINGS=(
-    "1-1.1:1.0:can_left_slave"
-    "1-1.4:1.0:can_right_slave"
+    "3-2.2.1:1.0:can_left_slave"
+    "3-2.2.4:1.0:can_right_slave"
 )
 MASTER_MAPPINGS=(
-    "1-1.2:1.0:can_left_mas"
-    "1-1.3:1.0:can_right_mas"
+    "3-2.2.2:1.0:can_left_mas"
+    "3-2.2.3:1.0:can_right_mas"
 )
 
 # ── 解析参数 ─────────────────────────────────────────────────────────────────

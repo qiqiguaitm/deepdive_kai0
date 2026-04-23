@@ -88,14 +88,23 @@ class Policy(BasePolicy):
             sample_kwargs["inference_delay"] = obs["inference_delay"]
         if "execute_horizon" in obs:
             sample_kwargs["execute_horizon"] = obs["execute_horizon"]
+        # NOTE: enable_rtc and mask_prefix_delay are Python bools. Forwarding
+        # them through the JIT boundary makes them bool[] tracers inside
+        # sample_actions, which then hit `if tracer:` branches in pi0_rtc.py
+        # (lines 323, 351) → TracerBoolConversionError. Upstream RTC clients
+        # (agilex/arx) send these keys in the payload, but Policy.infer
+        # intentionally drops them so sample_actions uses its function
+        # defaults (enable_rtc=True, mask_prefix_delay=False). Do NOT
+        # uncomment until pi0_rtc.py is refactored to use jax.lax.cond /
+        # jnp.where for these branches.
         # if "enable_rtc" in obs:
         #     sample_kwargs["enable_rtc"] = obs["enable_rtc"]
         # if "mask_prefix_delay" in obs:
         #     sample_kwargs["mask_prefix_delay"] = obs["mask_prefix_delay"]
-        # if "prefix_attention_schedule" in obs:
-        #     sample_kwargs["prefix_attention_schedule"] = obs["prefix_attention_schedule"]
-        # if "max_guidance_weight" in obs:
-        #     sample_kwargs["max_guidance_weight"] = obs["max_guidance_weight"]
+        if "prefix_attention_schedule" in obs:
+            sample_kwargs["prefix_attention_schedule"] = obs["prefix_attention_schedule"]
+        if "max_guidance_weight" in obs:
+            sample_kwargs["max_guidance_weight"] = obs["max_guidance_weight"]
         if noise is not None:
             noise = torch.from_numpy(noise).to(self._pytorch_device) if self._is_pytorch_model else jnp.asarray(noise)
 

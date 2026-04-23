@@ -151,7 +151,21 @@ def create_torch_dataset(
     Args:
         episodes: Optional list of meta.episodes keys (positions) to include.
             If None (default), uses all episodes. Used for train/val split.
+
+    Multi-dataset:
+        若 `data_config.repo_ids` 非空, 按列表逐个构造 LeRobotDataset 后用
+        torch.utils.data.ConcatDataset 串起来。`episodes` 对多数据集不直接适用
+        (每个数据集有各自的索引空间), 传了会 raise。
     """
+    repo_ids = getattr(data_config, "repo_ids", None)
+    if repo_ids:
+        if episodes is not None:
+            raise ValueError(
+                "`episodes` filter is not supported with multi-dataset (repo_ids); "
+                "split per-dataset or merge offline first."
+            )
+        return _create_concat_torch_dataset(repo_ids, data_config, action_horizon, model_config)
+
     repo_id = data_config.repo_id
     if repo_id is None:
         raise ValueError("Repo ID is not set. Cannot create dataset.")
@@ -171,6 +185,38 @@ def create_torch_dataset(
         dataset = TransformedDataset(dataset, [_transforms.PromptFromLeRobotTask(dataset_meta.tasks)])
 
     return dataset
+
+
+def _create_concat_torch_dataset(
+    repo_ids,
+    data_config: _config.DataConfig,
+    action_horizon: int,
+    model_config: _model.BaseModelConfig,
+) -> Dataset:
+    """Build one LeRobotDataset per repo_id, apply per-dataset prompt-from-task if requested,
+    then ConcatDataset them. Each dataset uses its own fps for delta_timestamps (robust to
+    heterogeneous FPS, though in practice should all be 30)."""
+    from torch.utils.data import ConcatDataset
+    parts: list[Dataset] = []
+    for rid in repo_ids:
+        meta = lerobot_dataset.LeRobotDatasetMetadata(rid)
+        ds = lerobot_dataset.LeRobotDataset(
+            rid,
+            delta_timestamps={
+                key: [t / meta.fps for t in range(action_horizon)]
+                for key in data_config.action_sequence_keys
+            },
+        )
+        if data_config.prompt_from_task:
+            ds = TransformedDataset(ds, [_transforms.PromptFromLeRobotTask(meta.tasks)])
+        parts.append(ds)
+    if not parts:
+        raise ValueError("repo_ids is empty after parsing")
+    logging.info(
+        "multi-dataset: concat %d LeRobotDatasets: %s", len(parts),
+        ", ".join(str(r) for r in repo_ids),
+    )
+    return ConcatDataset(parts)
 
 def create_advantage_torch_dataset(
     data_config: _config.DataConfig,

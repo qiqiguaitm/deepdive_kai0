@@ -161,6 +161,77 @@ LeRobot 归档规范），视频端点会在线用 ffmpeg 转成 H.264 碎片 mp
 
 相机 `dropped` 计数仅用于 `CameraGrid` 展示，**不参与异常判定**，避免瞬时抖动刷红。
 
+## 新目录布局 (task/date/subset)
+
+数据原来按 `Task_X_YYYY-MM-DD/<subset>/...` 扁平摆, 现改成层级:
+
+```
+<DATA_ROOT>/
+├── Task_A/
+│   ├── 2026-04-16/base/        # (data/, videos/, meta/ ...)
+│   ├── 2026-04-17/base/
+│   └── 2026-04-17/dagger/
+├── Task_E/
+│   ├── 2026-04-17/base/
+│   └── 2026-04-20/base/
+└── Task_P/...
+```
+
+内存 / SQLite / API URL / UI 里 `task_id` 仍用 **compound** 形式 (`Task_A_2026-04-16`),
+只有磁盘路径变了。所有构造/解析路径都走 `backend/app/layout.py`, 新写一律新布局,
+读旧数据会自动回落到扁平路径, 支持"迁了一半"的过渡状态。
+
+### 迁移历史数据
+```bash
+# dry-run 看清楚要动什么
+./backend/.venv/bin/python backend/tools/migrate_layout.py
+# 确认无误后真干
+./backend/.venv/bin/python backend/tools/migrate_layout.py --apply
+```
+脚本只会动名字能匹配 `Task_*_YYYY-MM-DD` 的顶层目录, 其他东西 (`.tar` 备份 / `ckpt_downloads/` /
+`*.py`) 原地不动。同盘 mv 零拷贝, 秒级完成。
+
+## 实时数据同步 gf (vePFS/gpfs 共享卷)
+
+`recorder.save()` 成功后会异步 rsync 刚写完那条 episode 所在的 `<task>/<date>/<subset>/`
+目录到 **gf0** 的 `/vePFS/visrobot01/KAI0/`。因为 gf0 和 gf1 两端的 `/vePFS` 挂的是同一块
+gpfs 卷 (`fs_vepfs-cnsh075262e1f815`), 推 gf0 = 到达 gf1, 不必重复推。
+不阻塞 UI, 失败只 log, **不加 `--delete`**, 本地误删不会传到云端。
+
+### 一次性准备 (需要 root)
+`/vePFS/visrobot01/` 默认是 `root:root 755`, `tim` 无法写入。在 gf 任意一台:
+```bash
+ssh -p 55555 tim@14.103.44.161 'sudo chown -R tim:tim /vePFS/visrobot01/KAI0'
+```
+之后整个 `KAI0/` 子树都归 tim, 不再需要 sudo。
+
+### 常用配置
+```bash
+# 关同步
+KAI0_SYNC_ENABLED=0 bash start_scripts/start_data_collect.sh
+
+# 换推 gf1 (两端都连同一块 gpfs, 二选一即可)
+export KAI0_SYNC_REMOTES='[{"name":"gf1-vepfs","user":"tim","host":"14.103.44.161","port":11111,"dest_root":"/vePFS/visrobot01/KAI0"}]'
+
+# 调优
+KAI0_SYNC_RETRIES=3         # rsync 失败重试次数
+KAI0_SYNC_BACKOFF_S=2       # 指数退避基值
+KAI0_SYNC_TIMEOUT_S=600     # 单次 rsync 上限
+```
+
+### 监控
+```bash
+curl -s http://127.0.0.1:8787/api/sync/status | jq
+tail -f web/data_manager/logs/sync.log
+
+# 管理员一次性把本地所有 subset 全推一遍 (迁移后首次对齐用)
+curl -X POST -H 'X-Role: admin' 'http://127.0.0.1:8787/api/sync/all'
+curl -X POST -H 'X-Role: admin' 'http://127.0.0.1:8787/api/sync/all?only_task=Task_A'
+```
+
+前置条件: ssh key 已配好; `/vePFS/visrobot01/KAI0/` 对 tim 可写 (见上); rsync 3.2.3+
+(有 `--mkpath` 自动建目标父目录)。
+
 ## USB 踏板启停 (pedal service)
 `run.sh` 启动时会顺带拉起 `backend/tools/pedal_listener.py`, 把踏板键按下变成
 `POST /api/recorder/toggle` 调用, 和鼠标"开始/保存"按钮互斥共用后端状态机:

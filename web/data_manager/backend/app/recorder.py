@@ -27,9 +27,15 @@ except ImportError:
     _HAS_ZARR = False
 
 from .config import DATA_ROOT
+from .layout import (
+    compound_to_subset_root,
+    new_task_subset_root,
+    today_compound,
+)
 from .models import RecState, SaveRecordingReq, StartRecordingReq
 from .ros_bridge import bridge
 from .stats_service import service as stats
+from .sync import sync_episode_subset
 from .templates import store as templates
 
 
@@ -42,17 +48,20 @@ log = logging.getLogger(__name__)
 
 
 def dated_task_name(task: str) -> str:
-    """裸 task 名 → 带日期的 on-disk 目录名: 'Task_A' → 'Task_A_2026-04-16'.
-    所有需要"目录名而不是模板 task 名"的地方都该过这个函数, 避免 DB / 路径不匹配."""
-    return f"{task}_{datetime.date.today().strftime('%Y-%m-%d')}"
+    """Compatibility shim: `'Task_A'` → `'Task_A_2026-04-16'` (compound task_id).
+    保留此名字以兼容外部脚本; 新代码请直接用 layout.today_compound."""
+    return today_compound(task)
 
 
 def _task_subset_root(task: str, subset: str) -> Path:
-    """新布局: <DATA_ROOT>/<task>_<YYYY-MM-DD>/<subset>/...
+    """写新 episode 用: 新层级布局 `<DATA_ROOT>/<task>/<today>/<subset>`.
 
-    日期取自 'now'. 同一天再录同一 (task,subset) 时落到同一目录, episode_id 自增;
-    跨日则落到新目录, episode_id 从 0 重新开始 (因为 stats_service 按目录扫描)."""
-    return DATA_ROOT / dated_task_name(task) / subset
+    同一天再录同一 (task,subset) 落到同一目录, episode_id 自增;
+    跨日落到新 date 目录, episode_id 重新从 0 算。
+
+    读老 episode 时统一用 `layout.compound_to_subset_root(compound, subset)`,
+    能透明回落到老扁平布局。"""
+    return new_task_subset_root(task, subset)
 
 
 def _pick_codec() -> tuple[str, str, dict]:
@@ -349,7 +358,13 @@ class Recorder:
                 raise
             self._reset()
         if task and subset and ep_id is not None:
-            stats.upsert_one(_task_subset_root(task, subset) / "data" / "chunk-000" / f"episode_{ep_id:06d}.parquet")
+            # task 只是裸名 ('Task_A'); 新 episode 刚写到 new_task_subset_root 下面,
+            # upsert_one 需要真实 parquet 路径。
+            pq_path = new_task_subset_root(task, subset) / "data" / "chunk-000" / f"episode_{ep_id:06d}.parquet"
+            stats.upsert_one(pq_path)
+            # post-save 异步推送到 gf0/gf1. 不阻塞 UI 响应, 失败只 log.
+            today = datetime.date.today().strftime("%Y-%m-%d")
+            sync_episode_subset(task, today, subset)
         return {"saved_episode_id": ep_id, "task_id": task, "subset": subset}
 
     def toggle(self, snapshot_fn) -> dict:

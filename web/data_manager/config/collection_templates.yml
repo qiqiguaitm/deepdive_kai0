@@ -23,3 +23,9 @@ templates:
   prompt: stand up the fallen box
   enabled: true
   note: Task E DAgger correction — same prompt as base/training config pi05_stand_box_normal
+- id: task_p_base
+  task_id: Task_P
+  subset: base
+  prompt: pick and place in box
+  enabled: true
+  note: Task P BASE

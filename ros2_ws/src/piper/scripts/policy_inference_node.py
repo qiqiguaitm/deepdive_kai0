@@ -286,6 +286,18 @@ class PolicyInferenceNode(Node):
         self.declare_parameter('latency_k', 8)
         self.declare_parameter('min_smooth_steps', 8)
         self.declare_parameter('decay_alpha', 0.25)
+        # ── RTC (Real-Time Chunking) parameters ──
+        # enable_rtc=True + Pi0Config → auto-upgraded to Pi0RTCConfig at load time
+        # (same weights, model class swap only; see _load_jax_policy). Guidance is
+        # applied inside sample_actions only when prev_action_chunk is not None,
+        # so cold-start / flush / observe→execute transitions fall back to non-RTC.
+        self.declare_parameter('enable_rtc', True)
+        self.declare_parameter('rtc_execute_horizon', 16)
+        self.declare_parameter('rtc_max_guidance_weight', 0.5)
+        # NOTE: mask_prefix_delay is declared upstream in pi0_rtc.py:244 but
+        # not exposed here — forwarding a Python bool through jit triggers
+        # TracerBoolConversionError at pi0_rtc.py:323. Left as function default
+        # (False) until the model uses jax.lax.cond for that branch.
         self.declare_parameter('gripper_offset', 0.003)
         self.declare_parameter('img_front_topic', '/camera_f/camera/color/image_raw')
         self.declare_parameter('img_left_topic', '/camera_l/camera/color/image_raw')
@@ -306,6 +318,9 @@ class PolicyInferenceNode(Node):
         self.latency_k = self.get_parameter('latency_k').value
         self.min_smooth_steps = self.get_parameter('min_smooth_steps').value
         self.decay_alpha = self.get_parameter('decay_alpha').value
+        self._enable_rtc = _to_bool(self.get_parameter('enable_rtc').value)
+        self._rtc_execute_horizon = int(self.get_parameter('rtc_execute_horizon').value)
+        self._rtc_max_guidance_weight = float(self.get_parameter('rtc_max_guidance_weight').value)
         self.gripper_offset = self.get_parameter('gripper_offset').value
 
         self.get_logger().info(f'Mode: {self.mode}')
@@ -315,6 +330,16 @@ class PolicyInferenceNode(Node):
         self.policy = None
         self.stream_buffer = StreamActionBuffer(
             decay_alpha=self.decay_alpha, state_dim=14)
+        # ── RTC state ──
+        # _rtc_prev_chunk: last chunk returned by inference, sent as prev_action_chunk
+        #   to the next call for chunk-boundary guidance. Reset to None on flush /
+        #   observe→execute / enable_rtc toggle to avoid dragging new predictions
+        #   toward a stale trajectory.
+        # _last_infer_ms: latest measured inference latency; converted to action-
+        #   horizon steps for `inference_delay` (pi0_rtc.py:301).
+        self._rtc_lock = threading.Lock()
+        self._rtc_prev_chunk = None
+        self._last_infer_ms = 0.0
 
         # ── Sensor deques (原版帧同步模式: 回调 append, get_synced_frame 消费) ──
         self._sensor_lock = threading.Lock()
@@ -418,7 +443,56 @@ class PolicyInferenceNode(Node):
         period = 1.0 / self.publish_rate
         self.create_timer(period, self._publish_action)
 
+        # ── Hot-reload callback for ros2 param set ──
+        # Without this, rtc_apply.sh can change the declared parameter values
+        # but the inference loop keeps reading the instance variables cached
+        # from __init__, so runtime changes silently no-op.
+        self.add_on_set_parameters_callback(self._on_set_parameters)
+
         self.get_logger().info('Policy inference node ready')
+
+    # ── Parameter hot-reload ────────────────────────────────────────
+
+    def _on_set_parameters(self, params):
+        """Apply ros2 param set changes to instance variables in-place.
+
+        Called synchronously on the executor thread when a parameter is updated
+        (e.g. via `ros2 param set /policy_inference enable_rtc false`). We only
+        mirror the subset that the inference/publish loops actually read.
+        """
+        from rcl_interfaces.msg import SetParametersResult
+        for p in params:
+            try:
+                if p.name == 'enable_rtc':
+                    new_val = _to_bool(p.value)
+                    if new_val != self._enable_rtc:
+                        # Clear prev_chunk on toggle so guidance doesn't use stale data
+                        with self._rtc_lock:
+                            self._rtc_prev_chunk = None
+                    self._enable_rtc = new_val
+                    self.get_logger().info(f'enable_rtc → {new_val}')
+                elif p.name == 'rtc_execute_horizon':
+                    self._rtc_execute_horizon = int(p.value)
+                    self.get_logger().info(f'rtc_execute_horizon → {p.value}')
+                elif p.name == 'rtc_max_guidance_weight':
+                    self._rtc_max_guidance_weight = float(p.value)
+                elif p.name == 'inference_rate':
+                    self.inference_rate = float(p.value)
+                    self.get_logger().info(f'inference_rate → {p.value}')
+                elif p.name == 'latency_k':
+                    self.latency_k = int(p.value)
+                elif p.name == 'min_smooth_steps':
+                    self.min_smooth_steps = int(p.value)
+                elif p.name == 'decay_alpha':
+                    self.decay_alpha = float(p.value)
+                    self.stream_buffer.decay_alpha = float(p.value)
+                elif p.name == 'gripper_offset':
+                    self.gripper_offset = float(p.value)
+                elif p.name == 'prompt':
+                    self.prompt = str(p.value)
+            except Exception as e:
+                return SetParametersResult(successful=False, reason=f'{p.name}: {e}')
+        return SetParametersResult(successful=True)
 
     # ── Policy loading ──────────────────────────────────────────────
 
@@ -462,12 +536,80 @@ class PolicyInferenceNode(Node):
 
         from openpi.policies import policy_config as _policy_config
         from openpi.training import config as _config
+        from openpi.models import pi0_config as _pi0_config
+        import dataclasses as _dc
 
         train_config = _config.get_config(config_name)
+
+        # Auto-upgrade Pi0Config → Pi0RTCConfig when enable_rtc is on. Pi0RTCConfig
+        # inherits from Pi0Config with no added fields, so this is a pure class
+        # swap — same weights, same architecture, same transforms. Guidance logic
+        # in sample_actions only engages when prev_action_chunk is not None, so
+        # flipping this without prev_chunk is a no-op at inference time.
+        if self._enable_rtc:
+            base = train_config.model
+            if isinstance(base, _pi0_config.Pi0RTCConfig):
+                self.get_logger().info('Model already Pi0RTCConfig, no swap needed')
+            elif isinstance(base, _pi0_config.Pi0Config):
+                rtc_model = _pi0_config.Pi0RTCConfig(**{
+                    f.name: getattr(base, f.name) for f in _dc.fields(base)
+                })
+                train_config = _dc.replace(train_config, model=rtc_model)
+                self.get_logger().info(
+                    f'Upgraded model: Pi0Config → Pi0RTCConfig (pi05={base.pi05}) '
+                    f'for RTC guidance')
+            else:
+                self.get_logger().warn(
+                    f'enable_rtc=True but model is {type(base).__name__} '
+                    f'(not Pi0Config); skipping RTC swap, guidance will be inactive')
+                self._enable_rtc = False
+
         self.policy = _policy_config.create_trained_policy(
             train_config, checkpoint_dir)
 
         self.get_logger().info(f'JAX policy loaded in {time.monotonic()-t0:.1f}s')
+
+        # ── Load action norm_stats for RTC prev_chunk normalization (R1 fix) ──
+        # Policy.infer extracts obs['prev_action_chunk'] and forwards it to
+        # sample_actions WITHOUT running input_transform on it (policy.py:85-86).
+        # But the diffusion trajectory x_t inside sample_actions lives in
+        # NORMALIZED model space (mean=0, std=1 after Normalize transform).
+        # If we send raw joint angles, the guidance error (prev - x_1) is
+        # systematically biased by the un-normalization mean shift — upstream
+        # agilex/arx RTC clients have the same bug. We normalize the 14-dim
+        # prev_chunk here using actions.mean/std from norm_stats.json so
+        # guidance compares like-for-like.
+        import glob as _glob2
+        self._norm_action_mean = None
+        self._norm_action_std = None
+        try:
+            ns_candidates = _glob2.glob(os.path.join(checkpoint_dir, 'assets', '**', 'norm_stats.json'),
+                                        recursive=True)
+            if ns_candidates:
+                import json as _json
+                with open(ns_candidates[0]) as _f:
+                    ns = _json.load(_f).get('norm_stats', {})
+                acts = ns.get('actions', {})
+                mean_full = np.asarray(acts.get('mean', []), dtype=np.float32)
+                std_full = np.asarray(acts.get('std', []), dtype=np.float32)
+                if mean_full.size >= 14 and std_full.size >= 14:
+                    self._norm_action_mean = mean_full[:14].copy()
+                    # Guard std against division by zero (pad dims would be 0)
+                    self._norm_action_std = np.where(std_full[:14] < 1e-6, 1.0, std_full[:14]).astype(np.float32)
+                    self.get_logger().info(
+                        f'RTC normalize: loaded norm_stats from {ns_candidates[0]} | '
+                        f'mean[:4]={self._norm_action_mean[:4].round(3).tolist()} '
+                        f'std[:4]={self._norm_action_std[:4].round(3).tolist()}')
+                else:
+                    self.get_logger().warn(
+                        f'norm_stats actions.mean has only {mean_full.size} dims (<14); '
+                        f'RTC prev_chunk will be sent raw (no normalize)')
+            else:
+                self.get_logger().warn(
+                    f'norm_stats.json not found under {checkpoint_dir}/assets — '
+                    f'RTC prev_chunk will be sent raw (no normalize, R1 bias present)')
+        except Exception as e:
+            self.get_logger().warn(f'norm_stats load failed: {e}; RTC prev_chunk will be sent raw')
 
     def _load_ws_policy(self):
         """Connect to external serve_policy.py via WebSocket."""
@@ -699,6 +841,10 @@ class PolicyInferenceNode(Node):
                 qr = np.pad(qr, (0, 7 - len(qr)))
             seed = np.concatenate([ql, qr])  # always 14-dim
         self.stream_buffer.flush(seed_action=seed)
+        # Clear RTC prev_chunk so next inference starts fresh (no guidance toward
+        # a stale trajectory). Next call falls back to base_step (pi0_rtc.py:351).
+        with self._rtc_lock:
+            self._rtc_prev_chunk = None
 
     def _keyboard_listener(self):
         """Non-blocking keyboard listener for interactive control.
@@ -1307,8 +1453,6 @@ class PolicyInferenceNode(Node):
                     'disabling Rerun logging in inference thread to prevent timeline corruption')
 
         self.get_logger().info('Inference loop started')
-        rate_hz = self.inference_rate
-        period = 1.0 / rate_hz
 
         # Warmup
         self.get_logger().info('Waiting for sensor data...')
@@ -1335,11 +1479,61 @@ class PolicyInferenceNode(Node):
                     time.sleep(0.01)
                     continue
 
+                # ── RTC guidance payload ──
+                # Only inject when RTC is on AND we have a previous chunk. The
+                # first call after load / flush / observe→execute has prev=None,
+                # so sample_actions falls back to base_step (pi0_rtc.py:351).
+                # inference_delay is estimated from last measured latency in
+                # action-horizon steps (publish_rate=30Hz → 1 step ≈ 33ms).
+                # Track whether RTC guidance is active THIS iteration (for log)
+                rtc_active = False
+                rtc_d_steps = 0
+                rtc_exec_h = 0
+                pc_for_log = None
+                if self._enable_rtc:
+                    with self._rtc_lock:
+                        pc = self._rtc_prev_chunk.copy() if self._rtc_prev_chunk is not None else None
+                    if pc is not None:
+                        d_steps = int(max(0, round(self._last_infer_ms / 1000.0 * self.publish_rate)))
+                        # R1 fix: normalize prev_chunk to match internal model space.
+                        # pc is in raw un-normalized robot space (14-dim joint angles);
+                        # sample_actions compares it against x_1 which is in normalized
+                        # 32-dim model space. Apply (pc - mean) / std over first 14 dims
+                        # so guidance error is computed like-for-like. Pi0RTC pads 14→32
+                        # with zeros; dim_mask filters padding out of the guidance error
+                        # (pi0_rtc.py:320-321), so sending 14-dim normalized is correct.
+                        if self._norm_action_mean is not None:
+                            pc_send = ((pc - self._norm_action_mean) / self._norm_action_std).astype(np.float32)
+                        else:
+                            pc_send = pc
+                        obs['prev_action_chunk'] = pc_send
+                        obs['inference_delay'] = d_steps
+                        obs['execute_horizon'] = int(self._rtc_execute_horizon)
+                        obs['max_guidance_weight'] = float(self._rtc_max_guidance_weight)
+                        rtc_active = True
+                        rtc_d_steps = d_steps
+                        rtc_exec_h = int(self._rtc_execute_horizon)
+                        pc_for_log = pc  # raw pc (for diag MAE comparison in raw space)
+                        # mask_prefix_delay intentionally not forwarded — it's a
+                        # Python bool that, once inside sample_actions' JIT boundary,
+                        # becomes a tracer and breaks the `if mask_prefix_delay:`
+                        # branch at pi0_rtc.py:323. Uses function default (False).
+
                 result = self.policy.infer(obs)
                 actions = result.get('actions', None)
                 infer_ms = (time.monotonic() - t_start) * 1000
+                self._last_infer_ms = infer_ms
 
                 if actions is not None and len(actions) > 0:
+                    # Always snapshot the latest chunk for (a) RTC guidance on the
+                    # next call and (b) the diagnostic MAE log below. Keeping it
+                    # populated even when enable_rtc is off lets us measure the
+                    # "natural chunk-to-chunk similarity" baseline as a control
+                    # against the RTC-on measurement — otherwise we can't tell
+                    # whether ratio < 1 is guidance or just horizon-dependent drift.
+                    with self._rtc_lock:
+                        self._rtc_prev_chunk = np.asarray(actions, dtype=float).copy()
+
                     self.stream_buffer.integrate_new_chunk(
                         actions,
                         max_k=self.latency_k,
@@ -1372,6 +1566,60 @@ class PolicyInferenceNode(Node):
                         f'| Δ(0→{len(actions)-1}): L={np.linalg.norm(a_last[:6]-a0[:6]):.2f} '
                         f'R={np.linalg.norm(a_last[7:13]-a0[7:13]):.2f}')
 
+                    # ── Chunk-alignment diagnostic ──
+                    # Measure MAE(new, prev) separately in the RTC guidance window
+                    # [d, exec_h) vs the free tail [exec_h, end). This is logged
+                    # EVERY cycle, regardless of whether RTC guidance was actually
+                    # injected this iteration (rtc_active flag). That way we can
+                    # compare:
+                    #   rtc=on  + injected=1 → measures guidance effect + natural drift
+                    #   rtc=off + injected=0 → measures natural drift only (baseline)
+                    # If ratio drops significantly when injected=1 vs injected=0,
+                    # the guidance is actually pulling. If ratio is the same,
+                    # "ratio<1" was just horizon-dependent chunk-decay.
+                    if pc_for_log is None:
+                        # Fall back to using the just-captured chunk as "prev" from
+                        # one step ago — which is what we'll use next iteration too.
+                        # On the very first iteration (no prev yet), skip.
+                        pass
+                    # Use the _rtc_prev_chunk BEFORE we overwrote it above. We need
+                    # the PREVIOUS chunk for this iteration's diag. Easiest: cache
+                    # it before the overwrite. Done via pc_for_log when rtc was
+                    # active; for rtc-off case we have no pc_for_log. Workaround:
+                    # also capture a local prev even when rtc_active was false.
+                    try:
+                        # Re-read: if we had pc_for_log (rtc injected), use it;
+                        # otherwise use what we stored last time under a separate
+                        # diagnostic attr that mirrors _rtc_prev_chunk every cycle.
+                        diag_prev = pc_for_log if pc_for_log is not None else getattr(self, '_diag_last_chunk', None)
+                        if diag_prev is not None:
+                            n_steps = min(diag_prev.shape[0], actions.shape[0])
+                            d_ = min(rtc_d_steps if rtc_active else 8, n_steps)  # for rtc-off use nominal d=8
+                            eh = min(rtc_exec_h if rtc_active else 16, n_steps)
+                            pc14 = diag_prev[:n_steps, :14]
+                            new14 = actions[:n_steps, :14]
+                            guid_mae = (
+                                float(np.mean(np.abs(new14[d_:eh] - pc14[d_:eh])))
+                                if eh > d_ else float('nan'))
+                            free_mae = (
+                                float(np.mean(np.abs(new14[eh:] - pc14[eh:])))
+                                if n_steps > eh else float('nan'))
+                            ratio = (guid_mae / free_mae) if (free_mae and free_mae > 1e-9) else float('nan')
+                            pc_mean_abs = float(np.mean(np.abs(pc14)))
+                            new_mean_abs = float(np.mean(np.abs(new14)))
+                            if rtc_active:
+                                inj = 'injected-norm' if self._norm_action_mean is not None else 'injected-raw'
+                            else:
+                                inj = 'baseline'
+                            self.get_logger().info(
+                                f'[{inj}] d={d_} exec_h={eh} | '
+                                f'guid_MAE={guid_mae:.4f} free_MAE={free_mae:.4f} '
+                                f'ratio={ratio:.2f} | |prev|={pc_mean_abs:.3f} |new|={new_mean_abs:.3f}')
+                        # Stash current chunk for next iteration's baseline diag
+                        self._diag_last_chunk = np.asarray(actions, dtype=float).copy()
+                    except Exception as e:
+                        self.get_logger().debug(f'chunk-diag error: {e}')
+
                     # Rerun: queue predicted trajectory for FK timer + log latency
                     # Pred queue is always safe (consumed by executor timer).
                     # Direct rr.log only if set_thread_local succeeded (_rr_infer_thread);
@@ -1398,8 +1646,11 @@ class PolicyInferenceNode(Node):
                         except Exception as e:
                             self.get_logger().debug(f'Rerun prediction log error: {e}')
 
+                # Re-read inference_rate each iteration so rtc_apply.sh / ros2
+                # param set takes effect without restart.
                 elapsed = time.monotonic() - t_start
-                sleep_time = max(0, period - elapsed)
+                period_live = 1.0 / max(0.1, float(self.inference_rate))
+                sleep_time = max(0, period_live - elapsed)
                 time.sleep(sleep_time)
 
             except Exception as e:

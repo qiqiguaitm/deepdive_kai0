@@ -139,6 +139,21 @@ def generate_launch_description():
     bg_enable_arg = DeclareLaunchArgument('bg_enable',
         default_value='false',
         description='Enable static background mesh (TSDF, requires open3d)')
+    # ── RTC (Real-Time Chunking) ──
+    # When enable_rtc=true, policy_inference_node auto-upgrades Pi0Config →
+    # Pi0RTCConfig at load time (same weights) and sends prev_action_chunk +
+    # inference_delay + execute_horizon to sample_actions. Runtime togglable
+    # via `ros2 param set /policy_inference enable_rtc {true,false}` or
+    # `rtc_apply.sh {on,off,rtc_tight,rtc_long}`.
+    enable_rtc_arg = DeclareLaunchArgument('enable_rtc',
+        default_value='true',
+        description='Enable RTC guidance for chunk-boundary continuity')
+    rtc_execute_horizon_arg = DeclareLaunchArgument('rtc_execute_horizon',
+        default_value='16',
+        description='Steps of new chunk to guide toward prev_chunk (16 ≈ 2×latency_k)')
+    rtc_max_guidance_weight_arg = DeclareLaunchArgument('rtc_max_guidance_weight',
+        default_value='0.5',
+        description='Upper bound on RTC guidance weight (see pi0_rtc.py)')
 
     # ── Piper 左臂 (mode=1 控制从臂, auto_enable 上电) ──
     # mode=1: subscribe to /master/joint_left and drive the slave arm hardware
@@ -206,6 +221,9 @@ def generate_launch_description():
             'puppet_left_topic': '/puppet/joint_left',
             'puppet_right_topic': '/puppet/joint_right',
             'execute_mode': LaunchConfiguration('execute_mode'),
+            'enable_rtc': LaunchConfiguration('enable_rtc'),
+            'rtc_execute_horizon': LaunchConfiguration('rtc_execute_horizon'),
+            'rtc_max_guidance_weight': LaunchConfiguration('rtc_max_guidance_weight'),
         }],
     )
 
@@ -288,6 +306,8 @@ def generate_launch_description():
         mode_arg, gpu_arg, config_arg, ckpt_arg, host_arg, port_arg, prompt_arg,
         execute_mode_arg, enable_rerun_arg, calib_arg,
         fg_enable_arg, bg_enable_arg,
+        enable_rtc_arg, rtc_execute_horizon_arg,
+        rtc_max_guidance_weight_arg,
         cleanup,
         piper_left_delayed, piper_right_delayed,
         multi_cam_delayed,

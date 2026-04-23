@@ -77,6 +77,11 @@ class AssetsConfig:
 class DataConfig:
     # LeRobot repo id. If None, fake data will be created.
     repo_id: str | None = None
+    # Optional multi-dataset fan-out: 每个元素是一个 LeRobot repo_id (本地路径或 HF id).
+    # 当非 None 时, create_torch_dataset 会按列表逐个构造 LeRobotDataset 然后 ConcatDataset,
+    # `repo_id` 仍保留用作 asset_id 回退 / 日志显示 (可以指任一条或共同目录).
+    # 训练 CLI 侧通常不直接填这个, 用 DataConfigFactory.datasets_yaml 自动 populate.
+    repo_ids: Sequence[str] | None = None
     # Directory within the assets directory containing the data assets.
     asset_id: str | None = None
     # Contains precomputed normalization stats. If None, normalization will not be performed.
@@ -178,10 +183,83 @@ class ModelTransformFactory(GroupFactory):
                 )
 
 
+def _load_repo_ids_yaml(path: str) -> list[str]:
+    """Parse a YAML / JSON / TXT file listing dataset roots and return the normalized list.
+
+    支持三种格式 (按文件扩展名分派):
+      * `.yaml` / `.yml`  — top-level list 或 {"roots": [...]}
+      * `.json`           — top-level list 或 [{"root": path}, ...]
+      * `.txt`            — 一行一个路径, 允许井号 '#' 行尾/整行注释
+
+    Examples (YAML):
+        roots:
+          - /transfer-shanghai/KAI0/Task_A/2026-04-16/base
+          - /transfer-shanghai/KAI0/Task_A/2026-04-17/base
+    """
+    import json
+    import os
+
+    p = pathlib.Path(os.path.expanduser(path))
+    if not p.is_file():
+        raise FileNotFoundError(f"datasets_yaml not found: {p}")
+
+    ext = p.suffix.lower()
+    text = p.read_text(encoding="utf-8")
+
+    if ext in (".yaml", ".yml"):
+        import yaml  # lazy: yaml is already a transitive dep of openpi
+        doc = yaml.safe_load(text)
+    elif ext == ".json":
+        doc = json.loads(text)
+    elif ext == ".txt":
+        doc = []
+        for raw in text.splitlines():
+            line = raw.split("#", 1)[0].strip()
+            if line:
+                doc.append(line)
+    else:
+        raise ValueError(
+            f"unsupported datasets_yaml extension {ext!r}; use .yaml/.yml/.json/.txt"
+        )
+
+    # Normalize the various shapes into list[str]
+    if isinstance(doc, dict):
+        doc = doc.get("roots") or doc.get("datasets") or doc.get("paths") or []
+    if not isinstance(doc, list) or not doc:
+        raise ValueError(f"{p} parsed to empty / non-list roots: {doc!r}")
+
+    out: list[str] = []
+    for entry in doc:
+        if isinstance(entry, str):
+            out.append(entry)
+        elif isinstance(entry, dict):
+            root = entry.get("root") or entry.get("path") or entry.get("repo_id")
+            if not root:
+                raise ValueError(f"entry in {p} has no 'root'/'path'/'repo_id' key: {entry!r}")
+            out.append(str(root))
+        else:
+            raise ValueError(f"unsupported entry type in {p}: {entry!r}")
+
+    # Dedup in order
+    seen: set[str] = set()
+    deduped = [x for x in out if not (x in seen or seen.add(x))]
+    return deduped
+
+
 @dataclasses.dataclass(frozen=True)
 class DataConfigFactory(abc.ABC):
     # The LeRobot repo id.
     repo_id: str = tyro.MISSING
+    # Optional: path to a YAML/JSON/TXT listing multiple dataset roots to concat for training.
+    # 支持三种格式, 用扩展名区分:
+    #   .yaml/.yml  — {roots: [path, path, ...]}  或顶层直接 list
+    #   .json       — [{"root": path}, ...]  或顶层 list[str]
+    #   .txt        — 每行一个路径, 井号 '#' 注释与空行会被忽略
+    # 提供时 create_base_config 会把解析结果写进 DataConfig.repo_ids;
+    # data_loader.create_torch_dataset 看到 repo_ids 就 ConcatDataset 多路数据。
+    # `repo_id` 仍用作 asset_id 回退 (norm stats 所在资产目录), 所以要么显式设
+    # `assets.asset_id`, 要么让 `repo_id` 指向任一有 norm_stats 的 dataset。
+    datasets_yaml: str | None = None
     # Determines how the assets will be loaded.
     assets: AssetsConfig = dataclasses.field(default_factory=AssetsConfig)
     # Base config that will be updated by the factory.
@@ -194,9 +272,15 @@ class DataConfigFactory(abc.ABC):
     def create_base_config(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
         repo_id = self.repo_id if self.repo_id is not tyro.MISSING else None
         asset_id = self.assets.asset_id or repo_id
+        repo_ids = _load_repo_ids_yaml(self.datasets_yaml) if self.datasets_yaml else None
+        if repo_ids and not repo_id:
+            # datasets_yaml 有但 repo_id 缺失: 退而求其次用第一个作为 asset_id 锚点
+            repo_id = repo_ids[0]
+            asset_id = asset_id or repo_id
         return dataclasses.replace(
             self.base_config or DataConfig(),
             repo_id=repo_id,
+            repo_ids=repo_ids,
             asset_id=asset_id,
             norm_stats=self._load_norm_stats(epath.Path(self.assets.assets_dir or assets_dirs), asset_id),
             use_quantile_norm=model_config.model_type not in (ModelType.PI0, ModelType.PI0_RTC),
@@ -1640,6 +1724,90 @@ _CONFIGS = [
         num_workers=2,
         batch_size=4,
         fsdp_devices=1,
+    ),
+    # Task P Stage 2: 8k steps + 2× LR + EMA 0.999 (best = step 3000).
+    # Val MAE@1 plateau around step 3000-4000 (0.0206); continued training overfit.
+    TrainConfig(
+        name="pi05_pick_place_box_kai0_unfreeze_8k",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_P/base",
+            default_prompt="pick and place in box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=2.5e-5, decay_steps=8_000, decay_lr=2.5e-6
+        ),
+        ema_decay=0.999,
+        num_train_steps=8_000,
+        keep_period=1_000,
+        save_interval=1_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_P/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+    ),
+    # Task P vision-unfreeze full-param (gf0 8×A100). Init from Task_A mixed_1.
+    # Mirror of pi05_stand_box_kai0_unfreeze_2k but for pick-and-place-in-box (Task_P).
+    TrainConfig(
+        name="pi05_pick_place_box_kai0_unfreeze_2k",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_P/base",
+            default_prompt="pick and place in box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=200, peak_lr=1.25e-5, decay_steps=2_000, decay_lr=1.25e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=2_000,
+        keep_period=500,
+        save_interval=500,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_P/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+    ),
+    # Task E vision-unfreeze full-param (gf1 8×A100). Init from Task_A mixed_1.
+    # T10 recipe (EMA+lowLR) but freeze_filter=None → vision+LLM+AE all trainable.
+    # 2000 steps × bs128 = 256k samples ~= 3.6 epochs (T10 was bs4×25k = 100k = 1.4ep).
+    # keep_period=500 preserves all 4 eval points, saves us from Task_P lost-best-ckpt bug.
+    TrainConfig(
+        name="pi05_stand_box_kai0_unfreeze_2k",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_E/base",
+            default_prompt="stand up the fallen box",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        # no freeze_filter → default nnx.Nothing → all params trainable
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=200, peak_lr=1.25e-5, decay_steps=2_000, decay_lr=1.25e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=2_000,
+        keep_period=500,
+        save_interval=500,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_E/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
     ),
     # Task E Phase-3 T14: T6 recipe + vision MLP LoRA r=16 (fixed init, w_b=0).
     # Test whether LoRA adds orthogonal value to the winning EMA+lowLR-from-kai0 stack.

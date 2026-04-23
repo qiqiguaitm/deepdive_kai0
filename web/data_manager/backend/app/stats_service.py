@@ -16,6 +16,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from .config import DATA_ROOT, STATS_DB_PATH
+from .layout import compound_to_subset_root, glob_all_episodes, path_to_compound
 from .models import EpisodeMeta, StatsBucket, StatsResponse
 
 CAMERAS = ("top_head", "hand_left", "hand_right")
@@ -23,42 +24,43 @@ EPISODE_RE = re.compile(r"episode_(\d+)\.parquet$")
 
 
 def _parse_episode_path(p: Path) -> Optional[dict]:
-    """匹配 .../<TASK_DIR>/<subset>/data/chunk-XXX/episode_NNNNNN.parquet
-    新布局 TASK_DIR = Task_<X>_<YYYY-MM-DD>; 旧布局 TASK_DIR = Task_<X>。
-    我们把整段第一层目录名当作 'task_id', 让 UI/DB 自然按日期分组。"""
-    try:
-        rel = p.resolve().relative_to(DATA_ROOT)
-    except ValueError:
+    """匹配 episode_NNNNNN.parquet, 新老布局都走 layout.path_to_compound 统一解析。
+    返回的 task_id 始终是 compound 形式 ('Task_A_2026-04-16'), 与 DB/UI 对齐。"""
+    parsed = path_to_compound(p)
+    if parsed is None:
         return None
-    parts = rel.parts
-    if len(parts) < 5 or parts[-3] != "data" or not parts[-2].startswith("chunk-"):
-        return None
-    m = EPISODE_RE.search(parts[-1])
+    compound, subset = parsed
+    m = EPISODE_RE.search(p.name)
     if not m:
         return None
+    # chunk dir 总是倒数第二段
+    try:
+        chunk = p.parent.name
+    except Exception:  # noqa: BLE001
+        chunk = "chunk-000"
     return {
-        "task_id": parts[0],   # 含日期 e.g. "Task_A_2026-04-16"
-        "subset": parts[1],
-        "chunk": parts[-2],
+        "task_id": compound,
+        "subset": subset,
+        "chunk": chunk,
         "episode_id": int(m.group(1)),
         "parquet_path": str(p),
     }
 
 
 def _expected_videos(task_id: str, subset: str, chunk: str, ep_id: int) -> dict[str, Path]:
-    base = DATA_ROOT / task_id / subset / "videos" / chunk
+    base = compound_to_subset_root(task_id, subset) / "videos" / chunk
     return {cam: base / cam / f"episode_{ep_id:06d}.mp4" for cam in CAMERAS}
 
 
 def _expected_depths(task_id: str, subset: str, chunk: str, ep_id: int) -> dict[str, Path]:
-    """新增: depth zarr 目录路径, 同 video 平行, key 加 _depth 后缀."""
-    base = DATA_ROOT / task_id / subset / "videos" / chunk
+    """depth zarr 目录路径, 同 video 平行, key 加 _depth 后缀."""
+    base = compound_to_subset_root(task_id, subset) / "videos" / chunk
     return {cam: base / f"{cam}_depth" / f"episode_{ep_id:06d}.zarr" for cam in CAMERAS}
 
 
 def _read_meta_lookup(task_id: str, subset: str) -> dict[int, dict]:
     """读 meta/episodes.jsonl，返回 episode_id -> meta dict。"""
-    fp = DATA_ROOT / task_id / subset / "meta" / "episodes.jsonl"
+    fp = compound_to_subset_root(task_id, subset) / "meta" / "episodes.jsonl"
     out: dict[int, dict] = {}
     if not fp.exists():
         return out
@@ -101,9 +103,8 @@ class StatsService:
         DATA_ROOT.mkdir(parents=True, exist_ok=True)
         rows: list[tuple] = []
         meta_cache: dict[tuple[str, str], dict[int, dict]] = {}
-        # Glob 放宽到 */*: 既能匹配旧 Task_A 也能匹配新 Task_A_2026-04-16,
-        # 第一层目录名整段进 task_id (见 _parse_episode_path 注释).
-        for parquet in DATA_ROOT.glob("*/*/data/chunk-*/episode_*.parquet"):
+        # glob_all_episodes 同时覆盖老扁平 (TASK_DATE/SUB/...) 和新层级 (TASK/DATE/SUB/...)
+        for parquet in glob_all_episodes():
             info = _parse_episode_path(parquet)
             if info is None:
                 continue
@@ -261,13 +262,9 @@ class StatsService:
     def next_episode_id(self, task_dir: str, subset: str) -> int:
         """直接扫盘目录下已存在的 episode_NNNNNN.parquet, 返回 max+1。
 
-        以前是查 SQLite 里 task_id 的最大值; 但 SQLite 的 task_id 是 *已带日期的目录名*
-        (e.g. 'Task_A_2026-04-16'), 而 recorder 一开始传进来的是 *裸 task* (e.g. 'Task_A'),
-        匹配不上 → 永远返回 0 → 每次保存覆盖 episode_000000.
-
-        改为扫真实目录: 不依赖 DB 一致性, 也能正确处理外部脚本删除/搬运 episode 的情况.
-        task_dir 必须是已带日期后缀的目录名 (recorder.dated_task_name 计算)."""
-        parquet_dir = DATA_ROOT / task_dir / subset / "data" / "chunk-000"
+        task_dir 必须是 compound (带日期) 形式, e.g. 'Task_A_2026-04-16';
+        走 layout.compound_to_subset_root 解析到真实磁盘路径 (新层级或老扁平都可)."""
+        parquet_dir = compound_to_subset_root(task_dir, subset) / "data" / "chunk-000"
         max_id = -1
         if parquet_dir.is_dir():
             for p in parquet_dir.glob("episode_*.parquet"):

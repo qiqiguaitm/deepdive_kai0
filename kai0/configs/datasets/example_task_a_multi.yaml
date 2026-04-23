@@ -1,0 +1,24 @@
+# Multi-dataset training example — enumerate several LeRobot v2.1 roots;
+# data_loader.create_torch_dataset will ConcatDataset them and train jointly.
+#
+# Paths can be:
+#   * local absolute path to a LeRobot dataset root (contains data/, videos/, meta/)
+#   * Hugging Face repo id (e.g. "physical-intelligence/libero")
+#
+# Training CLI (pass path via --data.datasets_yaml):
+#   uv run scripts/train.py pi05_task_a_multi \
+#       --exp_name=demo \
+#       --data.datasets_yaml=configs/datasets/example_task_a_multi.yaml
+#
+# Norm stats (important):
+#   The ConcatDataset uses ONE shared normalization (from DataConfigFactory.assets.asset_id).
+#   Make sure that asset_id's norm_stats.json represents *all* the datasets listed here,
+#   otherwise the stats will fit only one dataset and the rest will be poorly normalized.
+#   To compute/merge: run scripts/compute_norm_states_fast.py against each root and merge,
+#   or (simpler) compute against a representative canonical root and live with the bias.
+
+roots:
+  # Task_A, 同 operator/场景, 跨两天采集 → 合并训练提高多样性
+  - /transfer-shanghai/KAI0/Task_A/2026-04-16/base
+  - /transfer-shanghai/KAI0/Task_A/2026-04-17/base
+  # (按需继续追加, 每行一个)

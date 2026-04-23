@@ -161,6 +161,22 @@ def put_session(req: SessionReq):
     }
 
 
+# -------- data sync (gf0/gf1) --------
+@app.get("/api/sync/status")
+def get_sync_status():
+    from . import sync as _sync
+    return _sync.status()
+
+
+@app.post("/api/sync/all")
+def post_sync_all(only_task: Optional[str] = None, _: Role = Depends(require_admin)):
+    """管理员触发: 把 DATA_ROOT 下所有 (task,date,subset) 批量推到远端。
+    每个 subset 一个后台线程, 本接口立即返回排队数。"""
+    from . import sync as _sync
+    n = _sync.sync_all(only_task=only_task)
+    return {"queued": n}
+
+
 # -------- stats --------
 @app.get("/api/stats", response_model=StatsResponse)
 def get_stats():
