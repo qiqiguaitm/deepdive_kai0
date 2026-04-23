@@ -248,6 +248,12 @@ class Recorder:
         self.episode_id: Optional[int] = None
         self.error: Optional[str] = None
 
+        # 踏板 toggle 用: 记住上一次通过 /api/recorder/start 传入的 template_id +
+        # operator, 这样 IDLE 下只有外设触发也能启动 (首次仍需 UI 点一次"开始",
+        # 或在 IDLE 下用 UI 只选择/提交而已). 不写磁盘, 进程重启后清空.
+        self.last_template_id: Optional[str] = os.environ.get("KAI0_DEFAULT_TEMPLATE") or None
+        self.last_operator: Optional[str] = os.environ.get("KAI0_DEFAULT_OPERATOR") or None
+
         self._writer: Optional[_EpisodeWriter] = None
         self._worker: Optional[threading.Thread] = None
         self._stop_evt = threading.Event()
@@ -280,6 +286,9 @@ class Recorder:
             self.prompt = tpl.prompt
             self.operator = req.operator
             self.template_id = tpl.id
+            # toggle 用的粘性记忆: 保存到任何 start 成功就会更新一次
+            self.last_template_id = tpl.id
+            self.last_operator = req.operator
             # 必须传 *已带日期* 的目录名 (与磁盘上 _task_subset_root 一致),
             # 否则 next_episode_id 在 DB / 目录里都查不到匹配, 永远返回 0,
             # 每次保存都用 episode_000000.* 覆盖前一条 (这就是历史 bug 的来源).
@@ -342,6 +351,56 @@ class Recorder:
         if task and subset and ep_id is not None:
             stats.upsert_one(_task_subset_root(task, subset) / "data" / "chunk-000" / f"episode_{ep_id:06d}.parquet")
         return {"saved_episode_id": ep_id, "task_id": task, "subset": subset}
+
+    def toggle(self, snapshot_fn) -> dict:
+        """鼠标按钮之外的第二路启停入口 (踏板用).
+
+        snapshot_fn: 延迟调用 status_hub.snapshot, 避免 recorder → status_hub 的反向
+                     依赖 (status_hub 已经 import recorder).
+
+        返回 {"action": "started"|"saved"|"rejected", "reason": ..., ...}
+        状态码层面由 main.py 翻译: rejected → 409, 其他 → 200.
+        """
+        from .preflight import collect_failures
+
+        with self._lock:
+            st = self.state
+            if st == "SAVING":
+                return {"action": "rejected", "reason": "saving in progress",
+                        "state": st}
+            if st == "ERROR":
+                return {"action": "rejected", "reason": f"recorder error: {self.error}",
+                        "state": st}
+
+            if st == "RECORDING":
+                # 不做 preflight — 正在录的中途硬件掉线了也要能停; 不然数据丢了
+                res = self.save(SaveRecordingReq(success=True, note="pedal", scene_tags=[]))
+                return {"action": "saved", **res}
+
+            # IDLE: 需要 (1) 已有 last_template/operator, (2) preflight 通过
+            tpl_id = self.last_template_id
+            op = self.last_operator
+            if not tpl_id or not op:
+                return {"action": "rejected",
+                        "reason": "no template/operator remembered; click 开始 once from UI or set KAI0_DEFAULT_TEMPLATE/OPERATOR",
+                        "state": st}
+
+        # 把 snapshot+preflight 放到锁外做, 避免长时间持锁阻塞 capture_loop
+        try:
+            snap = snapshot_fn()
+        except Exception as e:  # noqa: BLE001
+            return {"action": "rejected", "reason": f"status snapshot failed: {e}"}
+        fails = collect_failures(snap)
+        if fails:
+            return {"action": "rejected", "reason": "preflight failed",
+                    "failures": fails, "state": "IDLE"}
+
+        # 再拿锁启动 (期间状态若被人抢先变了也安全, start() 自己会再校验 IDLE)
+        try:
+            res = self.start(StartRecordingReq(template_id=tpl_id, operator=op))
+        except (RuntimeError, ValueError) as e:
+            return {"action": "rejected", "reason": str(e)}
+        return {"action": "started", **res}
 
     # ---------- 内部 ----------
     def _capture_loop(self) -> None:

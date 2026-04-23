@@ -15,8 +15,11 @@
 # 环境变量 (传递给 run.sh):
 #   SKIP_ARMS=1        跳过机械臂
 #   SKIP_CAMERAS=1     跳过相机
+#   SKIP_PEDAL=1       跳过 USB 踏板监听 (默认启用; 无踏板硬件时会被重试循环自动退避)
 #   SKIP_DEPS=1        跳过后端 pip 依赖同步
 #   KAI0_DATA_ROOT=... 采集落盘根目录 (默认 /data1/DATA_IMP/KAI0)
+#   PEDAL_VID/PEDAL_PID/PEDAL_KEY/PEDAL_EDGE/PEDAL_DEBOUNCE_MS
+#                      踏板硬件参数覆盖, 详见 web/data_manager/backend/tools/pedal_listener.py
 ###############################################################################
 
 set -eo pipefail

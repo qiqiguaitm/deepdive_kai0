@@ -9,3 +9,4 @@ Pillow>=10.0  # JPEG encoding for camera MJPEG endpoint
 av>=12.0  # PyAV: AV1/H.264 mp4 encoding for episode recording
 pyarrow>=15.0  # LeRobot v2.1 Parquet writer
 zarr>=2.18,<3  # Depth (uint16) per-episode chunked store, training-friendly
+evdev>=1.7  # USB foot-pedal listener → /api/recorder/toggle

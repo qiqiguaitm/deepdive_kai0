@@ -11,9 +11,12 @@
 #   SETUP_CAN=1        启动时激活 CAN（默认跳过；假设已经手动激活过）
 #   SKIP_ARMS=1        跳过机械臂节点
 #   SKIP_CAMERAS=1     跳过相机节点
+#   SKIP_PEDAL=1       跳过 USB 踏板监听
 #   SKIP_DEPS=1        跳过后端 pip 依赖同步（默认每次 start 会同步）
 #   KAI0_DATA_ROOT=... 采集落盘根目录（默认 /data1/DATA_IMP/KAI0, 与项目目录隔离避免误删）
 #   KAI0_ROS_BRIDGE=mock  强制 mock（无 ROS2 环境时调试用）
+#   PEDAL_VID/PEDAL_PID/PEDAL_KEY/PEDAL_EDGE/PEDAL_DEBOUNCE_MS
+#                       踏板硬件参数覆盖 (见 backend/tools/pedal_listener.py)
 
 set -u
 # ros2 孤儿清理: pkill -f ros2 只能匹配到 `ros2 launch` 封装进程,
@@ -47,7 +50,7 @@ ACTIVATE_CAN="$REPO_ROOT/piper_tools/activate_can.sh"
 START_TELEOP="$REPO_ROOT/start_scripts/start_teleop.sh"
 LAUNCH_3CAM="$REPO_ROOT/start_scripts/launch_3cam.py"
 
-SERVICES=(arms cameras backend frontend)
+SERVICES=(arms cameras backend frontend pedal)
 
 # 服务 → 监听端口 (用于孤儿清理)。没监听端口的服务 (arms/cameras) 留空。
 # 历史背景: 之前 start_svc 用 $! 写 pidfile, 抓到的是瞬死的 setsid 父 PID,
@@ -197,6 +200,57 @@ do_start() {
     # 5) 前端
     start_svc frontend "cd '$FRONTEND_DIR' && npm run dev -- --host"
 
+    # 6) USB 踏板 (可选). 需要 tim 在 input 组 (或 udev 规则把踏板 VID:PID 放开),
+    #    否则会报 PermissionError. 见 config/99-kai0-pedal.rules.
+    #
+    # 关键坑: `gpasswd -a tim input` 之后, **已经打开的 shell 仍不带 input 组**
+    # (Linux 组成员关系登录时固化). 所以即便 DB 说 tim 在 input 里, $$ 的 Groups
+    # 可能没有 input → 子进程继承不到 → evdev 打不开 /dev/input/eventN.
+    # 解决: 用 `sg input -c "..."` 在 fork 点加上 input supplementary group,
+    # 避免强制用户重新登录. 前提是 tim 已经加入 input DB (否则 sg 会问密码).
+    if [[ "${SKIP_PEDAL:-0}" != "1" ]]; then
+        local pedal_py="$BACKEND_DIR/tools/pedal_listener.py"
+        if [[ ! -f "$pedal_py" ]]; then
+            warn "pedal listener missing: $pedal_py (skipping)"
+        else
+            # 等 backend 起来 (toggle endpoint 可达) 再启踏板; 避免冷启动 race.
+            for i in 1 2 3 4 5 6 7 8 9 10; do
+                curl -fs --max-time 1 "http://127.0.0.1:8787/api/health" >/dev/null 2>&1 && break
+                sleep 1
+            done
+
+            local user; user="$(id -un)"
+            local in_input_db=0
+            if getent group input | awk -F: '{print $4}' | tr ',' '\n' | grep -qx "$user"; then
+                in_input_db=1
+            fi
+            local pedal_cmd="'$BACKEND_DIR/.venv/bin/python' '$pedal_py'"
+            local cur_groups; cur_groups="$(id -G)"
+            local input_gid; input_gid="$(getent group input | cut -d: -f3)"
+            if [[ "$in_input_db" == "1" ]] && [[ -n "$input_gid" ]] \
+                    && ! echo " $cur_groups " | grep -q " $input_gid "; then
+                # 在 DB 但不在当前进程 creds → 用 sg 加上
+                if command -v sg >/dev/null 2>&1; then
+                    log "pedal: current shell lacks 'input' group in creds; wrapping with sg"
+                    # sg 要求整条命令是一个字符串; 外层 setsid bash -c '... eval $1 ...'
+                    # 已经 eval 一次, 所以这里传给 sg 的 -c 参数需要保持原样引号.
+                    pedal_cmd="exec sg input -c \"$pedal_cmd\""
+                else
+                    warn "pedal: user '$user' in 'input' DB but not in current process creds, "
+                    warn "      and 'sg' not found. Re-login (or run from a new shell) before starting."
+                    pedal_cmd="exec $pedal_cmd"
+                fi
+            elif [[ "$in_input_db" != "1" ]]; then
+                warn "pedal: user '$user' is NOT in 'input' group. pedal will log a warning and idle."
+                warn "      Fix once: sudo gpasswd -a $user input   (then re-run this script)"
+                pedal_cmd="exec $pedal_cmd"
+            else
+                pedal_cmd="exec $pedal_cmd"
+            fi
+            start_svc pedal "$pedal_cmd"
+        fi
+    fi
+
     echo
     log "all services launched."
     log "  前端:  http://$(hostname -I | awk '{print $1}'):5173/"
@@ -206,7 +260,7 @@ do_start() {
 
 do_stop() {
     # 按启动反序停
-    for svc in frontend backend cameras arms; do
+    for svc in pedal frontend backend cameras arms; do
         stop_svc "$svc"
     done
     # stop_svc 走 pidfile, 可能漏掉 pidfile 失同步的 ros2 子进程, 兜底清一次.

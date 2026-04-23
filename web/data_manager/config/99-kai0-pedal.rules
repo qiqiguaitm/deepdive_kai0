@@ -1,0 +1,21 @@
+# kai0 USB foot-pedal — relax /dev/input/event* perms for the pedal so the
+# listener daemon can run as the desktop user (no sudo required).
+#
+# Default matches the STM32-based pedal we ship (lsusb mis-labels it as
+# "STMicroelectronics LED badge"). Adjust idVendor/idProduct for other models;
+# the listener itself is driven by PEDAL_VID / PEDAL_PID env vars.
+#
+# Install:
+#   sudo cp web/data_manager/config/99-kai0-pedal.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload
+#   sudo udevadm trigger
+# Unplug / replug the pedal, or run the trigger above, to re-apply.
+#
+# Verify:
+#   ls -l /dev/input/by-id/usb-0483_5750-*  # should list as rw for group "input"
+#   getent group input                       # should contain user "tim"
+# If user isn't in `input`:
+#   sudo gpasswd -a tim input && newgrp input   # (or re-login)
+
+SUBSYSTEM=="input", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5750", \
+    MODE="0660", GROUP="input", TAG+="uaccess"

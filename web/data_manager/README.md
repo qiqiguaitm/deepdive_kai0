@@ -161,6 +161,62 @@ LeRobot 归档规范），视频端点会在线用 ffmpeg 转成 H.264 碎片 mp
 
 相机 `dropped` 计数仅用于 `CameraGrid` 展示，**不参与异常判定**，避免瞬时抖动刷红。
 
+## USB 踏板启停 (pedal service)
+`run.sh` 启动时会顺带拉起 `backend/tools/pedal_listener.py`, 把踏板键按下变成
+`POST /api/recorder/toggle` 调用, 和鼠标"开始/保存"按钮互斥共用后端状态机:
+- **IDLE → 启动**: 跑和前端一致的 preflight (ROS2/CAN/teleop/3 路相机 fps/recorder 错误/warnings),
+  任何一项失败都**不会**启动, 409 响应里带 `failures` 列表; 通过则用当前 session 里记到的
+  `template_id` + `operator` 启动
+  - Session 自动同步: 前端在用户改 task/prompt 下拉或敲操作员姓名时, 300ms 去抖后
+    PUT `/api/session` 推给后端 (App.tsx); 所以只要 UI 里选了 template + 填了姓名,
+    踏板立刻可用, 不需要先点一次"开始"
+  - 无头冷启动备选: 没 UI 的场景可 export `KAI0_DEFAULT_TEMPLATE` + `KAI0_DEFAULT_OPERATOR`,
+    后端启动时读入作为初始 session; 或直接 `curl -X PUT .../api/session -d '{...}'`
+- **RECORDING → 保存**: `success=True, note=pedal, scene_tags=[]` 一键完结; 想带
+  结果/场景标签/备注还是用鼠标按钮
+- **SAVING / ERROR**: 一律拒绝
+- 互斥由后端 `Recorder._lock` 保证, 鼠标踏板连按、两人同时按都不会 double-start
+
+设备识别按 **VID:PID** 做, 不绑 `/dev/input/eventN`, 换 USB 口无需改配置;
+默认匹配我们手上的踏板 (STM32 `0483:5750`, 映射 F3). 其他型号改:
+```bash
+SKIP_PEDAL=1                           # 不启用
+PEDAL_VID=0483 PEDAL_PID=5750          # 换踏板时用 lsusb 查 VID:PID
+PEDAL_KEY=KEY_F3                       # 或 KEY_F4 / KEY_A ... (见 evdev.ecodes)
+PEDAL_EDGE=release                     # release(松开触发, 默认) | press(踩下)
+PEDAL_DEBOUNCE_MS=500                  # 两次 toggle 最小间隔
+```
+
+热插拔: listener 启动时 / 运行中掉线时会回到 "按 VID:PID 扫描 → 2s 退避重试"
+循环; 用 `evdev.grab()` 独占, 防止按键串入终端/浏览器触发 F3 快捷键.
+
+**权限 (一次性设置)** — `/dev/input/event*` 默认 `crw-rw----  root:input`, 非 root 必须
+在 `input` 组. 两条路二选一:
+
+1. **加用户进 input 组** (推荐, 一劳永逸):
+   ```bash
+   sudo gpasswd -a "$USER" input && newgrp input  # 或直接重新登录
+   ```
+
+2. **udev 规则** (只对这只踏板放权, 最小权限):
+   ```bash
+   sudo cp config/99-kai0-pedal.rules /etc/udev/rules.d/
+   sudo udevadm control --reload && sudo udevadm trigger
+   # 如需换不同 VID:PID 的踏板, 先编辑规则里的 idVendor/idProduct
+   ```
+
+验证:
+```bash
+./run.sh status      # pedal 一行应该 running
+./run.sh logs pedal  # 应该看到 "grabbed /dev/input/event... (HID 0483:5750)"
+# 踩一下踏板, 日志出现: "pedal fired ... toggle 200 in ... ms: ..."
+```
+
+若 `pedal failed to start`, 查 `logs/pedal.log`:
+- `PermissionError: [Errno 13] Permission denied: '/dev/input/eventN'` → 权限没配
+- `waiting for pedal VID:PID=0483:5750 ...` 一直不变 → 踏板没插 / VID:PID 对不上,
+  先跑 `lsusb | grep -i <型号关键字>` 确认
+
 ## 环境变量速查
 | 变量 | 作用 | 默认 |
 |------|------|------|
@@ -171,3 +227,8 @@ LeRobot 归档规范），视频端点会在线用 ffmpeg 转成 H.264 碎片 mp
 | `KAI0_ROS_BRIDGE` | `auto` / `mock` | `auto` |
 | `KAI0_JPEG_QUALITY` | MJPEG JPEG 质量 | `60` |
 | `KAI0_JPEG_STRIDE` | MJPEG 下采样 | `2` |
+| `KAI0_DEFAULT_TEMPLATE` | 踏板启动时的默认 template_id (IDLE 且无记忆时使用) | — |
+| `KAI0_DEFAULT_OPERATOR` | 踏板启动时的默认 operator (同上) | — |
+| `SKIP_PEDAL` | `1` 跳过踏板监听 | `0` |
+| `PEDAL_VID` / `PEDAL_PID` / `PEDAL_KEY` / `PEDAL_EDGE` / `PEDAL_DEBOUNCE_MS` | 踏板参数覆盖 | 见上 |
+| `BACKEND_URL` | 踏板调 toggle 的后端 URL | `http://127.0.0.1:8787` |

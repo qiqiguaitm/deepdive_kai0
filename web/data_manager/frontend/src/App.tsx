@@ -55,6 +55,16 @@ export function App() {
     lastState.current = cur;
   }, [status?.recorder.state]);
 
+  // 把 tplId / operator 实时同步给后端 /api/session, 这样踏板等外设第一次就能
+  // 触发启动, 不用先点一次"开始". 300ms 去抖是为了敲名字时不逐键 PUT.
+  useEffect(() => {
+    if (!tplId && !operator) return;  // 都空: 没什么可同步
+    const h = window.setTimeout(() => {
+      api.setSession(tplId || null, operator || null).catch(() => { /* backend 暂时挂了, 下次再试 */ });
+    }, 300);
+    return () => window.clearTimeout(h);
+  }, [tplId, operator]);
+
   return (
     <div className="app">
       <StatusBar status={status} role={role} operator={operator} connected={connected} />

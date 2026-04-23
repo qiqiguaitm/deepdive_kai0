@@ -27,6 +27,13 @@ export const api = {
     req<{ deleted: boolean }>(`/api/templates/${id}`, { method: "DELETE" }),
 
   recorder: () => req<RecorderSnap>(`/api/recorder`),
+  // 前端把当前选择同步给后端, 供踏板等"无鼠标"入口冷启动用。
+  // template_id/operator 传 null 表示不改这一项; 传 "" 表示清空。
+  setSession: (template_id: string | null, operator: string | null) =>
+    req<{ template_id: string | null; operator: string | null }>(
+      `/api/session`,
+      { method: "PUT", body: JSON.stringify({ template_id, operator }) },
+    ),
   startRec: (template_id: string, operator: string) =>
     req<RecorderSnap>(`/api/recorder/start`, { method: "POST", body: JSON.stringify({ template_id, operator }) }),
   saveRec: (success: boolean, note: string, scene_tags: string[]) =>

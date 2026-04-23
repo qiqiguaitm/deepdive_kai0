@@ -7,6 +7,7 @@ from typing import Optional
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel
 
 from .episodes import (
     delete_episode,
@@ -107,6 +108,57 @@ def estop():
     bridge.emergency_stop()
     recorder.discard()
     return {"ok": True}
+
+
+@app.post("/api/recorder/toggle")
+def toggle_rec():
+    """鼠标按钮之外的第二路启停 (踏板 / 远程脚本可用).
+
+    IDLE→start(用上次记住的 template/operator, 先跑和前端一致的 preflight);
+    RECORDING→save(success=True, note=pedal);
+    SAVING/ERROR / 无记忆/preflight 失败 → 409 + reason (+failures).
+    """
+    res = recorder.toggle(hub.snapshot)
+    if res.get("action") == "rejected":
+        return JSONResponse(status_code=409, content=res)
+    return res
+
+
+@app.get("/api/recorder/preflight")
+def get_preflight():
+    """返回当前 snapshot 下的 failure 列表 (调试 / 踏板日志用)."""
+    from .preflight import collect_failures
+    snap = hub.snapshot()
+    return {"failures": collect_failures(snap), "state": snap.get("recorder", {}).get("state")}
+
+
+# -------- session (pedal / remote 冷启动依赖) --------
+# 前端每次改 template / operator 就 PUT 一次, 后端记到 recorder.last_* 里。
+# 这样踏板第一次就能触发启动, 不必先用鼠标点一次"开始"。
+class SessionReq(BaseModel):
+    template_id: Optional[str] = None
+    operator: Optional[str] = None
+
+
+@app.get("/api/session")
+def get_session():
+    return {
+        "template_id": recorder.last_template_id,
+        "operator": recorder.last_operator,
+    }
+
+
+@app.put("/api/session")
+def put_session(req: SessionReq):
+    # None = 不改; 空串 = 清除 (避免"选了但没保存"的幽灵状态)
+    if req.template_id is not None:
+        recorder.last_template_id = req.template_id or None
+    if req.operator is not None:
+        recorder.last_operator = req.operator or None
+    return {
+        "template_id": recorder.last_template_id,
+        "operator": recorder.last_operator,
+    }
 
 
 # -------- stats --------
