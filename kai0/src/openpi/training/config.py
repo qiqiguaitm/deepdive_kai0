@@ -1779,6 +1779,36 @@ _CONFIGS = [
         inline_eval_n_frames=200,
         inline_eval_every=1,
     ),
+    # Task_A mixed (visrobot01 + existing base + existing dagger).
+    # Used by dynamic dataset workflow (train_scripts/launch/dynamic_dataset_train.sh).
+    # Data built by train_scripts/data/build_task_a_mixed.py (equal N per source).
+    # With --val-size 21 → stratified 7-ep val per source.
+    # Init from Task_A/mixed_1 (kai0 MA-merged, 90% real-robot baseline).
+    TrainConfig(
+        name="pi05_flatten_fold_mixed_visrobot01",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A_mixed_gf1/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1.5e-5, decay_steps=12_000, decay_lr=1.5e-6
+        ),
+        ema_decay=0.999,
+        num_train_steps=12_000,
+        keep_period=1_000,
+        save_interval=1_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_A_mixed_gf1/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+    ),
     # Task E vision-unfreeze full-param (gf1 8×A100). Init from Task_A mixed_1.
     # T10 recipe (EMA+lowLR) but freeze_filter=None → vision+LLM+AE all trainable.
     # 2000 steps × bs128 = 256k samples ~= 3.6 epochs (T10 was bs4×25k = 100k = 1.4ep).
