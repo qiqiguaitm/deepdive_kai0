@@ -2,13 +2,14 @@
 
 > **作用**：集成本机所有 "freeze PaliGemma + 仅训 Action Expert" 类微调实验的历史记录与结果，**含每步 inline-eval MAE@{1,10,25,50} 完整曲线**。
 > **范围**：Task E（扶起倒箱）+ Task P（抓放盒子）+ 相关全参数对照实验。
-> **最近更新**：2026-04-25
+> **最近更新**：2026-04-25 23:30 CST (Task A 系列首次归档)
 > **数据来源**：`logs/train_*.log` 中 `[inline-eval] step=N MAE@1=… @10=… @25=… @50=…` 行（9 val ep × 20 frames，~30s/eval），与 `logs/eval_history_v2/v2_step_*.json` 离线归档（9 val ep × 50 queries）。
 > **命名前缀 `00_` 用于按文件名排序时置顶。**
 >
 > **关联详细文档**：
 > - `taskE_master_plan.md` — Task E 完整规划与所有 Phase 1/2 实验细节
 > - `task_p_unfreeze_8k_20k_analysis.md` — Task P 全参数解冻对照
+> - **`task_a_visrobot01_mixed_series_results.md`** — Task A 全参数微调系列 (mixed_gf0_173 / visrobot01_only / mix_vis600 / pure_vis600)
 > - `kai0_mixed_1_results.md` — Task A 迁移 init 来源
 > - `training_plans.md` — kai0_mixed_1 / kai0_full 训练 recipe
 > - `project_complete_guide.md` — freeze_filter / inline eval 总览
@@ -45,16 +46,24 @@
 | 对照 | unfreeze_8k ⚡ | Task P | base 24k frames | 8k | 3000 | 0.0206 | 0.0380 | 0.0610 | 0.0806 |
 | 对照 | p_t10_allgood_25k | Task P | base_allgood | 25k | 14000 | 0.0626 | 0.0860 | 0.1265 | 0.1842 |
 | 对照 | p_v3_kai0init (P-T10) | Task P | base 24k frames + freeze | 15k | 6000 | 0.0703 | 0.0965 | 0.1380 | 0.1950 |
+| Task A | **mixed_gf0_173** ⚡ | Task A | mix 173+173+173 ep | 13k | 9000 | **0.0129** | 0.0296 | 0.0521 | 0.0786 |
+| Task A | visrobot01_only_v1 (B end) ⚡ | Task A | vis_base 288+22 (Phase A→B) | 12k | 11999 | 0.0171 | 0.0373 | 0.0625 | 0.0943 |
+| Task A | visrobot01_only_v1 (Phase A end) ⚡ | Task A | visrobot01-only 193+17 | 9k | 9000 | 0.0179 | 0.0389 | 0.0648 | 0.0974 |
+| Task A | visrobot01_only_2k_gf0 ⚡ | Task A | visrobot01-only 193+17 | 2k | 1999 | 0.0202 | 0.0411 | 0.0680 | 0.1017 |
+| Task A | mix_vis600_v1 ⏳ | Task A | mix 310+145+145 (40k) | 40k | (running) | (TBD) | — | — | — |
+| Task A | pure_vis600_v1 ⏳ | Task A | 309 orig + 291 hflip mirror (40k) | 40k | (running) | (TBD) | — | — | — |
 
 ¹ E3 (combo) 在 step ~8k 因 GPU 1 NUMA SIGSEGV 中断，best 在 step 12000 之前；step 10000=0.0284, step 12000=0.0277。
 ² v2 训练超过 nominal 15k 步，step 16000 实测最佳 (0.0382)；master plan 中 0.0411@14000 是 canonical 数。
 ³ bs=64/128 series 没做 LR 缩放 → 大 bs 下 effective LR 过低 → 早期反而更差，且 long-horizon (@50) 严重退化（0.21+）。
-⚡ Task P 用 8×A100 全解冻，与 Task E 不同基线，**仅供对照**，不在同一榜单。
+⚡ Task P / Task A 用 8×A100 全解冻，与 Task E 不同基线，**仅供对照**，不在同一榜单。
+⏳ 训练中，详见 `task_a_visrobot01_mixed_series_results.md`。
 
 **核心修正**（vs 上一版）：
 1. **真正的 Task E 最佳是 t10_allgood_25k = 0.0233**，不是 E2 的 0.0262。允许更长训练 + "allgood" 增广数据后，性能再下一台阶（-12%）。
 2. **t6/t10/t14/t15/t16 系列**（kai0_allgood + 长训）此前未在 master plan 中归档，本汇总首次系统化。
 3. v3 / v5 / v3e_lowlr / v3e_ema / t7 等 best step 已用完整曲线核实。
+4. **Task A 系列首次归档** (2026-04-25): mixed_gf0_173 = 0.0129, visrobot01_only B end = 0.0171, 详见 `task_a_visrobot01_mixed_series_results.md`。
 
 **两条核心结论**：
 1. Task E 小数据（64 ep base）：action-only + 短训打到 ~0.033；用 base_allgood（增广扩到 ~256 ep 等价规模）+ 25k 步可压到 **0.0233**，比 v2 基线 -43%。
@@ -395,6 +404,48 @@ freeze_filter = nnx.All(
 4. **过拟合识别 3 标志**（来自 unfreeze_20k）：val MAE 反弹 +3-5%；train_loss/val_MAE gap > 10×；gradient norm 继续降但 val 不动 → 过拟合震荡。
 5. **早停信号**：必须用 val MAE@1，不能用 train_loss（unfreeze_8k step 7999 train=0.0009 但 val MAE=0.0219，gap 24×）。
 
+### 3.6 Task A — 全解冻全参数微调系列（gf0/gf1，2026-04-24 ~ 04-26）
+
+> **完整 per-step 曲线**: `task_a_visrobot01_mixed_series_results.md`
+> 全部 init from `Task_A/mixed_1/params`，全部 8×A100 FSDP=8 bs=128，全部 cosine schedule。
+
+#### mixed_gf0_173 (gf0, 13k 步) ✅
+| step | MAE@1 | @10 | @25 | @50 |
+|---:|---:|---:|---:|---:|
+| 1000 | 0.0153 | 0.0352 | 0.0647 | 0.1020 |
+| 5000 | 0.0133 | 0.0303 | 0.0532 | 0.0804 |
+| 7000 | 0.0130 | 0.0298 | 0.0523 | 0.0789 |
+| **9000** | **0.0129** | 0.0296 | 0.0521 | 0.0786 |
+| 12999 | 0.0129 | 0.0296 | 0.0520 | 0.0785 |
+
+step 7-12999 完全 plateau。519 ep mix (173 vis + 173 base + 173 dagger) → MAE@1=0.0129。
+
+#### visrobot01_only_v1 (gf1, Phase A 9k → Phase B --resume 12k) ✅
+| step | MAE@1 | val | 阶段 |
+|---:|---:|---|---|
+| 1000 | 0.0241 | 17 ep | A |
+| 5000 | 0.0183 | 17 ep | A |
+| 8000 | 0.0179 | 17 ep | A |
+| 9000 | **0.0179** | 17 ep | A end (plateau) |
+| 10000 | 0.0175 | 22 ep | B (vis_base 288 ep 重建) |
+| 11000 | 0.0172 | 22 ep | B |
+| **11999** | **0.0171** | 22 ep | B end |
+
+⚠️ Phase A vs B val 集不同, 不可直接比 (17 ep 单日期 vs 22 ep 跨 3 日期)。Phase B 内部 step-step 同 val 可比。
+
+**关键发现**: 在 Phase A 完全 plateau (step 8-9k) 后, 加 95 个新 vis_base ep + 极低 LR (3.66e-6 → 1.5e-6) 续训, 仍能压低 4.5%。续训突破 plateau 是真信号 (不是 LR 退火噪声)。
+
+#### visrobot01_only_2k_gf0 (gf0, 2k sanity) ✅
+step 1999 MAE@1=0.0202。同样数据 2k 比 9k (Phase A) 差 11%。
+
+#### mix_vis600_v1 (gf0, 40k 长训) ⏳ 进行中
+540 train (310 vis + 145 base + 145 dagger) + 60 val。peak_lr=1.5e-5, ema=0.9999, save_interval=2k。
+
+**Note**: step 2k/4k/6k 三次 inline-eval 失败 (val ep 35 引用 corrupt source mp4 `vis_base/2026-04-24/ep_53/hand_left.mp4`)，已于 step 6740 修复 (移除 val ep 35, 60→59)。step 8000 起出有效 MAE。
+
+#### pure_vis600_v1 (gf1, 40k 长训) ⏳ 刚启动
+560 train (309 orig + 291 hflip mirror) + 40 val (paired by source ep 防 hflip leakage)。**0 kai0 source**, 全部 visrobot01 域 + 镜像增强。与 mix_vis600 head-to-head 对照。
+
 ---
 
 ## 4. 关键工程经验（按通用性排序）
@@ -501,7 +552,17 @@ freeze_filter = nnx.All(
 | **unfreeze_8k** | `kai0/checkpoints/pi05_pick_place_box_kai0_unfreeze_8k/p_unfreeze_8k_v1/` | **3000 (0.0206)** |
 | **unfreeze_20k** 🥇 | `kai0/checkpoints/pi05_pick_place_box_kai0_unfreeze_20k/` | **4000 (0.0195)** |
 
-### 5.5 其他相关（探索性 / 已废弃）
+### 5.5 Task A 全参数微调 checkpoint (`task_a_visrobot01_mixed_series_results.md`)
+
+| exp | 路径 | best step (best @1) |
+|---|---|---|
+| **mixed_gf0_173_v1** | `/vePFS/.../checkpoints/pi05_flatten_fold_mixed_gf0/mixed_gf0_173_v1/` | 9000-12999 tied @ 0.0129 (推荐 12999) |
+| **visrobot01_only_v1** (Phase A end + Phase B end) | `/vePFS/.../checkpoints/pi05_flatten_fold_visrobot01_only/visrobot01_only_v1/` | A: 9000 (0.0179); B: **11999 (0.0171)** |
+| visrobot01_only_2k_gf0_v1 | `/vePFS/.../checkpoints/pi05_flatten_fold_visrobot01_only_2k/visrobot01_only_2k_gf0_v1/` | 1999 (0.0202) |
+| **mix_vis600_v1** ⏳ | `/vePFS/.../checkpoints/pi05_flatten_fold_mix_vis600/mix_vis600_v1/` | (训练中, ETA Sun 21:00 CST) |
+| **pure_vis600_v1** ⏳ | `/vePFS/.../checkpoints/pi05_flatten_fold_pure_vis600/pure_vis600_v1/` | (训练中, ETA Sun 23:00 CST) |
+
+### 5.6 其他相关（探索性 / 已废弃）
 
 | exp | 路径 | 状态 |
 |---|---|---|
