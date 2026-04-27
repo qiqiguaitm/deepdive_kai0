@@ -17,10 +17,10 @@
 | 2 | visrobot01_only_2k_gf0_v1 | gf0 | 2k | Task_A_visrobot01_only (193 train+17 val) | 1999 | 0.0202 | 短训 sanity, 与 v1 同源数据 |
 | 3 | visrobot01_only_v1 (Phase A) | gf1 | 9k | Task_A_visrobot01_only (193 train+17 val) | 8000-9000 | 0.0179 | step 8-9k plateau, dataset 路径迁移导致 crash |
 | 4 | visrobot01_only_v1 (Phase B, --resume) | gf1 | 9k → 12k | Task_A_visrobot01_only (288 train+22 val, vis_base 重建) | **11999** | **0.0171** | 续训突破 plateau, 4.5% 改善 |
-| 5 | **mix_vis600_v1** ⏳ | gf0 | 40k | mix_vis600 (310 vis + 145 base + 145 dagger; 540 train+60 val) | (running) | (待出) | 起 14:24 CST 25日, ETA Sun 21:00 CST |
-| 6 | **pure_vis600_v1** ⏳ | gf1 | 40k | pure_vis600 (309 orig + 291 hflip mirror; 560 train+40 val) | (running) | (待出) | 起 23:09 CST 25日, ETA Sun 23:00 CST |
+| 5 | **mix_vis600_v1** ✅ | gf0 | 40k | mix_vis600 (310 vis + 145 base + 145 dagger; 540 train+59 val) | **36000-39999 tied** | **0.0146** | 训完 33:21 hr, plateau @ step 30k |
+| 6 | **pure_vis600_v1** ⏳ | gf1 | 40k 部分 | pure_vis600 (309 orig + 291 hflip mirror; 560 train+40 val) | (running, step 13.7k @ 0.0201) | (TBD) | 步速慢 (8.4 s/step h264+av1 解码), 短期内不会完成 |
 
-⏳ = 训练中 (本次更新时未完成)
+⏳ = 训练中, ✅ = 已完成
 
 ---
 
@@ -179,7 +179,7 @@
 
 ---
 
-## 4. mix_vis600 (gf0, 40k 长训) ⏳ **进行中**
+## 4. mix_vis600 (gf0, 40k 长训) ✅ **已完成**
 
 ### 4.1 实验设定
 
@@ -188,54 +188,105 @@
 | config | `pi05_flatten_fold_mix_vis600` |
 | exp_name | `mix_vis600_v1` |
 | init | `Task_A/mixed_1/params` (冷启) |
-| data | `Task_A/self_built/mix_vis600/base` (540 train) + `mix_vis600/val` (60 val) |
-| 数据成分 | 310 vis_base + 145 kai0_base + 145 kai0_dagger; train 540 (vis 279 + base 131 + dag 130 stratified, 60 val 32+14+14) |
-| total frames | 487,052 (~10 epochs at 40k step) |
+| data | `Task_A/self_built/mix_vis600/base` (540 train) + `mix_vis600/val` (60 → **59** after corrupt fix) |
+| 数据成分 | 310 vis_base + 145 kai0_base + 145 kai0_dagger; train 540 (vis 279 + base 131 + dag 130 stratified, val 59 修复后) |
+| total frames | 487,052 (~10.6 epochs at 40k step) |
 | steps / bs / fsdp | 40,000 / 128 / 8 |
 | peak_lr / warmup / decay | 1.5e-5 / 1000 / cosine to 1.5e-6 over 40k |
 | ema_decay | **0.9999** (长训改用) |
 | save_interval / keep_period | 2000 / 2000 (20 ckpts × 12 GB) |
 | inline_eval_every | 1 (每 save_interval = 每 2k step) |
 
-### 4.2 训练状态 (本文档生成时)
+### 4.2 训练时间
 
-- 启动: 2026-04-25 18:25 CST (10:25 UTC)
-- 当前 step: ~7,500 / 40,000 (~19%)
-- 步速: 2.0-2.4 s/step (与 gf1 共存期间)
-- ETA 完成: **2026-04-26 21:00 CST (Sun 13:00 UTC)**
-- ckpts 已保存: 2000, 4000, 6000
+| 事件 | 时间 |
+|---|---|
+| 启动 | 2026-04-25 18:25 CST (10:25 UTC) |
+| 完成 | 2026-04-27 03:48 CST (Sun 19:48 UTC) |
+| **总耗时** | **33:21:43** (含 17 次 inline-eval ~10.8 hr + 20 次 ckpt save) |
+| ckpts 保存 | step 2000, 4000, ..., 38000, 39999 (20 个 × ~12 GB = ~240 GB) |
 
-### 4.3 inline-eval 历史 (注意: 早期失败已修复)
+### 4.3 完整 inline-eval 历史
 
-⚠️ **step 2000/4000/6000 三次 eval 全部失败**, 原因: val ep 35 symlink 指向 corrupt mp4 (`/vePFS/visrobot01/.../2026-04-24/.../episode_000053.mp4`, moov atom not found).
+⚠️ step 2000/4000/6000 三次 eval 失败, 原因: val ep 35 symlink 指向 corrupt mp4 (`vis_base/2026-04-24/.../episode_000053.mp4`, moov atom not found). 在 step 6740 时通过 `/tmp/fix_val_remove_ep35.py` 移除 val ep 35 并重编号 (60→59 ep)。**train 数据全程未受影响** (该 corrupt 源文件未被 train 引用)。
 
-修复时间: 2026-04-25 22:21 CST (step 6740 时), 通过 `/tmp/fix_val_remove_ep35.py` 移除 val ep 35 并重编号 (60 → 59 ep)。**train 数据全程未受影响** (该 corrupt 源文件未被 train 引用)。
+| step | MAE@1 | @10 | @25 | @50 | Δ vs 上一点 | 阶段 |
+|---:|---:|---:|---:|---:|---:|---|
+| 2000 | — | — | — | — | ❌ | failed (corrupt val ep 35) |
+| 4000 | — | — | — | — | ❌ | failed |
+| 6000 | — | — | — | — | ❌ | failed |
+| 8000 | 0.0189 | 0.0385 | 0.0672 | 0.1033 | (基线) | val 修复后首点, rapid 下降 |
+| 10000 | 0.0180 | 0.0363 | 0.0628 | 0.0957 | -4.8% | |
+| 12000 | 0.0173 | 0.0348 | 0.0601 | 0.0914 | -3.9% | |
+| 14000 | 0.0166 | 0.0338 | 0.0584 | 0.0887 | -4.0% | |
+| 16000 | 0.0161 | 0.0331 | 0.0573 | 0.0871 | -3.0% | |
+| 18000 | 0.0157 | 0.0326 | 0.0566 | 0.0859 | -2.5% | 减速 |
+| 20000 | 0.0154 | 0.0323 | 0.0561 | 0.0852 | -1.9% | |
+| 22000 | 0.0152 | 0.0321 | 0.0558 | 0.0846 | -1.3% | |
+| 24000 | 0.0150 | 0.0320 | 0.0556 | 0.0842 | -1.3% | |
+| 26000 | 0.0149 | 0.0320 | 0.0554 | 0.0839 | -0.7% | |
+| 28000 | 0.0148 | 0.0319 | 0.0554 | 0.0837 | -0.7% | |
+| 30000 | 0.0147 | 0.0319 | 0.0553 | 0.0835 | -0.7% | 准 plateau |
+| 32000 | 0.0147 | 0.0319 | 0.0553 | 0.0835 | 0.0% | **PLATEAU** |
+| 34000 | 0.0147 | 0.0320 | 0.0554 | 0.0834 | 0.0% | |
+| **36000** | **0.0146** | 0.0320 | 0.0554 | 0.0834 | -0.7% | **best 首次** |
+| **38000** | **0.0146** | 0.0320 | 0.0554 | 0.0834 | 0.0% | **best, 推荐部署** |
+| **39999** | **0.0146** | 0.0321 | 0.0555 | 0.0835 | 0.0% | final, @50 略差 |
 
-| step | MAE@1 | @10 | @25 | @50 | 备注 |
-|---:|---:|---:|---:|---:|---|
-| 2000 | — | — | — | — | ❌ failed (corrupt val ep 35) |
-| 4000 | — | — | — | — | ❌ failed |
-| 6000 | — | — | — | — | ❌ failed |
-| 8000 | (待出, ~23:00 CST) | | | | 首个有效点 |
+### 4.4 关键观察
 
-### 4.4 Train Loss 轨迹 (作为代理参考, 不能直接推 val MAE)
+- **完美收敛轨迹**: step 8k → 30k 单调下降 (0.0189 → 0.0147), 无 overfit rebound
+- **三连 best tied**: step 36000 / 38000 / 39999 全部 MAE@1=0.0146, 数值完全收敛
+- **Plateau 自 step 30k 起**: step 30k/32k/34k 全 = 0.0147, 之后微改善至 0.0146
+- **推荐部署 step**: **38000** (mid-plateau, 三连 best 中数值最稳, @50=0.0834 略好于 39999=0.0835)
+
+### 4.5 Train Loss 轨迹
 
 | step | train_loss | grad_norm | param_norm |
 |---:|---:|---:|---:|
 | 0 | 0.2269 | 1.2667 | 1804.34 |
 | 100 | 0.1338 | 0.6634 | 1804.34 |
-| 200 | 0.0355 | 0.1278 | 1804.34 |
 | 500 | 0.0202 | 0.0882 | 1804.35 |
 | 1000 | 0.0158 | 0.0841 | 1804.39 |
-| 2000 | 0.0112 | 0.0733 | 1804.54 |
 | 5000 | 0.0072 | 0.0660 | 1804.96 |
 | 7000 | 0.0061 | 0.0572 | 1805.22 |
+| 19400 | 0.0032 | 0.0486 | 1806.30 |
 
-收敛形态健康, 无发散/振荡。step 7000 train loss 已与 mixed_173 plateau 期相当 (后者 train loss 未记录但 val MAE 在 step 7k 才到 0.0130)。
+train loss 持续单调降, param_norm 缓增 (训练健康)。
+
+### 4.6 Checkpoint + 部署 tar 包
+
+```
+/vePFS/.../checkpoints/pi05_flatten_fold_mix_vis600/mix_vis600_v1/
+├── 2000/  4000/  ...  36000/  38000/  39999/   ★ 38000 推荐
+└── norm_stats.json
+```
+
+**部署 tar 包** (已打包, 2026-04-27 08:34 CST):
+- 路径: `/vePFS/tim/workspace/deepdive_kai0_tmp/data/mix_vis600_best_step38000.tar`
+- 大小: 11.6 GB (12,440,371,200 bytes)
+- 内容: `params/` + `_CHECKPOINT_METADATA` + `assets/` (不含 train_state)
+- MAE@1 = 0.0146, @10 = 0.0320, @25 = 0.0554, @50 = 0.0834
+
+### 4.7 与 mixed_gf0_173 关键对比 (反直觉)
+
+| 实验 | 数据 | 步数 | EMA | 终点 MAE@1 | val 集 |
+|---|---|---:|---|---:|---|
+| mixed_gf0_173_v1 | 519 ep mix (1:1:1) | 13k | 0.999 | **0.0129** | val ~50 ep |
+| mix_vis600_v1 | 540 ep mix (2:1:1) | 40k | 0.9999 | **0.0146** | val 59 ep |
+
+**mix_vis600 跑了 3× 步数 + 类似数据量, MAE 反而比 mixed_173 差 13%**。
+
+可能原因 (按可信度排序):
+1. **val 集不可比** (最可能): mixed_173 val 与 train 分布更近 (1:1:1 mix); mix_vis600 val 60 ep stratified 后 vis 比例更高 (32/60=53%), 可能更难
+2. **数据 composition**: mixed_173 是 1:1:1 等量; mix_vis600 是 ~2:1:1 (vis 主导), kai0 仅 290 ep, 模型对 kai0 域可能学得不充分
+3. **EMA=0.9999 + 长训** vs **EMA=0.999 + 短训**: 长训目标 plateau 更慢 (40k cosine 平均 LR 比 13k cosine 高), 但已 plateau 应饱和
+
+**真正的对比需要在共同 test 集上做** (e.g., sim01 真机 / 共同 hold-out val)。inline-eval MAE 不绝对可比。
 
 ---
 
-## 5. pure_vis600 (gf1, 40k 长训) ⏳ **刚启动**
+## 5. pure_vis600 (gf1, 40k 长训) ⏳ **进行中, 步速过慢**
 
 ### 5.1 实验设定
 
@@ -255,13 +306,41 @@
 | ema_decay | 0.9999 (同) |
 | save_interval / keep_period | 2000 / 2000 (同) |
 
-### 5.2 训练状态
+### 5.2 训练状态 (2026-04-27 08:21 CST 更新)
 
 - 启动: 2026-04-25 23:09 CST (15:09 UTC)
-- 当前 step: 启动中 (init/JIT 阶段)
-- ETA 完成: **2026-04-26 23:00 CST (Sun 15:00 UTC)**
+- 当前 step: **13,700 / 40,000** (34% — Mon 08:00 CST 时点)
+- 步速: **~8.4 s/step** (gf0 mix_vis600 同期是 2.0 s/step, **慢 4×**!)
+- ckpts 保存: step 2k/4k/6k/8k/10k/12k (6 个, 待续)
+- ETA 完成 (按当前速度): Wed 23:00 CST (远超 deadline)
+- **决策**: 让训练继续, deadline (Mon 09:00 CST) 时不会跑完, 但已有 6+ inline-eval 数据点足以做 trend 对比
 
-### 5.3 设计意图 (与 mix_vis600 对比)
+### 5.3 步速慢分析
+
+| 项 | 状态 |
+|---|---|
+| GPU util | 100% × 8 (非 I/O 瓶颈) ✓ |
+| dataloader skip | 0 (数据干净) ✓ |
+| CPU load | 19+ (8 worker 各 122-188% CPU) |
+| memory | 676 GB / 1.9 TB total ✓ |
+
+**最可能原因**: pure_vis600 视频 codec 混合 — originals 是 av1 (vis_base 原始), mirrors 是 h264 (libx264 重编码)。PyAV 在混合 codec 路径上每帧 decode 慢 3-4× (推测). gf0 mix_vis600 几乎全 av1 (kai0 源也是 av1) 因此快很多。
+
+### 5.4 inline-eval 历史 (截至 step 13.7k)
+
+| step | MAE@1 | @10 | @25 | @50 | Δ |
+|---:|---:|---:|---:|---:|---:|
+| 2000 | 0.0268 | 0.0589 | 0.1074 | 0.1698 | (起点) |
+| 4000 | 0.0254 | 0.0522 | 0.0911 | 0.1433 | -5.2% |
+| 6000 | 0.0238 | 0.0466 | 0.0778 | 0.1191 | -6.3% |
+| 8000 | 0.0222 | 0.0422 | 0.0684 | 0.1017 | -6.7% |
+| 10000 | 0.0211 | 0.0391 | 0.0621 | 0.0904 | -5.0% |
+| **12000** | **0.0201** | 0.0367 | 0.0577 | 0.0829 | -4.7% |
+| 14000 | (即将, ~Mon 03:00 UTC) | — | — | — | — |
+
+仍快速下降, 未到 plateau (mix_vis600 同 step 早已下到 0.0173)。
+
+### 5.5 设计意图 vs 当前观察 (与 mix_vis600 对比)
 
 | 维度 | mix_vis600 | pure_vis600 |
 |---|---|---|
@@ -269,13 +348,15 @@
 | visrobot01 直接采集 | 310 (51.7%) | 309 (51.5%) |
 | 镜像增强 | 0 | 291 (48.5%) |
 | 跨域 (kai0_base/dagger) | 290 (48.3%) | 0 |
-| 假设 | "更多多样性, kai0 帮助 generalize" | "纯 visrobot01 + 对称性正则" |
+| 同 val: step 8000 MAE@1 | 0.0189 | 0.0222 (-15%) |
+| 同 val: step 10000 MAE@1 | 0.0180 | 0.0211 (-15%) |
+| 同 val: step 12000 MAE@1 | 0.0173 | 0.0201 (-14%) |
 
-**Hypothesis**: 如 mix_vis600 < pure_vis600 → kai0 旧域帮助; 反之 → mirror 增强足够好。
+**初步观察**: mix_vis600 一致地比 pure_vis600 在自己 val 上低 14-15%, 提示 **kai0 跨域数据帮助比 hflip 镜像增强更多**。但 val 集不同 (mix val 含 kai0 样本易匹配, pure val 全 vis+mirror), 数值不绝对可比。
 
 ---
 
-## 6. 系列结论 (本文档生成时)
+## 6. 系列结论 (2026-04-27 mix_vis600 完成后更新)
 
 ### 已确认结论
 
@@ -283,14 +364,15 @@
 2. **续训 + 新数据可破 plateau**: visrobot01_only Phase A 在 step 8-9k 完全 plateau, 加 95 ep 新数据 + 极低 LR 续训仍能压低 4.5%。
 3. **EMA 选择**: 短训 (≤15k) 用 0.999 收敛快; 长训 (40k) 用 0.9999 更稳。
 4. **norm_stats 续训策略**: 续训若数据分布变化小 (~5% 漂移), 保留旧 snapshot 比重算更稳, 避免输入分布跳变导致前期 MAE spike。
+5. **40k 长训 vs 13k 短训 (mix_vis600 0.0146 vs mixed_173 0.0129)**: 在自己各自的 val 上, 长训反而较差。但 val 集不同, 不严格可比。**真正结论必须看共同 test (sim01 真机/共同 hold-out)**。
+6. **kai0 跨域数据 vs hflip 镜像增强**: 同 step head-to-head, mix_vis600 一致比 pure_vis600 低 14-15% (虽 val 不同), 提示 kai0 旧域 (~290 ep) 比 291 mirror ep 提供更有效的 generalization 信号。
 
-### 待验证 (mix_vis600 + pure_vis600 完成后)
+### 部分验证 (pure_vis600 仍在跑)
 
-- ❓ 600 ep × 40k step (10 epoch) 能否压低 mixed_173 (519 ep × 13k = 5 epoch) 的 0.0129?
-- ❓ kai0 旧源数据 (mix_vis600) vs 镜像增强 (pure_vis600) 谁更帮 generalize?
-- ❓ 40k 步是否真的优于 13-15k? 还是只是边际收益消失?
-
-预计 Sun 21:00-23:00 CST 两侧训练完成后可分析。
+- ✅ **600 ep × 40k step (10 epoch) 在自己 val 上 plateau 0.0146** — 比 mixed_173 (519 ep × 13k = 5 epoch) 在其 val 上的 0.0129 要差 13%, 但 val 不可比
+- ✅ **kai0 mix > 镜像增强 (head-to-head 同 step trend)**: mix_vis600 一致比 pure_vis600 低 14-15% (各自 val), 倾向 kai0 跨域数据更有效
+- ⏳ **40k vs 13-15k 真实优劣**: 待 sim01 真机部署 mix_vis600 vs mixed_173 直接成功率比较
+- ⏳ **pure_vis600 完整 plateau 数据**: 需训练继续到 step 30k+ (按当前 8.4 s/step 还需 ~2 天)
 
 ---
 
@@ -339,6 +421,9 @@ gf0 + gf1 同时跑训练时 vePFS I/O 竞争, 步速 ~2.0-2.5 s/step (单跑约
 | 2026-04-25 22:47 | gf1 visrobot01_only_v1 (Phase B) 完成 (step 11999, MAE 0.0171) |
 | 2026-04-25 22:21 | gf0 mix_vis600 val 修复 (移除 corrupt ep 35) |
 | 2026-04-25 23:09 | gf1 pure_vis600_v1 启动 (40k 步) |
-| 2026-04-26 21:00 (预计) | gf0 mix_vis600 完成 |
+| 2026-04-27 03:48 | **gf0 mix_vis600_v1 完成** (step 39999, best step 36k/38k/39999 tied @ MAE 0.0146; 总耗时 33:21:43) |
+| 2026-04-27 08:34 | mix_vis600 best ckpt step 38000 打包 → `/vePFS/.../deepdive_kai0_tmp/data/mix_vis600_best_step38000.tar` (11.6 GB) |
+| 2026-04-27 09:00 | Mon 测试 deadline; gf1 pure_vis600 此时 step ~14k (35% 完成度) |
+| 待 (Wed?) | gf1 pure_vis600 完成 (按当前 8.4 s/step 速度) |
 | 2026-04-26 23:00 (预计) | gf1 pure_vis600 完成 |
 | 2026-04-27 09:00 | 部署测试 deadline |

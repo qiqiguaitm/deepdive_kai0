@@ -2,7 +2,7 @@
 
 > **作用**：集成本机所有 "freeze PaliGemma + 仅训 Action Expert" 类微调实验的历史记录与结果，**含每步 inline-eval MAE@{1,10,25,50} 完整曲线**。
 > **范围**：Task E（扶起倒箱）+ Task P（抓放盒子）+ 相关全参数对照实验。
-> **最近更新**：2026-04-25 23:30 CST (Task A 系列首次归档)
+> **最近更新**：2026-04-27 08:40 CST (gf0 mix_vis600 40k 完成, MAE@1=0.0146)
 > **数据来源**：`logs/train_*.log` 中 `[inline-eval] step=N MAE@1=… @10=… @25=… @50=…` 行（9 val ep × 20 frames，~30s/eval），与 `logs/eval_history_v2/v2_step_*.json` 离线归档（9 val ep × 50 queries）。
 > **命名前缀 `00_` 用于按文件名排序时置顶。**
 >
@@ -47,17 +47,18 @@
 | 对照 | p_t10_allgood_25k | Task P | base_allgood | 25k | 14000 | 0.0626 | 0.0860 | 0.1265 | 0.1842 |
 | 对照 | p_v3_kai0init (P-T10) | Task P | base 24k frames + freeze | 15k | 6000 | 0.0703 | 0.0965 | 0.1380 | 0.1950 |
 | Task A | **mixed_gf0_173** ⚡ | Task A | mix 173+173+173 ep | 13k | 9000 | **0.0129** | 0.0296 | 0.0521 | 0.0786 |
+| Task A | **mix_vis600_v1** ⚡ | Task A | mix 310+145+145 (540 train) | 40k | **38000** | **0.0146** | 0.0320 | 0.0554 | 0.0834 |
 | Task A | visrobot01_only_v1 (B end) ⚡ | Task A | vis_base 288+22 (Phase A→B) | 12k | 11999 | 0.0171 | 0.0373 | 0.0625 | 0.0943 |
 | Task A | visrobot01_only_v1 (Phase A end) ⚡ | Task A | visrobot01-only 193+17 | 9k | 9000 | 0.0179 | 0.0389 | 0.0648 | 0.0974 |
+| Task A | pure_vis600_v1 ⏳ | Task A | 309 orig + 291 hflip mirror (40k 部分) | partial | 12000* | 0.0201* | 0.0367 | 0.0577 | 0.0829 |
 | Task A | visrobot01_only_2k_gf0 ⚡ | Task A | visrobot01-only 193+17 | 2k | 1999 | 0.0202 | 0.0411 | 0.0680 | 0.1017 |
-| Task A | mix_vis600_v1 ⏳ | Task A | mix 310+145+145 (40k) | 40k | (running) | (TBD) | — | — | — |
-| Task A | pure_vis600_v1 ⏳ | Task A | 309 orig + 291 hflip mirror (40k) | 40k | (running) | (TBD) | — | — | — |
 
 ¹ E3 (combo) 在 step ~8k 因 GPU 1 NUMA SIGSEGV 中断，best 在 step 12000 之前；step 10000=0.0284, step 12000=0.0277。
 ² v2 训练超过 nominal 15k 步，step 16000 实测最佳 (0.0382)；master plan 中 0.0411@14000 是 canonical 数。
 ³ bs=64/128 series 没做 LR 缩放 → 大 bs 下 effective LR 过低 → 早期反而更差，且 long-horizon (@50) 严重退化（0.21+）。
 ⚡ Task P / Task A 用 8×A100 全解冻，与 Task E 不同基线，**仅供对照**，不在同一榜单。
 ⏳ 训练中，详见 `task_a_visrobot01_mixed_series_results.md`。
+\* pure_vis600 仍在训练 (步速 8.4 s/step h264+av1 解码慢), 当前最低数据点 step 12000 = 0.0201；预计继续下降。
 
 **核心修正**（vs 上一版）：
 1. **真正的 Task E 最佳是 t10_allgood_25k = 0.0233**，不是 E2 的 0.0262。允许更长训练 + "allgood" 增广数据后，性能再下一台阶（-12%）。
@@ -438,13 +439,39 @@ step 7-12999 完全 plateau。519 ep mix (173 vis + 173 base + 173 dagger) → M
 #### visrobot01_only_2k_gf0 (gf0, 2k sanity) ✅
 step 1999 MAE@1=0.0202。同样数据 2k 比 9k (Phase A) 差 11%。
 
-#### mix_vis600_v1 (gf0, 40k 长训) ⏳ 进行中
-540 train (310 vis + 145 base + 145 dagger) + 60 val。peak_lr=1.5e-5, ema=0.9999, save_interval=2k。
+#### mix_vis600_v1 (gf0, 40k 长训) ✅ 已完成 (2026-04-27 03:48 CST, 33:21 hr)
+540 train (310 vis + 145 base + 145 dagger) + 59 val (60 → 59 修复 corrupt val ep 35)。peak_lr=1.5e-5, ema=0.9999, save_interval=2k。
 
-**Note**: step 2k/4k/6k 三次 inline-eval 失败 (val ep 35 引用 corrupt source mp4 `vis_base/2026-04-24/ep_53/hand_left.mp4`)，已于 step 6740 修复 (移除 val ep 35, 60→59)。step 8000 起出有效 MAE。
+| step | MAE@1 | @10 | @25 | @50 |
+|---:|---:|---:|---:|---:|
+| 8000 | 0.0189 | 0.0385 | 0.0672 | 0.1033 |
+| 12000 | 0.0173 | 0.0348 | 0.0601 | 0.0914 |
+| 16000 | 0.0161 | 0.0331 | 0.0573 | 0.0871 |
+| 20000 | 0.0154 | 0.0323 | 0.0561 | 0.0852 |
+| 24000 | 0.0150 | 0.0320 | 0.0556 | 0.0842 |
+| 28000 | 0.0148 | 0.0319 | 0.0554 | 0.0837 |
+| 30000 | 0.0147 | 0.0319 | 0.0553 | 0.0835 |
+| **36000** | **0.0146** | 0.0320 | 0.0554 | 0.0834 |
+| **38000** | **0.0146** | 0.0320 | 0.0554 | 0.0834 |
+| **39999** | **0.0146** | 0.0321 | 0.0555 | 0.0835 |
 
-#### pure_vis600_v1 (gf1, 40k 长训) ⏳ 刚启动
+step 30000 起 plateau, step 36k/38k/39999 三连 tied @ 0.0146 (best, **推荐部署 step 38000**)。完整 17 个数据点见 `task_a_visrobot01_mixed_series_results.md`。
+
+**部署 tar 包**: `/vePFS/.../deepdive_kai0_tmp/data/mix_vis600_best_step38000.tar` (11.6 GB, params + assets + _CHECKPOINT_METADATA, MAE@1=0.0146)。
+
+#### pure_vis600_v1 (gf1, 40k 长训) ⏳ 进行中 (步速 8.4 s/step 慢)
 560 train (309 orig + 291 hflip mirror) + 40 val (paired by source ep 防 hflip leakage)。**0 kai0 source**, 全部 visrobot01 域 + 镜像增强。与 mix_vis600 head-to-head 对照。
+
+| step | MAE@1 | @10 | @25 | @50 |
+|---:|---:|---:|---:|---:|
+| 2000 | 0.0268 | 0.0589 | 0.1074 | 0.1698 |
+| 4000 | 0.0254 | 0.0522 | 0.0911 | 0.1433 |
+| 6000 | 0.0238 | 0.0466 | 0.0778 | 0.1191 |
+| 8000 | 0.0222 | 0.0422 | 0.0684 | 0.1017 |
+| 10000 | 0.0211 | 0.0391 | 0.0621 | 0.0904 |
+| 12000 | 0.0201 | 0.0367 | 0.0577 | 0.0829 |
+
+仍在快速下降, 未到 plateau。同 step 一致比 mix_vis600 高 14-15% (但 val 不同), 提示 kai0 跨域比 hflip 镜像更帮 generalize。
 
 ---
 
@@ -559,8 +586,8 @@ step 1999 MAE@1=0.0202。同样数据 2k 比 9k (Phase A) 差 11%。
 | **mixed_gf0_173_v1** | `/vePFS/.../checkpoints/pi05_flatten_fold_mixed_gf0/mixed_gf0_173_v1/` | 9000-12999 tied @ 0.0129 (推荐 12999) |
 | **visrobot01_only_v1** (Phase A end + Phase B end) | `/vePFS/.../checkpoints/pi05_flatten_fold_visrobot01_only/visrobot01_only_v1/` | A: 9000 (0.0179); B: **11999 (0.0171)** |
 | visrobot01_only_2k_gf0_v1 | `/vePFS/.../checkpoints/pi05_flatten_fold_visrobot01_only_2k/visrobot01_only_2k_gf0_v1/` | 1999 (0.0202) |
-| **mix_vis600_v1** ⏳ | `/vePFS/.../checkpoints/pi05_flatten_fold_mix_vis600/mix_vis600_v1/` | (训练中, ETA Sun 21:00 CST) |
-| **pure_vis600_v1** ⏳ | `/vePFS/.../checkpoints/pi05_flatten_fold_pure_vis600/pure_vis600_v1/` | (训练中, ETA Sun 23:00 CST) |
+| **mix_vis600_v1** ✅ | `/vePFS/.../checkpoints/pi05_flatten_fold_mix_vis600/mix_vis600_v1/` | **38000 (0.0146)** ★ 推荐部署; tar 包 `/vePFS/.../deepdive_kai0_tmp/data/mix_vis600_best_step38000.tar` 11.6 GB |
+| **pure_vis600_v1** ⏳ | `/vePFS/.../checkpoints/pi05_flatten_fold_pure_vis600/pure_vis600_v1/` | partial: step 12000 (0.0201), 仍训练中 |
 
 ### 5.6 其他相关（探索性 / 已废弃）
 
