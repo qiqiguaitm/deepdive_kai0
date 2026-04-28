@@ -19,6 +19,7 @@
 11. [当前实验汇总](#11-当前实验汇总)
 12. [常见坑与规则](#12-常见坑与规则)
 13. [命令速查](#13-命令速查)
+14. [文档命名约定](#14-文档命名约定)
 
 ---
 
@@ -702,13 +703,75 @@ source ros2_ws/install/setup.bash
 
 ---
 
+## 14. 文档命名约定
+
+> 本节是 `docs/` 目录下 markdown 文件的命名规范。新增文档前对照本节。
+> ckpt 实体目录的命名规范 (run_label / config / run_id / step) 在 `docs/deployment/checkpoints_layout.md` §4。
+
+### 14.1 通用原则
+
+1. **全 snake_case**: `task_a_visrobot01_mixed_600.md`, **不**用 mixed-case (`taskA_*`) 或 kebab-case (`task-a-*`).
+2. **任务前缀 lowercase**: `task_a_*` / `task_e_*` / `task_p_*`. 之前出现过的 `taskA_master_plan.md` / `taskE_master_plan.md` 已统一改为 `task_a_master_plan.md` / `task_e_master_plan.md` (2026-04-28 commit `c3801e6`).
+3. **关键 dataset / 步数 / step signature 进文件名**, 比 `_results` / `_series` 这类后缀更耐用 (后者随时间会模糊):
+   - ✅ 好: `task_a_visrobot01_mixed_600.md` (600 = mix_vis600 / pure_vis600 dataset signature, 一眼能看懂)
+   - ✅ 好: `task_p_unfreeze_8k_20k_analysis.md` (8k / 20k schedule signature)
+   - ❌ 差: `task_a_results.md` / `task_a_v2_summary.md` (谁知道是哪批实验)
+4. **末尾 _md.md 字符不要重复**, 也不要加 `.markdown` 等替代扩展.
+5. **优先复用已有目录** (`docs/training/` / `docs/deployment/`); 不新建顶层目录除非真要分类一个全新维度.
+
+### 14.2 命名前缀 / 后缀的"特殊用法"
+
+允许的两类例外, **必须**在文件头部 frontmatter 或 `>` blockquote 里**显式写出该前缀/后缀的语义**:
+
+| 模式 | 例 | 用法 | 怎么标注 |
+|---|---|---|---|
+| **`00_*`** 数字前缀 | `00_action_only_finetune_history.md` (历史聚合 leaderboard, 想置顶) | 文件名按字典序排序时强制顶置 | 文件头加 `> **命名前缀 00_ 用于按文件名排序时置顶。**` |
+| **`*_YYYY-MM-DD.md`** 日期后缀 | `realsense_anti_flicker_2026-04-27.md` (一次性 ADR-style 故障 / 决策记录) | 时间锁定的"快照"文档, 与持续维护的主题文档区分开 | 文件头加 `> **日期后缀: 单次 ADR; 不再维护, 仅作历史记录。**` 或类似话 |
+
+不要用其它特殊字符前后缀 (例如 `_v2`, `_new`, `_OLD`, `_DEPRECATED`) — 用 git history 表达版本演化, 不在文件名里。
+
+### 14.3 跨文档引用
+
+- 链接全部用**相对路径**: `` `docs/training/task_a_master_plan.md` ``, **不**写绝对路径 `/data1/.../task_a_*.md`.
+- 任何文档 rename 后**必须** `grep -rln "<旧文件名>" --exclude-dir=.git` 找全反向引用一次性更新, 例:
+  ```bash
+  git mv docs/training/old_name.md docs/training/new_name.md
+  grep -rln "old_name" --exclude-dir=.git --exclude-dir=.venv \
+       --exclude-dir=submodules --exclude-dir=checkpoints | \
+       xargs sed -i "s|old_name|new_name|g"
+  ```
+  历次踩坑 (例如 2026-04-28 `taskA_master_plan` → `task_a_master_plan` 重命名时漏了 `kai0/src/openpi/training/config.py:1452` 的注释引用) 都源自跳过这一步.
+
+### 14.4 文档→实体映射
+
+很多文档对应一个 ckpt / 数据集 / config 系列。文件名应该让人一眼看出对应关系:
+
+| 文档 | 对应实体 | 命名映射 |
+|---|---|---|
+| `task_a_visrobot01_mixed_600.md` | `pi05_flatten_fold_mix_vis600` config + `mix_vis600` 数据集 | task 前缀 + 数据 signature `_600` |
+| `task_p_unfreeze_8k_20k_analysis.md` | `pi05_pick_place_box_kai0_unfreeze_{8k,20k}` config 系列 | task 前缀 + 关键超参 signature `8k_20k` |
+| `gf0_normal_training_plan.md` | gf0 上的常规训练计划 (主机 + 训练类型) | 主机 + 训练类型 |
+| `awbc_v2_training_plan.md` | `pi05_flatten_fold_awbc_v2` config 系列 | config 名前缀简化 |
+
+新文档命名前问自己: **"这个文件名 6 个月后我自己看, 还能猜对它讲什么吗?"** 不行就再炼.
+
+### 14.5 当前已知合规 / 已规范化
+
+最近 (2026-04-27 ~ 04-28) 的两次集中规范化:
+
+- `c3801e6 docs: rename taskA/taskE master plans to snake_case` (8 文件 / 8 行)
+- `3e552ab docs(training): rename Task_A series doc, surface init weight info` (含 `task_a_visrobot01_mixed_series_results.md` → `task_a_visrobot01_mixed_600.md`)
+
+---
+
 ## 参考
 
 - `docs/training/dynamic_dataset_workflow.md` — 动态数据集方案
 - `docs/training/task_p_unfreeze_8k_20k_analysis.md` — Task_P 过拟合分析
-- `docs/training/task_a_master_plan.md` — Task_A 训练路线
+- `docs/deployment/task_a_master_plan.md` — Task_A 训练路线
 - `docs/training/training_cli_notes.md` — 命令注记
 - `docs/deployment/sim01_deployment.md` — sim01 部署细节
+- `docs/deployment/checkpoints_layout.md` — Checkpoint 落盘规范 + ckpt 命名约定
 - kai0 官方论文 Model Arithmetic / Stage Advantage / Train-Deploy Alignment 三模块
 
 ---
