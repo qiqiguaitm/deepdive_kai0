@@ -1,11 +1,26 @@
-# Task A 全参数微调实验系列 (visrobot01 / mixed / mix_vis600 / pure_vis600)
+# Task A 全参数微调实验系列 (visrobot01 / mixed_gf0 / mix_vis600 / pure_vis600 / vis_base_40k)
 
-> **范围**: 2026-04-24 ~ 04-26 在 gf0/gf1 上的 Task A "Flatten and fold the cloth" 全参数微调系列
+> **范围**: 2026-04-24 ~ 04-28 在 gf0/gf1 上的 Task A "Flatten and fold the cloth" 全参数微调系列
 > **训练框架**: openpi (JAX) + pi05 (PaliGemma + Action Expert), 全部 8×A100 80GB FSDP=8
 > **配置文件**: `kai0/src/openpi/training/config.py` (`pi05_flatten_fold_*` 系列)
-> **公共 Init**: `Task_A/mixed_1/params` (kai0 MA-merged base)
 > **构建脚本**: `train_scripts/data/build_task_a_{vis_base,mix_vis600,pure_vis600,mix_vis600_split,pure_vis600_split}.py`
 > **launcher**: `train_scripts/launch/run_{taska_mixed_gf0,visrobot01_only_2k_gf0,resume_visrobot01_only_gf1,mix_vis600_gf0,pure_vis600_gf1}.sh`
+
+## 公共 Init (重要 — 所有 7 个 run 共用)
+
+| 项 | 值 |
+|---|---|
+| **init weight 路径** | `kai0/checkpoints/Task_A/mixed_1/params/` |
+| **init norm_stats** | `kai0/checkpoints/Task_A/mixed_1/norm_stats.json` (md5 `b206072c...`, 5343 B) |
+| **init 来源** | kai0 项目早期发布的 **"MA-merged" 基础模型** — 在官方 pi05_base 上做 Task_A 数据 (mixed_1 数据集, 推测含 base+dagger+advantage 多源) 的初步对齐, 作为后续所有 Task_A 微调的共同起点 |
+| **架构** | `Pi0Config(pi05=True)` (PaliGemma 视觉塔 + LLM 主干 + Action Expert), 不含 RTC |
+| **参数总量** | 3.3 B; 全部解冻参与训练 (无 freeze_filter) |
+| **本系列的微调起点 MAE@1** | step 0 (init) ≈ 0.027–0.030 (各 val 集略不同), 训练后压到 0.013–0.020 |
+
+**为什么这 7 个 run 都从 `mixed_1` 起跑**:
+1. mixed_1 已经在 Task_A 概念上初步对齐, 不是 from-scratch — 比直接 pi05_base 起跑快 5-10x 收敛.
+2. 所有 run 同 init → val MAE 间的差异**纯**反映"数据配方"的影响 (vis_base ratio / mirror 增广 / 数据量), 不被 init 噪声混淆.
+3. mixed_1 对应的 norm_stats 与训练用的 dataset norm_stats **可以不同** (见 §3.3 of `kai0/checkpoints/README.md`): 训练时用 dataset 自带 stats, 但 weight_loader 只取 `mixed_1/params/`, 不读 mixed_1 的 norm_stats.
 
 ---
 
