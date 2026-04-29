@@ -2562,6 +2562,94 @@ _CONFIGS = [
     ),
     #**************************FlattenFold AWBC from official MA checkpoint (β-official)*******************************
     # Warm-start AWBC fine-tune from the official MA product (Task_A/mixed_1, HF release).
+    # Task_A mix_vis600 cold-start (40k steps, 540 train / 60 val).
+    # Composition: 310 vis_base (sim01 visrobot01) + 145 kai0_base + 145 kai0_dagger.
+    # Init from Task_A/mixed_1, peak_lr=1.5e-5 cosine to 1.5e-6 over 40k, ema=0.9999.
+    # save_interval=2000 (20 ckpts × 12 GB), inline-eval every 2k step (~20 evals × 19.5 min).
+    # 部署: norm_stats 在 data 路径 (mix_vis600/base/norm_stats.json), asset_id 默认回退 = repo_id (绝对) → 直读.
+    TrainConfig(
+        name="pi05_flatten_fold_mix_vis600",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/self_built/mix_vis600/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=40_000, decay_lr=1.5e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=40_000,
+        keep_period=2_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_A/self_built/mix_vis600/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+    ),
+    # Task_A pure_vis600 cold-start (40k steps; pair with mix_vis600 for ablation).
+    # Composition: 309 vis_base ORIGINALS + 291 hflip MIRRORS (left↔right swap), zero kai0 source.
+    # Same hyperparams as pi05_flatten_fold_mix_vis600. Init from Task_A/mixed_1.
+    TrainConfig(
+        name="pi05_flatten_fold_pure_vis600",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A/self_built/pure_vis600/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=40_000, decay_lr=1.5e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=40_000,
+        keep_period=2_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_A/self_built/pure_vis600/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+    ),
+    # Task_A vis_base_40k cold-start (vis_base 310 ep ONLY, no mirror, no kai0).
+    # Pair with mix_vis600 + pure_vis600 ablation: same hyperparams, source data
+    # is strict subset of pure_vis600 (no hflip mirrors).
+    # 288 train + 22 val (existing Task_A_visrobot01_only/{base,val} reused).
+    # Init from Task_A/mixed_1, peak_lr=1.5e-5 cosine to 1.5e-6 over 40k, ema=0.9999.
+    TrainConfig(
+        name="pi05_flatten_fold_vis_base_40k",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id=f"{_KAI0_DATA_ROOT}/data/Task_A_visrobot01_only/base",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=40_000, decay_lr=1.5e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=40_000,
+        keep_period=2_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root=f"{_KAI0_DATA_ROOT}/data/Task_A_visrobot01_only/val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+    ),
     # Goal: approximate the paper's MA+SA combination — "MA first, then SA on top of MA".
     # Data: Task_A/advantage (3055 ep base with advantage labels), following official AWBC recipe
     # (dagger has no official advantage, so AWBC stays on base only).
