@@ -14,8 +14,65 @@ Topic 映射:
 Usage:
   ros2 launch scripts/launch_e2e_test.py
 """
+import importlib.util
+from pathlib import Path
+
 from launch import LaunchDescription
 from launch_ros.actions import Node
+
+
+def _load_depth_enabled_map() -> dict:
+    """Read CAMERA_DEPTH_ENABLED from config/camera_depth_flags.py — same
+    macro file the data-collection / autonomy stack uses, so e2e parity
+    tests automatically reflect production depth toggles.
+    """
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidate = parent / 'config' / 'camera_depth_flags.py'
+        if candidate.is_file():
+            spec = importlib.util.spec_from_file_location(
+                'kai0_camera_depth_flags_e2e', candidate)
+            mod = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(mod)
+            return dict(mod.CAMERA_DEPTH_ENABLED)
+    return {}
+
+
+_DEPTH_ENABLED = _load_depth_enabled_map()
+
+
+def _depth_node_params(serial: str, name: str, enable_depth: bool) -> dict:
+    p = {
+        'serial_no': serial,
+        'camera_name': name,
+        'enable_color': True,
+        'enable_depth': enable_depth,
+        'enable_infra1': False,
+        'enable_infra2': False,
+        'enable_gyro': False,
+        'enable_accel': False,
+        'rgb_camera.color_profile': '640x480x30',
+        'align_depth.enable': False,
+        'initial_reset': False,
+    }
+    if enable_depth:
+        p['depth_module.depth_profile'] = '640x480x30'
+    return p
+
+
+def _depth_remaps(ns: str, enable_depth: bool) -> list:
+    color = [
+        ('color/image_raw', f'/{ns}/color/image_raw'),
+        ('color/image_rect_raw', f'/{ns}/color/image_raw'),
+        ('color/camera_info', f'/{ns}/color/camera_info'),
+    ]
+    if enable_depth:
+        color += [
+            ('depth/image_rect_raw', f'/{ns}/depth/image_raw'),
+            ('depth/camera_info', f'/{ns}/depth/camera_info'),
+        ]
+    return color
 
 
 def generate_launch_description():
@@ -59,34 +116,20 @@ def generate_launch_description():
         ],
     )
 
+    # 每相机的 enable_depth 由 config/camera_depth_flags.py 宏定义统一控制.
+    en_top = _DEPTH_ENABLED.get('top_head', False)
+    en_l = _DEPTH_ENABLED.get('hand_left', False)
+    en_r = _DEPTH_ENABLED.get('hand_right', False)
+
     # ── D435 头顶相机 (namespace=camera_f, 但 topic 重映射到 /camera_f/*) ──
     cam_f = Node(
         package='realsense2_camera',
         executable='realsense2_camera_node',
         name='camera_f',
-        namespace='',           # 不加额外 namespace
+        namespace='',
         output='screen',
-        parameters=[{
-            'serial_no': '254622070889',
-            'camera_name': 'camera_f',
-            'enable_color': True,
-            'enable_depth': True,
-            'enable_infra1': False,
-            'enable_infra2': False,
-            'enable_gyro': False,
-            'enable_accel': False,
-            'rgb_camera.color_profile': '640x480x30',
-            'depth_module.depth_profile': '640x480x30',
-            'align_depth.enable': False,
-            'initial_reset': False,
-        }],
-        remappings=[
-            # 重映射到推理脚本期望的 topic 名
-            ('color/image_raw', '/camera_f/color/image_raw'),
-            ('color/camera_info', '/camera_f/color/camera_info'),
-            ('depth/image_rect_raw', '/camera_f/depth/image_raw'),
-            ('depth/camera_info', '/camera_f/depth/camera_info'),
-        ],
+        parameters=[_depth_node_params('254622070889', 'camera_f', en_top)],
+        remappings=_depth_remaps('camera_f', en_top),
     )
 
     # ── D405-L 左腕相机 ──
@@ -96,27 +139,8 @@ def generate_launch_description():
         name='camera_l',
         namespace='',
         output='screen',
-        parameters=[{
-            'serial_no': '409122273074',
-            'camera_name': 'camera_l',
-            'enable_color': True,
-            'enable_depth': True,
-            'enable_infra1': False,
-            'enable_infra2': False,
-            'enable_gyro': False,
-            'enable_accel': False,
-            'rgb_camera.color_profile': '640x480x30',
-            'depth_module.depth_profile': '640x480x30',
-            'align_depth.enable': False,
-            'initial_reset': False,
-        }],
-        remappings=[
-            ('color/image_raw', '/camera_l/color/image_raw'),
-            ('color/image_rect_raw', '/camera_l/color/image_raw'),
-            ('color/camera_info', '/camera_l/color/camera_info'),
-            ('depth/image_rect_raw', '/camera_l/depth/image_raw'),
-            ('depth/camera_info', '/camera_l/depth/camera_info'),
-        ],
+        parameters=[_depth_node_params('409122273074', 'camera_l', en_l)],
+        remappings=_depth_remaps('camera_l', en_l),
     )
 
     # ── D405-R 右腕相机 ──
@@ -126,27 +150,8 @@ def generate_launch_description():
         name='camera_r',
         namespace='',
         output='screen',
-        parameters=[{
-            'serial_no': '409122271568',
-            'camera_name': 'camera_r',
-            'enable_color': True,
-            'enable_depth': True,
-            'enable_infra1': False,
-            'enable_infra2': False,
-            'enable_gyro': False,
-            'enable_accel': False,
-            'rgb_camera.color_profile': '640x480x30',
-            'depth_module.depth_profile': '640x480x30',
-            'align_depth.enable': False,
-            'initial_reset': False,
-        }],
-        remappings=[
-            ('color/image_raw', '/camera_r/color/image_raw'),
-            ('color/image_rect_raw', '/camera_r/color/image_raw'),
-            ('color/camera_info', '/camera_r/color/camera_info'),
-            ('depth/image_rect_raw', '/camera_r/depth/image_raw'),
-            ('depth/camera_info', '/camera_r/depth/camera_info'),
-        ],
+        parameters=[_depth_node_params('409122271568', 'camera_r', en_r)],
+        remappings=_depth_remaps('camera_r', en_r),
     )
 
     return LaunchDescription([piper_left, piper_right, cam_f, cam_l, cam_r])

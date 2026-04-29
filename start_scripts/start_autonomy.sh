@@ -197,14 +197,23 @@ export PATH="$KAI0_DIR/.venv/bin:$PATH"
 export JAX_COMPILATION_CACHE_DIR=/tmp/xla_cache
 mkdir -p /tmp/xla_cache
 
-# GPU allocation: pick GPU with fewest active compute processes.
-# Free memory alone is misleading because other processes' cuBLAS contexts
-# fragment GPU memory and can cause OOM even when nvidia-smi shows free space.
-GPU_ID=$(nvidia-smi --query-compute-apps=gpu_uuid --format=csv,noheader 2>/dev/null \
-    | sort | uniq -c | sort -n > /tmp/gpu_proc_count.txt || true)
-GPU_ID=$(
-    python3 -c "
-import subprocess
+# GPU allocation strategy:
+#   1. KAI0_GPU_ID=<n> forces the choice (escape hatch).
+#   2. Otherwise require ≥MIN_FREE_MB free (π0.5 restore peaks ~2.25 GiB per
+#      shard on top of weights + KV cache + cuBLAS context — 6 GB cards OOM).
+#      Among qualifying GPUs, prefer fewest running compute apps, then most
+#      free memory (empty card > big-but-shared card, per old fragmentation
+#      concern).
+#   3. If nothing qualifies, fall back to the most-free GPU and warn loudly.
+MIN_FREE_MB=${KAI0_MIN_FREE_MB:-12288}
+if [ -n "$KAI0_GPU_ID" ]; then
+    GPU_ID="$KAI0_GPU_ID"
+    info "KAI0_GPU_ID override → using GPU $GPU_ID"
+else
+    GPU_ID=$(
+        MIN_FREE_MB="$MIN_FREE_MB" python3 -c "
+import os, subprocess
+min_free = int(os.environ['MIN_FREE_MB'])
 r = subprocess.run(['nvidia-smi', '--query-gpu=index,uuid,memory.free',
                     '--format=csv,noheader,nounits'], capture_output=True, text=True)
 gpus = {}
@@ -218,14 +227,23 @@ for line in r.stdout.strip().split('\n'):
     if uuid in gpus:
         idx, free, n = gpus[uuid]
         gpus[uuid] = (idx, free, n + 1)
-# Sort by: fewest processes first, then most free memory
-best = sorted(gpus.values(), key=lambda g: (g[2], -g[1]))[0]
-print(best[0])
+eligible = [g for g in gpus.values() if g[1] >= min_free]
+if eligible:
+    best = sorted(eligible, key=lambda g: (g[2], -g[1]))[0]
+    print(best[0])
+else:
+    best = sorted(gpus.values(), key=lambda g: -g[1])[0]
+    print(f'{best[0]}:LOW')
 " 2>/dev/null
-)
-GPU_ID=${GPU_ID:-0}
+    )
+    if [[ "$GPU_ID" == *:LOW ]]; then
+        GPU_ID="${GPU_ID%:LOW}"
+        warn "no GPU has ≥${MIN_FREE_MB}MB free; falling back to GPU $GPU_ID (inference may OOM). Override with KAI0_GPU_ID=<n> or lower KAI0_MIN_FREE_MB."
+    fi
+    GPU_ID=${GPU_ID:-0}
+fi
 FREE_MB=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits -i "$GPU_ID" 2>/dev/null || echo "?")
-info "using GPU $GPU_ID (free: ${FREE_MB}MB)"
+info "using GPU $GPU_ID (free: ${FREE_MB}MB, threshold: ${MIN_FREE_MB}MB)"
 
 # Unset proxy vars that can interfere with JAX/gRPC
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY 2>/dev/null || true

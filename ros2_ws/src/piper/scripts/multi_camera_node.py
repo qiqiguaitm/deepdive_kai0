@@ -18,6 +18,7 @@ Publishes:
 import os
 import sys
 import time
+from pathlib import Path
 import numpy as np
 
 import rclpy
@@ -26,6 +27,30 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPo
 from sensor_msgs.msg import Image
 from std_msgs.msg import Header
 from builtin_interfaces.msg import Time
+
+
+def _load_depth_enabled_map() -> dict:
+    """Probe upward for config/camera_depth_flags.py and return its
+    CAMERA_DEPTH_ENABLED dict. Same pattern as the data_manager bridge —
+    this script may run from a colcon-installed path where the source-tree
+    `config/` is several levels above, so we walk parents until found.
+    """
+    import importlib.util
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidate = parent / "config" / "camera_depth_flags.py"
+        if candidate.is_file():
+            spec = importlib.util.spec_from_file_location(
+                "kai0_camera_depth_flags_multicam", candidate)
+            mod = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(mod)
+            return dict(mod.CAMERA_DEPTH_ENABLED)
+    # 兜底: 不开任何 depth, 比误启动 D405 depth (USB 带宽紧张) 安全.
+    return {}
+
+
+_DEPTH_ENABLED_MAP = _load_depth_enabled_map()
 
 try:
     import pyrealsense2 as rs
@@ -55,14 +80,17 @@ class MultiCameraNode(Node):
         self.declare_parameter('fps', 15)
         self.declare_parameter('width', 640)
         self.declare_parameter('height', 480)
-        self.declare_parameter('enable_head_depth', True)
-        self.declare_parameter('enable_wrist_depth', True)
 
         fps = self.get_parameter('fps').value
         w = self.get_parameter('width').value
         h = self.get_parameter('height').value
-        enable_head_depth = self.get_parameter('enable_head_depth').value
-        enable_wrist_depth = self.get_parameter('enable_wrist_depth').value
+
+        # Per-camera depth on/off comes from config/camera_depth_flags.py;
+        # role-name in this file ('head'/'left'/'right') maps to the
+        # cameras.yml canonical name ('top_head'/'hand_left'/'hand_right').
+        enable_head_depth = _DEPTH_ENABLED_MAP.get('top_head', False)
+        enable_wrist_depth_l = _DEPTH_ENABLED_MAP.get('hand_left', False)
+        enable_wrist_depth_r = _DEPTH_ENABLED_MAP.get('hand_right', False)
 
         cam_f_serial = self.get_parameter('cam_f_serial').value
         cam_l_serial = self.get_parameter('cam_l_serial').value
@@ -105,8 +133,8 @@ class MultiCameraNode(Node):
 
         cameras = [
             ('head', cam_f_serial, True, enable_head_depth),
-            ('left', cam_l_serial, False, enable_wrist_depth),
-            ('right', cam_r_serial, False, enable_wrist_depth),
+            ('left', cam_l_serial, False, enable_wrist_depth_l),
+            ('right', cam_r_serial, False, enable_wrist_depth_r),
         ]
 
         # Start cameras sequentially with warm-up frames (matches verify_calibration.py approach).
@@ -127,6 +155,27 @@ class MultiCameraNode(Node):
                     if need_depth:
                         config.enable_stream(rs.stream.depth, w, h, rs.format.z16, fps)
                     profile = pipeline.start(config)
+
+                    # Anti-flicker.
+                    #   D435 (rolling-shutter RGB): power_line_frequency=1 (50Hz)
+                    #     fixes horizontal banding under LED light.
+                    #   D405 (global-shutter color on depth_module): PLF has no
+                    #     effect; whole-frame brightness pulses unless exposure
+                    #     covers the LED PWM period. Lock to 20ms — verified
+                    #     empirically to eliminate flicker with adequate
+                    #     brightness in the sim01 workspace.
+                    try:
+                        color_sensor = profile.get_device().first_color_sensor()
+                        if color_sensor.supports(rs.option.power_line_frequency):
+                            color_sensor.set_option(rs.option.power_line_frequency, 1)
+                        if not is_d435:
+                            if color_sensor.supports(rs.option.enable_auto_exposure):
+                                color_sensor.set_option(rs.option.enable_auto_exposure, 0)
+                            if color_sensor.supports(rs.option.exposure):
+                                color_sensor.set_option(rs.option.exposure, 20000)
+                    except Exception as e:
+                        self.get_logger().warn(
+                            f'{role} set anti-flicker options failed: {e}')
 
                     # Warm up: grab frames to stabilize the USB stream
                     # (critical for D405 on shared USB hubs)

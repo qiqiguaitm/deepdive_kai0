@@ -188,6 +188,8 @@ def generate_launch_description():
     # ── Multi-camera node: single process manages all 3 RealSense cameras ──
     # Avoids USB contention from multiple realsense2_camera_node processes
     # each doing independent device enumeration and USB resets.
+    # Per-camera depth on/off lives in config/camera_depth_flags.py;
+    # multi_camera_node loads it directly, so no enable_*_depth params here.
     multi_cam = Node(
         package='piper', executable='multi_camera_node.py',
         name='multi_camera', output='screen',
@@ -198,8 +200,6 @@ def generate_launch_description():
             'fps': 30,
             'width': 640,
             'height': 480,
-            'enable_head_depth': True,
-            'enable_wrist_depth': True,
         }],
     )
 

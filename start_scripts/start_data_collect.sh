@@ -18,6 +18,9 @@
 #   SKIP_PEDAL=1       跳过 USB 踏板监听 (默认启用; 无踏板硬件时会被重试循环自动退避)
 #   SKIP_DEPS=1        跳过后端 pip 依赖同步
 #   KAI0_DATA_ROOT=... 采集落盘根目录 (默认 /data1/DATA_IMP/KAI0)
+#                      磁盘布局: $KAI0_DATA_ROOT/<Task>/<subset>/<YYYY-MM-DD>/{data,meta,videos}/
+#                      (subset=base|dagger|...; 同一 subset 的多日数据聚在一棵子树, 方便整 subset
+#                       做训练/同步; 路径生成在 web/data_manager/backend/app/layout.py)
 #   PEDAL_VID/PEDAL_PID/PEDAL_KEY/PEDAL_EDGE/PEDAL_DEBOUNCE_MS
 #                      踏板硬件参数覆盖, 详见 web/data_manager/backend/tools/pedal_listener.py
 ###############################################################################
@@ -51,16 +54,52 @@ if [[ "$ACTION" == "start" || "$ACTION" == "restart" ]]; then
     ros2 daemon stop  2>/dev/null || true
     ros2 daemon start 2>/dev/null || true
 
-    # 2. USB camera reset (passwordless via /etc/sudoers.d/kai0-autonomy)
+    # 2. USB camera reset
+    #
+    # 优先走 /etc/sudoers.d/kai0-autonomy 的 NOPASSWD 规则 (sudo -n 一次成功).
+    # 如果未配置或规则被改, fall back 到 SUDO_ASKPASS helper, 自动喂密码.
+    # 密码来源优先级:
+    #   1. 环境变量 $SUDO_PASSWORD (不写盘, 最安全)
+    #   2. ~/.sudo_password 文件 (chmod 600, 不进 git)
+    #   3. 字面量 "tim" (兜底, 仅为本机便利; **不要把这脚本连同字面量一起 push 出去**)
+    #
+    # ⚠️ 安全提醒: 硬编码弱口令 "tim" 是本机调试便利, 不应出现在远端/公共环境。
+    #    长期建议: 扩展 /etc/sudoers.d/kai0-autonomy, 让 tim ALL=(ALL) NOPASSWD:
+    #    /usr/bin/tee /sys/bus/usb/devices/*/authorized, 然后本 askpass 路径可以删除.
     echo "--- USB camera reset ---"
+    _ASKPASS_SCRIPT="/tmp/.kai0_askpass_$$.sh"
+    cleanup_askpass() { rm -f "$_ASKPASS_SCRIPT" 2>/dev/null; }
+    trap cleanup_askpass EXIT
+    if [ -n "${SUDO_PASSWORD:-}" ]; then
+        _PW="$SUDO_PASSWORD"
+    elif [ -r "$HOME/.sudo_password" ]; then
+        _PW="$(head -n1 "$HOME/.sudo_password")"
+    else
+        _PW="tim"
+    fi
+    cat > "$_ASKPASS_SCRIPT" <<EOF
+#!/bin/sh
+echo '$_PW'
+EOF
+    chmod 700 "$_ASKPASS_SCRIPT"
+    unset _PW
+    export SUDO_ASKPASS="$_ASKPASS_SCRIPT"
     for dev in 2-1 2-2 4-2.2; do
         auth="/sys/bus/usb/devices/$dev/authorized"
         if [ -e "$auth" ]; then
-            echo 0 | sudo -n tee "$auth" >/dev/null 2>&1 || true
+            # Try NOPASSWD first (fast path), fall back to askpass if sudo -n fails
+            echo 0 | sudo -n tee "$auth" >/dev/null 2>&1 \
+                || echo 0 | sudo -A tee "$auth" >/dev/null 2>&1 \
+                || true
             sleep 0.5
-            echo 1 | sudo -n tee "$auth" >/dev/null 2>&1 || true
+            echo 1 | sudo -n tee "$auth" >/dev/null 2>&1 \
+                || echo 1 | sudo -A tee "$auth" >/dev/null 2>&1 \
+                || true
         fi
     done
+    unset SUDO_ASKPASS
+    cleanup_askpass
+    trap - EXIT
     sleep 3
 
     CAM_COUNT=$(lsusb | grep -c "Intel.*RealSense" 2>/dev/null || echo 0)

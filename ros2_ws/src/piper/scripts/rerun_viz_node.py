@@ -56,8 +56,31 @@ def _setup_venv_paths():
 _setup_venv_paths()
 
 import time
+from pathlib import Path
 import numpy as np
 import yaml
+
+
+def _load_depth_enabled_map() -> dict:
+    """Probe upward for config/camera_depth_flags.py — same pattern as
+    multi_camera_node / data_manager bridges. Returns dict keyed by
+    canonical camera name (top_head / hand_left / hand_right).
+    """
+    import importlib.util
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidate = parent / 'config' / 'camera_depth_flags.py'
+        if candidate.is_file():
+            spec = importlib.util.spec_from_file_location(
+                'kai0_camera_depth_flags_rerun', candidate)
+            mod = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(mod)
+            return dict(mod.CAMERA_DEPTH_ENABLED)
+    return {}
+
+
+_DEPTH_ENABLED_MAP = _load_depth_enabled_map()
 
 # GPU projection via JAX. The policy inference node owns GPU 0; initializing
 # a second JAX context on the same device segfaults at first use. Pin this
@@ -354,15 +377,22 @@ class RerunVizNode(Node):
         self.create_subscription(Image,
             self.get_parameter('img_right_topic').value,
             self._cb_img_right, img_qos)
-        self.create_subscription(Image,
-            self.get_parameter('depth_front_topic').value,
-            self._cb_depth_front, depth_qos)
-        self.create_subscription(Image,
-            self.get_parameter('depth_left_topic').value,
-            self._cb_depth_left, depth_qos)
-        self.create_subscription(Image,
-            self.get_parameter('depth_right_topic').value,
-            self._cb_depth_right, depth_qos)
+        # Depth subs are gated by config/camera_depth_flags.py — a False
+        # macro for a camera means we never decode/project its depth, so
+        # the corresponding _latest_depth_* stays None and downstream loops
+        # skip that camera (they already check `if dep_cache is None`).
+        if _DEPTH_ENABLED_MAP.get('top_head', False):
+            self.create_subscription(Image,
+                self.get_parameter('depth_front_topic').value,
+                self._cb_depth_front, depth_qos)
+        if _DEPTH_ENABLED_MAP.get('hand_left', False):
+            self.create_subscription(Image,
+                self.get_parameter('depth_left_topic').value,
+                self._cb_depth_left, depth_qos)
+        if _DEPTH_ENABLED_MAP.get('hand_right', False):
+            self.create_subscription(Image,
+                self.get_parameter('depth_right_topic').value,
+                self._cb_depth_right, depth_qos)
         self.create_subscription(JointState,
             self.get_parameter('puppet_left_topic').value,
             self._cb_joint_left, 10)

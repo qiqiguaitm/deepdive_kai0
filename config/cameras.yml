@@ -15,6 +15,9 @@ cameras:
     ros2_topic_color: /camera_f/camera_f/color/image_raw
     ros2_topic_depth: /camera_f/camera_f/depth/image_rect_raw
 
+  # 此文件描述硬件 *能力* — 是否真的使用 depth 流由 config/camera_depth_flags.py
+  # 里的宏定义 (ENABLE_DEPTH_*) 控制. 想停用某相机的 depth 处理, 改宏即可,
+  # 不必删 topic.
   hand_left:
     model: Intel RealSense D405
     serial_number: "409122273074"
