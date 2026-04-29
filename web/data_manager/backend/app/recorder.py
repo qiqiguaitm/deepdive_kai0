@@ -35,11 +35,39 @@ from .layout import (
 from .models import RecState, SaveRecordingReq, StartRecordingReq
 from .ros_bridge import bridge
 from .stats_service import service as stats
-from .sync import sync_episode_subset
+from .sync import sync_episode_files
 from .templates import store as templates
 
 
 CAMERAS = ("top_head", "hand_left", "hand_right")
+
+
+def _load_depth_flags():
+    """Import config/camera_depth_flags.py from the repo root by probing
+    upward — the data_manager backend isn't a child of /config/, so a
+    plain relative import won't reach it.
+
+    Returns a tuple of camera names whose depth stream is ENABLED.
+    Falls back to () (no depth) if the macro file is missing, which keeps
+    recording from breaking on a stale checkout.
+    """
+    import importlib.util
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidate = parent / "config" / "camera_depth_flags.py"
+        if candidate.is_file():
+            spec = importlib.util.spec_from_file_location(
+                "kai0_camera_depth_flags", candidate)
+            mod = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(mod)
+            return tuple(mod.DEPTH_CAMERAS)
+    return ()
+
+
+# 只对 ENABLE_DEPTH_* 宏 (config/camera_depth_flags.py) 标记为 True 的相机录深度.
+# 默认 D435 头顶 on, D405 腕部 off — 改宏即可全局切换, 不必再编辑这里.
+DEPTH_CAMERAS = _load_depth_flags()
 FPS = 30
 WIDTH = 640
 HEIGHT = 480
@@ -100,10 +128,11 @@ class _EpisodeWriter:
             cam: self.root / "videos" / "chunk-000" / cam / f"episode_{ep:06d}.mp4"
             for cam in CAMERAS
         }
-        # Depth 走 zarr DirectoryStore, 一个目录 = 一个 episode 的一个相机
+        # Depth 走 zarr DirectoryStore, 一个目录 = 一个 episode 的一个相机.
+        # 只对 D435 头顶相机录深度 (DEPTH_CAMERAS); D405 腕部相机不参与.
         self.depth_paths = {
             cam: self.root / "videos" / "chunk-000" / f"{cam}_depth" / f"episode_{ep:06d}.zarr"
-            for cam in CAMERAS
+            for cam in DEPTH_CAMERAS
         }
         for p in [self.pq_path.parent, *(v.parent for v in self.video_paths.values()),
                   *(d.parent for d in self.depth_paths.values())]:
@@ -169,10 +198,10 @@ class _EpisodeWriter:
             for packet in self._streams[cam].encode(frame):
                 self._containers[cam].mux(packet)
 
-        # 深度: 每相机 append 一帧到 zarr; 缺帧用 0 占位保持帧数一致
+        # 深度: 仅 D435 头顶相机 append 一帧到 zarr; 缺帧用 0 占位保持帧数一致.
         if self._depth_arrays:
             depth_frames = depth_frames or {}
-            for cam in CAMERAS:
+            for cam in DEPTH_CAMERAS:
                 z = self._depth_arrays.get(cam)
                 if z is None:
                     continue
@@ -362,9 +391,10 @@ class Recorder:
             # upsert_one 需要真实 parquet 路径。
             pq_path = new_task_subset_root(task, subset) / "data" / "chunk-000" / f"episode_{ep_id:06d}.parquet"
             stats.upsert_one(pq_path)
-            # post-save 异步推送到 gf0/gf1. 不阻塞 UI 响应, 失败只 log.
+            # post-save 异步单 episode 推送: 只 rsync 该 ep 的 parquet/mp4/zarr + meta,
+            # 用 --files-from 跳过全树 stat, 即使 subset 已有 10k+ 文件也几秒完成.
             today = datetime.date.today().strftime("%Y-%m-%d")
-            sync_episode_subset(task, today, subset)
+            sync_episode_files(task, today, subset, ep_id)
         return {"saved_episode_id": ep_id, "task_id": task, "subset": subset}
 
     def toggle(self, snapshot_fn) -> dict:
@@ -437,7 +467,7 @@ class Recorder:
             frames = {cam: bridge.get_frame_rgb(cam) for cam in CAMERAS}
             depth_frames = {
                 cam: bridge.get_frame_depth(cam) if hasattr(bridge, "get_frame_depth") else None
-                for cam in CAMERAS
+                for cam in DEPTH_CAMERAS
             }
             try:
                 state, action = bridge.get_state_action()
@@ -582,7 +612,7 @@ class Recorder:
         }
         return {
             **{f"observation.images.{cam}": img_feat for cam in CAMERAS},
-            **{f"observation.depth.{cam}": depth_feat for cam in CAMERAS},
+            **{f"observation.depth.{cam}": depth_feat for cam in DEPTH_CAMERAS},
             "observation.state": {"dtype": "float32", "shape": [14], "names": None},
             "action": {"dtype": "float32", "shape": [14], "names": None},
             "timestamp": {"dtype": "float32", "shape": [1], "names": None},

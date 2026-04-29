@@ -41,6 +41,9 @@ def episode_video_path(task_id: str, subset: str, episode_id: int, camera: str) 
 
 
 def episode_depth_zarr_path(task_id: str, subset: str, episode_id: int, camera: str) -> Path:
+    # 新录制只为 D435 头顶相机生成 depth zarr (见 recorder.DEPTH_CAMERAS);
+    # hand_left / hand_right 仅为兼容历史数据保留可达路径, 新数据下这两个 cam
+    # 走到 main.py 的 file_exists 检查即返回 404, 不会泄露其他目录.
     if camera not in ("top_head", "hand_left", "hand_right"):
         raise HTTPException(status_code=400, detail="unknown camera")
     return _subset_join(task_id, subset, "videos", "chunk-000", f"{camera}_depth", f"episode_{episode_id:06d}.zarr")

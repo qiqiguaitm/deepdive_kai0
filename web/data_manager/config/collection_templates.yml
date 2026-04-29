@@ -29,3 +29,15 @@ templates:
   prompt: pick and place in box
   enabled: true
   note: Task P BASE
+- id: task_h_hand
+  task_id: Task_H
+  subset: base
+  prompt: pick and place in box
+  enabled: true
+  note: Task H HAND
+- id: task_hp_piper
+  task_id: Task_HP
+  subset: base
+  prompt: 'pick and place '
+  enabled: true
+  note: TASK HP PIPER

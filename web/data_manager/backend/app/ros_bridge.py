@@ -35,6 +35,33 @@ FRESH_JOINT_S = 2.0
 FRESH_CAM_S = 2.0
 
 
+def _load_depth_enabled_map() -> dict[str, bool]:
+    """Inline-load CAMERA_DEPTH_ENABLED from config/camera_depth_flags.py.
+
+    Mirrored in recorder.py / sync.py — same path-probing pattern, since
+    config/ isn't a Python package and `from config...` won't resolve at
+    runtime.
+    """
+    import importlib.util
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidate = parent / "config" / "camera_depth_flags.py"
+        if candidate.is_file():
+            spec = importlib.util.spec_from_file_location(
+                "kai0_camera_depth_flags_bridge", candidate)
+            mod = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(mod)
+            return dict(mod.CAMERA_DEPTH_ENABLED)
+    # 找不到宏文件就当全部禁用 — 比误开订阅一通 depth topic 安全.
+    return {}
+
+
+# Per-camera depth on/off, populated once at import. Consumers (RclpyBridge)
+# check this map before subscribing or accepting incoming depth frames.
+_DEPTH_ENABLED_MAP = _load_depth_enabled_map()
+
+
 # ---------------------------- Mock ------------------------------------------
 class MockBridge:
     kind = "mock"
@@ -192,9 +219,11 @@ class RclpyBridge:
                     lambda msg, k=cam_name: self._on_cam_image(k, msg),
                     self._qos_sensor,
                 )
-                # 深度: 16-bit mono (encoding=16UC1), 单独缓存供 recorder 拉取
+                # 深度: 16-bit mono (encoding=16UC1), 单独缓存供 recorder 拉取.
+                # 仅当宏 (config/camera_depth_flags.py) 把该相机标记为 True 时
+                # 才订阅, 否则就算 cameras.yml 列了 topic 也不消费.
                 depth = cam.get("ros2_topic_depth")
-                if depth:
+                if depth and _DEPTH_ENABLED_MAP.get(cam_name, False):
                     depth = _normalize_topic(depth)
                     self._node.create_subscription(
                         self._Image, depth,

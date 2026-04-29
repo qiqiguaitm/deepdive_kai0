@@ -37,6 +37,17 @@ kill_ros2_orphans() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WEB_DIR="$REPO_ROOT/web/data_manager"
+
+# Load operational env overrides if .env present (KAI0_SYNC_REMOTES, BWLIMIT, ...).
+# .env is .gitignore'd; non-tracked. Delete the file to revert to code defaults.
+# Format: standard shell `KEY=value` (one per line, # comments allowed).
+if [[ -f "$WEB_DIR/.env" ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "$WEB_DIR/.env"
+    set +a
+fi
+
 BACKEND_DIR="$WEB_DIR/backend"
 FRONTEND_DIR="$WEB_DIR/frontend"
 LOG_DIR="$WEB_DIR/logs"

@@ -161,35 +161,47 @@ LeRobot 归档规范），视频端点会在线用 ffmpeg 转成 H.264 碎片 mp
 
 相机 `dropped` 计数仅用于 `CameraGrid` 展示，**不参与异常判定**，避免瞬时抖动刷红。
 
-## 新目录布局 (task/date/subset)
+## 目录布局 (v2: task/subset/date)
 
-数据原来按 `Task_X_YYYY-MM-DD/<subset>/...` 扁平摆, 现改成层级:
+数据布局演变:
+- v0 (扁平)   `<DATA_ROOT>/Task_X_YYYY-MM-DD/<subset>/...`
+- v1 (按日期) `<DATA_ROOT>/Task_X/YYYY-MM-DD/<subset>/...`
+- v2 (按子集) `<DATA_ROOT>/Task_X/<subset>/YYYY-MM-DD/...`   ← **当前**
 
 ```
 <DATA_ROOT>/
 ├── Task_A/
-│   ├── 2026-04-16/base/        # (data/, videos/, meta/ ...)
-│   ├── 2026-04-17/base/
-│   └── 2026-04-17/dagger/
+│   ├── base/
+│   │   ├── 2026-04-16/        # (data/, videos/, meta/ ...)
+│   │   ├── 2026-04-17/
+│   │   └── 2026-04-25/
+│   └── dagger/
+│       └── 2026-04-16/
 ├── Task_E/
-│   ├── 2026-04-17/base/
-│   └── 2026-04-20/base/
+│   └── base/
+│       ├── 2026-04-17/
+│       └── 2026-04-20/
 └── Task_P/...
 ```
 
+v2 把 subset 抬到日期之上 — 同一种数据 (`base` / `dagger`) 跨日期连成一棵子树,
+方便整 subset 做训练 / 同步 / 备份。
+
 内存 / SQLite / API URL / UI 里 `task_id` 仍用 **compound** 形式 (`Task_A_2026-04-16`),
-只有磁盘路径变了。所有构造/解析路径都走 `backend/app/layout.py`, 新写一律新布局,
-读旧数据会自动回落到扁平路径, 支持"迁了一半"的过渡状态。
+只有磁盘路径变了。所有构造/解析路径都走 `backend/app/layout.py`, 新写一律 v2,
+读旧数据按 v2 → v1 → v0 优先级回退, 支持"迁了一半"的过渡状态。
 
 ### 迁移历史数据
 ```bash
-# dry-run 看清楚要动什么
+# dry-run 看清楚要动什么 (同时识别 v0 → v2 和 v1 → v2)
 ./backend/.venv/bin/python backend/tools/migrate_layout.py
 # 确认无误后真干
 ./backend/.venv/bin/python backend/tools/migrate_layout.py --apply
 ```
-脚本只会动名字能匹配 `Task_*_YYYY-MM-DD` 的顶层目录, 其他东西 (`.tar` 备份 / `ckpt_downloads/` /
-`*.py`) 原地不动。同盘 mv 零拷贝, 秒级完成。
+脚本只会动数据子集 (内部带 `data/` / `meta/` / `videos/` 之一), 其他东西
+(`.tar` 备份 / `ckpt_downloads/` / `*.py`) 原地不动。同盘 mv 零拷贝, 秒级完成。
+迁移幂等: 已经是 v2 的目录会被跳过, 远端 (gf vePFS / bja2) 也用同一逻辑就地 rename
+(参见 `tools/kai0_migrate_v2.sh`, 已分发到远端 `/tmp/`), 无需重传 165 GB 历史数据。
 
 ## 实时数据同步 gf (vePFS/gpfs 共享卷)
 

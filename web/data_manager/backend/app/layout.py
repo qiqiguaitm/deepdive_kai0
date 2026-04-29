@@ -1,16 +1,20 @@
 """On-disk layout helpers.
 
-历史: 采集数据原来在 `<DATA_ROOT>/<Task_X_YYYY-MM-DD>/<subset>/...` 扁平布局;
-现在改成 `<DATA_ROOT>/<Task_X>/<YYYY-MM-DD>/<subset>/...` 层级布局, 同一个
-task 的不同日期聚在一个父目录下, 方便按 task 做训练 / 同步.
+历史:
+  v0 (扁平):   `<DATA_ROOT>/<Task_X_YYYY-MM-DD>/<subset>/...`
+  v1 (按日期): `<DATA_ROOT>/<Task_X>/<YYYY-MM-DD>/<subset>/...`
+  v2 (按子集): `<DATA_ROOT>/<Task_X>/<subset>/<YYYY-MM-DD>/...`   ← 当前
+
+v2 把 subset 抬到日期之上, 让同一种数据 (base / dagger) 跨日期连成一棵树,
+方便整 subset 的训练 / 同步 / 备份。
 
 约定:
-  * 内存 / SQLite / API URL / UI 里依然用 **compound** 形式 "Task_X_YYYY-MM-DD"
-    作为 task_id (最少改动面), 只是磁盘路径不同.
-  * 所有构造/解析盘路径的点必须过这两个函数 (`compound_to_root`, `path_to_compound`),
-    不要直接 `DATA_ROOT / task_id`.
-  * 写新 episode 时一律走新布局; 读既有 episode 时先查新, 没有再回退老扁平路径,
-    支持"一部分已迁移, 一部分还没"的中间态.
+  * 内存 / SQLite / API URL / UI 里继续用 **compound** 形式 "Task_X_YYYY-MM-DD"
+    作 task_id (最少改动面), 只是磁盘路径不同。
+  * 所有构造/解析盘路径的点必须过 `compound_to_subset_root` / `path_to_compound`,
+    不要直接 `DATA_ROOT / task_id`。
+  * 写新 episode 一律走 v2; 读既有 episode 时 v2 → v1 → v0 优先级回退,
+    支持"一部分已迁移, 一部分还没"的中间态。
 """
 from __future__ import annotations
 
@@ -36,46 +40,60 @@ def split_compound(compound: str) -> tuple[str, str] | None:
     return (m.group(1), m.group(2)) if m else None
 
 
-def compound_to_root(compound: str) -> Path:
-    """Compound task_id → 盘上 **<task>/<date>** 目录.
+def _v2_path(task: str, subset: str, date: str) -> Path:
+    return DATA_ROOT / task / subset / date
 
-    选择策略:
-      1. 如果有日期后缀:
-         - `DATA_ROOT/<task>/<date>` 存在 → 用新布局
-         - 否则若 `DATA_ROOT/<compound>` 存在 → 用老扁平 (未迁移)
-         - 都不存在 → 返回新布局 (caller 会在写新 episode 时 mkdir)
-      2. 无日期后缀 (例如训练产出的 'Task_A'): 退到 `DATA_ROOT/<compound>`
-    """
-    split = split_compound(compound)
-    if split is None:
-        return DATA_ROOT / compound  # no date → flat, as-is
-    task, date = split
-    new = DATA_ROOT / task / date
-    if new.exists():
-        return new
-    old = DATA_ROOT / compound
-    if old.exists():
-        return old
-    return new  # default for fresh writes
+
+def _v1_path(task: str, subset: str, date: str) -> Path:
+    return DATA_ROOT / task / date / subset
+
+
+def _v0_path(task: str, subset: str, date: str) -> Path:
+    return DATA_ROOT / f"{task}_{date}" / subset
 
 
 def compound_to_subset_root(compound: str, subset: str) -> Path:
-    """`'Task_A_2026-04-16', 'base'` → `DATA_ROOT/Task_A/2026-04-16/base` (or old)."""
-    return compound_to_root(compound) / subset
+    """`'Task_A_2026-04-16', 'base'` → 该 episode 子目录的真实磁盘路径.
+
+    优先级: v2 (`<task>/<subset>/<date>`) → v1 (`<task>/<date>/<subset>`)
+            → v0 (`<task>_<date>/<subset>`) → v2 (默认, caller mkdir).
+
+    无日期后缀的 compound (训练产出的 'Task_A' 等) 直接 `DATA_ROOT/<compound>/<subset>`,
+    不属于本布局体系, 走老路。
+    """
+    sp = split_compound(compound)
+    if sp is None:
+        return DATA_ROOT / compound / subset
+    task, date = sp
+    v2 = _v2_path(task, subset, date)
+    if v2.exists():
+        return v2
+    v1 = _v1_path(task, subset, date)
+    if v1.exists():
+        return v1
+    v0 = _v0_path(task, subset, date)
+    if v0.exists():
+        return v0
+    return v2
 
 
 def new_task_subset_root(task: str, subset: str) -> Path:
-    """写新 episode 用: 一律走新布局 `<DATA_ROOT>/<task>/<today>/<subset>`."""
-    return DATA_ROOT / task / datetime.date.today().strftime("%Y-%m-%d") / subset
+    """写新 episode 用: 一律走 v2 `<DATA_ROOT>/<task>/<subset>/<today>`."""
+    return _v2_path(task, subset, datetime.date.today().strftime("%Y-%m-%d"))
 
 
 def path_to_compound(p: Path) -> tuple[str, str] | None:
     """盘上一个 parquet 文件路径 → `(compound_task_id, subset)`.
 
     支持:
-      新布局  `.../TASK/DATE/SUBSET/data/chunk-000/episode_NNNNNN.parquet`
-      老布局  `.../TASK_DATE/SUBSET/data/chunk-000/episode_NNNNNN.parquet`
+      v2  `.../TASK/SUBSET/DATE/data/chunk-000/episode_NNNNNN.parquet`
+      v1  `.../TASK/DATE/SUBSET/data/chunk-000/episode_NNNNNN.parquet`
+      v0  `.../TASK_DATE/SUBSET/data/chunk-000/episode_NNNNNN.parquet`
     None 表示非法路径 (不在 DATA_ROOT 下 / 层数不对 / 非 episode).
+
+    v1 / v2 都是 task/X/Y 三段, 按 X 是否是 YYYY-MM-DD 区分:
+      - X 是日期 → v1 (date 在中间)
+      - X 不是日期 → v2 (subset 在中间)
     """
     try:
         rel = p.resolve().relative_to(DATA_ROOT)
@@ -85,21 +103,25 @@ def path_to_compound(p: Path) -> tuple[str, str] | None:
     # 至少要有 data/chunk-*/*.parquet 这三段
     if len(parts) < 4 or parts[-3] != "data" or not parts[-2].startswith("chunk-"):
         return None
-    # 前缀: ... / TASK [/ DATE] / SUBSET / data
-    prefix = parts[:-3]  # TASK[/DATE]/SUBSET
-    if len(prefix) == 2:  # 老布局: (compound, subset)
+    # 前缀: ... / TASK [/ X] [/ Y] / data, 其中前缀 2 段=v0, 3 段=v1 or v2
+    prefix = parts[:-3]
+    if len(prefix) == 2:  # v0: (compound, subset)
         compound, subset = prefix
         return compound, subset
-    if len(prefix) == 3:  # 新布局: (task, date, subset) — 要求 date 是 YYYY-MM-DD
-        task, date, subset = prefix
-        if _DATE_RE.match(date):
-            return f"{task}_{date}", subset
+    if len(prefix) == 3:
+        a, b, c = prefix
+        if _DATE_RE.match(b):  # v1: (task, date, subset)
+            return f"{a}_{b}", c
+        if _DATE_RE.match(c):  # v2: (task, subset, date)
+            return f"{a}_{c}", b
     return None
 
 
 def glob_all_episodes():
-    """遍历 DATA_ROOT, yield 每个 episode.parquet 的 Path (新+老布局一起)."""
-    # 老布局: <DATA_ROOT>/*/*/data/chunk-*/episode_*.parquet  (深度 5)
-    # 新布局: <DATA_ROOT>/*/*/*/data/chunk-*/episode_*.parquet (深度 6)
+    """遍历 DATA_ROOT, yield 每个 episode.parquet 的 Path (v0 + v1 + v2 一起)."""
+    # v0 扁平:   <DATA_ROOT>/*/*/data/chunk-*/episode_*.parquet            (深 5)
+    # v1 按日期: <DATA_ROOT>/*/*/*/data/chunk-*/episode_*.parquet          (深 6)
+    # v2 按子集: <DATA_ROOT>/*/*/*/data/chunk-*/episode_*.parquet          (深 6)
+    # v1 / v2 同深度同 glob, 一次返回, path_to_compound 内部按 X 是否是日期区分.
     yield from DATA_ROOT.glob("*/*/data/chunk-*/episode_*.parquet")
     yield from DATA_ROOT.glob("*/*/*/data/chunk-*/episode_*.parquet")
