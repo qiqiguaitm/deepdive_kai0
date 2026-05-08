@@ -40,21 +40,10 @@ info() { echo -e "${CYAN}[INFO]${NC} $1"; }
 
 ACTION="${1:-start}"
 
-# ── Deployment mode marker (P1: replay function safety gate) ──
-# Replay can only run in 'autonomy' mode; teleop arms publishing to /master/joint_*
-# would conflict with replay's publish path. Marker lets backend pre-flight
-# reject replay attempts before any ros2 call.
-# IMPORTANT: only own/clear the marker when it currently says 'teleop' — never
-# stomp an 'autonomy' marker (autonomy may still be running concurrently and
-# replay would be wrongly rejected after this stop).
-KAI0_DEPLOYMENT_MARKER=/tmp/kai0_deployment_mode
-if [[ "$ACTION" == "start" || "$ACTION" == "restart" ]]; then
-    echo teleop > "$KAI0_DEPLOYMENT_MARKER"
-elif [[ "$ACTION" == "stop" ]]; then
-    if [[ -f "$KAI0_DEPLOYMENT_MARKER" && "$(cat "$KAI0_DEPLOYMENT_MARKER" 2>/dev/null)" == "teleop" ]]; then
-        rm -f "$KAI0_DEPLOYMENT_MARKER"
-    fi
-fi
+# Replay support has migrated to start_autonomy.sh (`--replay [--sim]`).
+# data_collect intentionally does NOT touch /tmp/kai0_deployment_mode: when only
+# data_collect is running the marker is absent, so backend preflight rejects
+# replay attempts (correct — teleop publishes /master/joint_* and would conflict).
 
 # ── Pre-flight: only on start/restart ──
 if [[ "$ACTION" == "start" || "$ACTION" == "restart" ]]; then
