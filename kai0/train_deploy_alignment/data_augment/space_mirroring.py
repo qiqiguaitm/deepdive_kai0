@@ -29,62 +29,124 @@ if str(_utils_dir) not in sys.path:
 try:
     from merge_lerobot import merge_repos
     MERGE_AVAILABLE = True
-except ImportError:
+except (ImportError, RuntimeError):
+    # ImportError: file missing. RuntimeError: lerobot pkg not installed (its
+    # internal guard re-raises). Either way merge is unavailable; create-mirror
+    # still works.
     MERGE_AVAILABLE = False
-    print("Warning: merge_lerobot module not available. Merge functionality will be disabled.")
+    merge_repos = None  # type: ignore
 
 
 # ==================== Core Utility Functions ====================
 
-def swap_arms_in_array(arr: np.ndarray, left_dim: int = 7, right_dim: int = 7) -> np.ndarray:
-    """Swap the first left_dim dimensions with the last right_dim dimensions of an array"""
+# Per-joint sign pattern for body-mirror across the sagittal (YZ) plane on the
+# Agilex Piper 6-DOF + gripper chain (yaw-pitch-pitch-yaw-pitch-roll + grip).
+# Joints whose axis flips under mirror (yaw j0, wrist yaw j3, wrist roll j5)
+# need their sign negated; pitches (j1/j2/j4) keep sign; gripper (j6) is a
+# scalar opening with no rotational sign meaning.
+#
+# A pure left↔right swap WITHOUT this sign flip is the bug we hit in the first
+# round of mirror tests: the rerun joints and the mirrored mp4 visually
+# disagreed because the recorded poses, after swap, weren't mirror-of-original
+# — they were "right-arm joint values executed by the left arm", a different
+# configuration in body frame.
+PIPER_JOINT_MIRROR_SIGN = (-1.0, 1.0, 1.0, -1.0, 1.0, -1.0, 1.0)
+
+
+def _resolve_sign(sign_pattern, ndim: int) -> np.ndarray:
+    """Normalize sign_pattern arg → length-ndim ndarray of ±1.
+
+    sign_pattern:
+      None                       → use PIPER_JOINT_MIRROR_SIGN (default)
+      False / 'none' / 'noflip'  → all-ones (legacy pure-swap behavior)
+      tuple/list/np.ndarray      → custom per-joint sign vector
+    """
+    if sign_pattern is None:
+        sp = PIPER_JOINT_MIRROR_SIGN
+    elif sign_pattern is False or (isinstance(sign_pattern, str)
+                                   and sign_pattern.lower() in ("none", "noflip", "off")):
+        return np.ones(ndim, dtype=np.float64)
+    else:
+        sp = sign_pattern
+    arr = np.asarray(sp, dtype=np.float64)
+    if arr.shape == (ndim,):
+        return arr
+    raise ValueError(f"sign_pattern must be length {ndim}, got shape {arr.shape}")
+
+
+def swap_arms_in_array(arr: np.ndarray, left_dim: int = 7, right_dim: int = 7,
+                        sign_pattern=None) -> np.ndarray:
+    """Mirror a [left(left_dim) | right(right_dim)] joint vector across the
+    body's sagittal plane: swap L↔R AND negate yaw/roll dims so the resulting
+    pose is the geometric mirror, not just relocated joint values.
+
+    sign_pattern: see _resolve_sign(). Default = PIPER_JOINT_MIRROR_SIGN.
+    """
     if not isinstance(arr, np.ndarray):
         arr = np.array(arr)
-    
+
     if arr.ndim == 0:
         return arr
-    
+
     arr_flat = arr.flatten()
     total_dim = left_dim + right_dim
-    
+
     if len(arr_flat) != total_dim:
         raise ValueError(
             f"Array dimension mismatch: expected {total_dim} dims (left{left_dim} + right{right_dim}), "
             f"got {len(arr_flat)} dims"
         )
-    
-    left_arm = arr_flat[:left_dim].copy()
-    right_arm = arr_flat[left_dim:left_dim + right_dim].copy()
+
+    sign_l = _resolve_sign(sign_pattern, left_dim)
+    sign_r = _resolve_sign(sign_pattern, right_dim) if right_dim != left_dim else sign_l
+
+    left_arm = arr_flat[:left_dim] * sign_l
+    right_arm = arr_flat[left_dim:left_dim + right_dim] * sign_r
     swapped = np.concatenate([right_arm, left_arm])
-    
+
     if arr.ndim > 1:
         swapped = swapped.reshape(arr.shape)
-    
+
     return swapped
 
 
-def swap_array_dims_list(arr: List[float], left_dim: int = 7, right_dim: int = 7, keep_padding: bool = True) -> List[float]:
-    """Swap the first and last dimensions of a list (for JSON/JSONL)"""
+def swap_array_dims_list(arr: List[float], left_dim: int = 7, right_dim: int = 7,
+                         keep_padding: bool = True, sign_pattern=None) -> List[float]:
+    """Same as swap_arms_in_array but for plain Python lists (JSON/JSONL).
+    Default applies PIPER_JOINT_MIRROR_SIGN; pass sign_pattern=False for legacy
+    pure-swap (use only for stats fields where sign doesn't apply, e.g. std)."""
     if not isinstance(arr, list):
         arr = list(arr)
-    
+
     total_dim = left_dim + right_dim
-    
+
     if len(arr) < total_dim:
         raise ValueError(
             f"Insufficient array dimensions: expected at least {total_dim} dims (left{left_dim} + right{right_dim}), "
             f"got {len(arr)} dims"
         )
-    
-    left_arm = arr[:left_dim].copy()
-    right_arm = arr[left_dim:left_dim + right_dim].copy()
+
+    sign_l = _resolve_sign(sign_pattern, left_dim)
+    sign_r = _resolve_sign(sign_pattern, right_dim) if right_dim != left_dim else sign_l
+
+    left_arm = [a * float(s) for a, s in zip(arr[:left_dim], sign_l)]
+    right_arm = [a * float(s) for a, s in zip(arr[left_dim:left_dim + right_dim], sign_r)]
     swapped = right_arm + left_arm
-    
+
     if keep_padding and len(arr) > total_dim:
         padding = arr[total_dim:]
         swapped = swapped + padding
-    
+
     return swapped
+
+
+_EP_NAME_RE = __import__("re").compile(r"^episode_(\d+)\.")
+
+
+def _ep_id_from_parquet_name(name: str) -> Optional[int]:
+    """`episode_000042.parquet` → 42; non-matching → None."""
+    m = _EP_NAME_RE.match(name)
+    return int(m.group(1)) if m else None
 
 
 # ==================== Parquet Processing ====================
@@ -95,8 +157,11 @@ def swap_arms_in_parquet(
     columns: Optional[List[str]] = None,
     left_dim: int = 7,
     right_dim: int = 7,
+    sign_pattern=None,
 ) -> Tuple[str, bool, str]:
-    """Process a single parquet file, swap the first and last dimensions of specified columns"""
+    """Process a single parquet file: swap left↔right halves AND apply joint
+    sign mirror (default Piper) for action/state columns. Pass sign_pattern=False
+    for legacy pure-swap (only valid if you know your URDF doesn't need it)."""
     try:
         df = pd.read_parquet(str(input_path))
         
@@ -136,7 +201,7 @@ def swap_arms_in_parquet(
                             f"Unsupported data type for column {col} row {idx}: {type(val)}"
                         )
                     
-                    swapped_arr = swap_arms_in_array(arr, left_dim, right_dim)
+                    swapped_arr = swap_arms_in_array(arr, left_dim, right_dim, sign_pattern)
                     swapped_values.append(swapped_arr)
                 
                 except Exception as e:
@@ -168,31 +233,40 @@ def process_parquet_files(
     left_dim: int = 7,
     right_dim: int = 7,
     num_workers: int = 4,
-) -> None:
-    """Batch process parquet files"""
+    episode_filter: Optional[List[int]] = None,
+    sign_pattern=None,
+) -> int:
+    """Batch process parquet files. Returns # of episodes processed.
+
+    episode_filter: optional list of episode ids to keep (e.g. [0,1,2]); None = all.
+    """
     parquet_files = list(input_dir.rglob('*.parquet'))
+    if episode_filter is not None:
+        keep = set(int(e) for e in episode_filter)
+        parquet_files = [f for f in parquet_files
+                         if _ep_id_from_parquet_name(f.name) in keep]
     
     if not parquet_files:
         print(f"Warning: No parquet files found in {input_dir}")
-        return
-    
+        return 0
+
     print(f"Found {len(parquet_files)} parquet files")
-    
+
     def get_output_path(input_file: Path) -> Path:
         relative = input_file.relative_to(input_dir)
         return output_dir / relative
-    
+
     tasks = [(f, get_output_path(f)) for f in parquet_files]
-    
+
     success_count = 0
     fail_count = 0
-    
+
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         future_to_file = {
-            executor.submit(swap_arms_in_parquet, inp, out, columns, left_dim, right_dim): inp
+            executor.submit(swap_arms_in_parquet, inp, out, columns, left_dim, right_dim, sign_pattern): inp
             for inp, out in tasks
         }
-        
+
         for future in tqdm(as_completed(future_to_file), total=len(tasks), desc="Processing parquet"):
             input_path = future_to_file[future]
             try:
@@ -205,8 +279,9 @@ def process_parquet_files(
             except Exception as e:
                 print(f"✗ [{input_path}] Processing exception: {str(e)}")
                 fail_count += 1
-    
+
     print(f"Parquet processing complete: {success_count} succeeded, {fail_count} failed")
+    return success_count
 
 
 # ==================== JSON Processing ====================
@@ -216,41 +291,49 @@ def process_norm_stats_json(
     output_path: Path,
     left_dim: int = 7,
     right_dim: int = 7,
+    sign_pattern=None,
 ) -> Tuple[str, bool, str]:
-    """Process norm_stats.json file"""
+    """Process norm_stats.json file.
+
+    Apply sign-flip to `mean` (mean of flipped data = sign-flipped mean), and
+    legacy pure-swap to std/q01/q99 — those would need careful handling under
+    sign flip (std stays positive, q01↔-q99 swap, etc.). For correctness,
+    re-run compute_norm_stats on the mirrored dataset rather than relying on
+    these transformed values."""
     try:
         with open(input_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        
+
         if "norm_stats" not in data:
             return (str(input_path), False, "Field 'norm_stats' not found in JSON file")
-        
+
         norm_stats = data["norm_stats"]
-        
+
+        # mean: gets full sign-flip+swap; std/q01/q99: pure swap (sign_pattern=False)
+        STAT_SIGN = {"mean": sign_pattern, "std": False, "q01": False, "q99": False}
         for key in ["state", "actions"]:
             if key not in norm_stats:
                 continue
-            
             stat_item = norm_stats[key]
-            
-            for stat_key in ["mean", "std", "q01", "q99"]:
+            for stat_key, sp in STAT_SIGN.items():
                 if stat_key in stat_item:
                     try:
                         stat_item[stat_key] = swap_array_dims_list(
                             stat_item[stat_key],
                             left_dim,
                             right_dim,
-                            keep_padding=True
+                            keep_padding=True,
+                            sign_pattern=sp,
                         )
                     except Exception as e:
                         print(f"Warning: Error processing norm_stats.{key}.{stat_key}: {e}")
-        
+
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
-        
-        return (str(input_path), True, "Processing successful")
-    
+
+        return (str(input_path), True, "Processing successful (recommend recompute_norm_stats afterwards)")
+
     except Exception as e:
         return (str(input_path), False, f"Error: {str(e)}")
 
@@ -260,34 +343,33 @@ def process_norm_stats_json(
 def swap_stats_dims(
     stats_dict: Dict[str, Any],
     left_dim: int = 7,
-    right_dim: int = 7
+    right_dim: int = 7,
+    sign_pattern=None,
 ) -> Dict[str, Any]:
-    """Swap left/right arm data in stats dictionary"""
+    """Swap left/right arm data in stats dictionary. Sign-flip is applied to
+    `mean` only; std/min/max are pure-swapped (see process_norm_stats_json
+    docstring for why)."""
     # Swap hand_left and hand_right
     if "observation.images.hand_left" in stats_dict and "observation.images.hand_right" in stats_dict:
         hand_left = stats_dict["observation.images.hand_left"]
         hand_right = stats_dict["observation.images.hand_right"]
         stats_dict["observation.images.hand_left"] = hand_right
         stats_dict["observation.images.hand_right"] = hand_left
-    
-    # Process observation.state and action
+
+    STAT_SIGN = {"mean": sign_pattern, "std": False, "min": False, "max": False}
     for key in ["observation.state", "action"]:
         if key not in stats_dict:
             continue
-        
         stat_item = stats_dict[key]
-        
-        for stat_key in ["min", "max", "mean", "std"]:
+        for stat_key, sp in STAT_SIGN.items():
             if stat_key in stat_item:
                 try:
                     stat_item[stat_key] = swap_array_dims_list(
-                        stat_item[stat_key],
-                        left_dim,
-                        right_dim
+                        stat_item[stat_key], left_dim, right_dim, sign_pattern=sp,
                     )
                 except Exception as e:
                     print(f"Warning: Error processing {key}.{stat_key}: {e}")
-    
+
     return stats_dict
 
 
@@ -296,27 +378,28 @@ def process_episodes_stats_jsonl(
     output_path: Path,
     left_dim: int = 7,
     right_dim: int = 7,
+    sign_pattern=None,
 ) -> Tuple[str, bool, str]:
     """Process episodes_stats.jsonl file"""
     try:
         with open(input_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-        
+
         processed_lines = []
         processed_count = 0
         error_count = 0
-        
+
         for line_num, line in enumerate(lines, 1):
             line = line.strip()
             if not line:
                 processed_lines.append('')
                 continue
-            
+
             try:
                 data = json.loads(line)
-                
+
                 if "stats" in data and isinstance(data["stats"], dict):
-                    data["stats"] = swap_stats_dims(data["stats"], left_dim, right_dim)
+                    data["stats"] = swap_stats_dims(data["stats"], left_dim, right_dim, sign_pattern)
                     processed_count += 1
                 
                 processed_lines.append(json.dumps(data, ensure_ascii=False))
@@ -459,7 +542,133 @@ def merge_lerobot_datasets(
     )
 
 
+# ==================== Video / Depth helpers (per-camera) ====================
+
+# Two naming conventions are used in the wild for video sub-dirs:
+#   bare name      → top_head / hand_left / hand_right            (kai0 collected data)
+#   prefixed name  → observation.images.top_head / .hand_left / …  (some HF mirrors)
+# Match either when sourcing.
+def _find_cam_dir(parent: Path, cam_name: str) -> Optional[Path]:
+    for candidate in (cam_name, f"observation.images.{cam_name}"):
+        p = parent / candidate
+        if p.is_dir():
+            return p
+    return None
+
+
+def flip_depth_zarr(src_zarr: Path, dst_zarr: Path) -> None:
+    """Horizontal-flip every frame of a uint16 depth zarr [T, H, W]."""
+    import zarr  # lazy
+    dst_zarr.parent.mkdir(parents=True, exist_ok=True)
+    z_in = zarr.open(str(src_zarr), mode="r")
+    z_out = zarr.open(str(dst_zarr), mode="w",
+                       shape=z_in.shape, chunks=z_in.chunks, dtype=z_in.dtype)
+    for i in range(int(z_in.shape[0])):
+        z_out[i] = np.ascontiguousarray(z_in[i][:, ::-1])
+
+
+def _flip_videos_for_episodes(src_dir: Path, dst_dir: Path,
+                              episode_filter: Optional[List[int]],
+                              num_workers: int) -> int:
+    """Flip mp4s under src_dir/episode_NNNNNN.mp4 → dst_dir/. Returns count."""
+    if not src_dir.is_dir():
+        return 0
+    files = sorted(src_dir.glob("*.mp4"))
+    if episode_filter is not None:
+        keep = set(int(e) for e in episode_filter)
+        files = [f for f in files if _ep_id_from_parquet_name(f.name) in keep]
+    tasks = [(str(f), str(dst_dir / f.name)) for f in files]
+    if not tasks:
+        return 0
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    success = 0
+    with ProcessPoolExecutor(max_workers=num_workers) as ex:
+        futs = {ex.submit(flip_video, inp, out): inp for inp, out in tasks}
+        for fut in tqdm(as_completed(futs), total=len(tasks), desc=f"  → {dst_dir.name}"):
+            _, ok, msg = fut.result()
+            if ok:
+                success += 1
+            else:
+                print(f"  ✗ {futs[fut]}: {msg}")
+    return success
+
+
+def _flip_zarrs_for_episodes(src_dir: Path, dst_dir: Path,
+                             episode_filter: Optional[List[int]]) -> int:
+    """Flip depth zarr dirs under src_dir/episode_NNNNNN.zarr/ → dst_dir/.
+    Sequential (zarr writes are I/O bound but mostly fine without pool); skip
+    silently if src_dir absent."""
+    if not src_dir.is_dir():
+        return 0
+    zdirs = sorted([p for p in src_dir.iterdir()
+                    if p.is_dir() and p.suffix == ".zarr"])
+    if episode_filter is not None:
+        keep = set(int(e) for e in episode_filter)
+        zdirs = [p for p in zdirs if _ep_id_from_parquet_name(p.name) in keep]
+    success = 0
+    for src_z in tqdm(zdirs, desc=f"  → {dst_dir.name}"):
+        try:
+            flip_depth_zarr(src_z, dst_dir / src_z.name)
+            success += 1
+        except Exception as e:
+            print(f"  ✗ {src_z}: {e}")
+    return success
+
+
+# ==================== Meta helpers ====================
+
+def _filter_meta_jsonl(src_path: Path, dst_path: Path,
+                       episode_filter: Optional[List[int]]) -> int:
+    """Copy `episodes.jsonl`, keeping only entries whose episode id ∈ filter
+    (or all if None). Accepts either `episode_index` (LeRobot v2) or
+    `episode_id` (kai0 collected) as the id field. Returns kept count."""
+    if not src_path.is_file():
+        return 0
+    keep = None if episode_filter is None else set(int(e) for e in episode_filter)
+    out_lines = []
+    with open(src_path) as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                ep_id = obj.get("episode_index", obj.get("episode_id"))
+                if keep is None or ep_id in keep:
+                    out_lines.append(line)
+            except json.JSONDecodeError:
+                out_lines.append(line)
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(dst_path, "w") as f:
+        f.write("\n".join(out_lines))
+        if out_lines:
+            f.write("\n")
+    return len(out_lines)
+
+
+def _patch_info_json(src_path: Path, dst_path: Path,
+                     n_episodes: int, n_frames: int, n_cams: int) -> None:
+    """Read src info.json, update totals + splits, write to dst."""
+    if not src_path.is_file():
+        return
+    with open(src_path) as f:
+        info = json.load(f)
+    info["total_episodes"] = int(n_episodes)
+    info["total_frames"] = int(n_frames)
+    info["total_videos"] = int(n_episodes * n_cams)
+    info["splits"] = {"train": f"0:{int(n_episodes)}"}
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(dst_path, "w") as f:
+        json.dump(info, f, indent=2, ensure_ascii=False)
+
+
 # ==================== Main Functions ====================
+
+# Camera roles whose RGB+depth are mirrored. top_head: in-place flip;
+# hand_left ↔ hand_right: swap+flip.
+CAMS_FLIP_INPLACE = ("top_head",)
+CAMS_SWAP_PAIR = ("hand_left", "hand_right")
+
 
 def create_mirror_dataset(
     src_path: str,
@@ -467,118 +676,136 @@ def create_mirror_dataset(
     left_dim: int = 7,
     right_dim: int = 7,
     num_workers: int = 4,
-) -> None:
-    """Create mirrored dataset"""
+    sign_pattern=None,
+    episode_filter: Optional[List[int]] = None,
+) -> Dict[str, Any]:
+    """Create mirrored dataset.
+
+    sign_pattern: per-joint sign vector for body-mirror; default Piper
+                  [-1,1,1,-1,1,-1,1] (j0/j3/j5 negate, others keep).
+                  Pass False for legacy pure-swap.
+    episode_filter: optional list of episode_index to keep (None = all).
+
+    Returns dict with summary {episodes, total_frames, src, dst}.
+    """
     src_root = Path(src_path).expanduser().resolve()
     tgt_root = Path(tgt_path).expanduser().resolve()
-    
     if not src_root.exists():
         raise RuntimeError(f"Source path does not exist: {src_root}")
-    
     print("=" * 60)
-    print("Starting to create mirrored dataset")
+    print("Space Mirror — create mirrored dataset")
     print("=" * 60)
-    print(f"Source path: {src_root}")
-    print(f"Target path: {tgt_root}")
+    print(f"  source       : {src_root}")
+    print(f"  target       : {tgt_root}")
+    print(f"  episode_filter: {episode_filter if episode_filter is not None else 'all'}")
+    eff_sign = _resolve_sign(sign_pattern, left_dim).tolist()
+    print(f"  joint sign   : {eff_sign}  (PIPER default = {list(PIPER_JOINT_MIRROR_SIGN)})")
     print()
-    
-    # 1. Process norm_stats.json
-    print("[1/5] Processing norm_stats.json...")
-    src_norm_stats = src_root / "norm_stats.json"
-    if src_norm_stats.exists():
-        tgt_norm_stats = tgt_root / "norm_stats.json"
-        result, success, msg = process_norm_stats_json(src_norm_stats, tgt_norm_stats, left_dim, right_dim)
-        if success:
-            print(f"✓ norm_stats.json processing complete")
-        else:
-            print(f"✗ norm_stats.json processing failed: {msg}")
+
+    # ── 1. norm_stats.json (sign-flipped mean, plain swap for std/q01/q99) ──
+    print("[1/5] norm_stats.json …")
+    src_norm = src_root / "norm_stats.json"
+    if src_norm.exists():
+        _, ok, msg = process_norm_stats_json(
+            src_norm, tgt_root / "norm_stats.json",
+            left_dim, right_dim, sign_pattern)
+        print("  " + ("✓ " + msg if ok else "✗ " + msg))
     else:
-        print("  Skipping: norm_stats.json does not exist")
-    print()
-    
-    # 2. Process episodes_stats.jsonl
-    print("[2/5] Processing episodes_stats.jsonl...")
-    src_episodes_stats = src_root / "meta" / "episodes_stats.jsonl"
-    if src_episodes_stats.exists():
-        tgt_episodes_stats = tgt_root / "meta" / "episodes_stats.jsonl"
-        result, success, msg = process_episodes_stats_jsonl(src_episodes_stats, tgt_episodes_stats, left_dim, right_dim)
-        if success:
-            print(f"✓ episodes_stats.jsonl processing complete: {msg}")
-        else:
-            print(f"✗ episodes_stats.jsonl processing failed: {msg}")
+        print("  (no norm_stats.json — skip)")
+
+    # ── 2. episodes_stats.jsonl ──
+    print("[2/5] meta/episodes_stats.jsonl …")
+    src_es = src_root / "meta" / "episodes_stats.jsonl"
+    if src_es.exists():
+        _, ok, msg = process_episodes_stats_jsonl(
+            src_es, tgt_root / "meta" / "episodes_stats.jsonl",
+            left_dim, right_dim, sign_pattern)
+        print("  " + ("✓ " + msg if ok else "✗ " + msg))
     else:
-        print("  Skipping: episodes_stats.jsonl does not exist")
+        print("  (no episodes_stats.jsonl — skip)")
+
+    # ── 3. parquet (action + state, sign + swap, optional ep filter) ──
+    print("[3/5] data/chunk-*/episode_*.parquet …")
+    n_eps = process_parquet_files(
+        src_root / "data", tgt_root / "data", None,
+        left_dim, right_dim, num_workers,
+        episode_filter=episode_filter, sign_pattern=sign_pattern)
+
+    # ── 4. videos: top_head flip + hand_left⇄hand_right swap+flip; same for *_depth ──
+    print("[4/5] videos (RGB + depth zarr) …")
+    src_videos = src_root / "videos"
+    n_cams_present = 0
+    if src_videos.is_dir():
+        chunks = sorted([d for d in src_videos.iterdir()
+                         if d.is_dir() and d.name.startswith("chunk-")])
+        for chunk in chunks:
+            tgt_chunk = tgt_root / "videos" / chunk.name
+            # top_head (RGB + depth): in-place flip
+            for cam in CAMS_FLIP_INPLACE:
+                src_rgb = _find_cam_dir(chunk, cam)
+                if src_rgb is not None:
+                    _flip_videos_for_episodes(src_rgb, tgt_chunk / cam,
+                                              episode_filter, num_workers)
+                    n_cams_present += 1
+                src_dep = _find_cam_dir(chunk, f"{cam}_depth")
+                if src_dep is not None:
+                    _flip_zarrs_for_episodes(src_dep, tgt_chunk / f"{cam}_depth",
+                                             episode_filter)
+            # hand_left ↔ hand_right (RGB + depth): swap+flip
+            cam_l, cam_r = CAMS_SWAP_PAIR
+            sl_rgb, sr_rgb = _find_cam_dir(chunk, cam_l), _find_cam_dir(chunk, cam_r)
+            if sl_rgb is not None and sr_rgb is not None:
+                _flip_videos_for_episodes(sr_rgb, tgt_chunk / cam_l,
+                                          episode_filter, num_workers)
+                _flip_videos_for_episodes(sl_rgb, tgt_chunk / cam_r,
+                                          episode_filter, num_workers)
+                n_cams_present += 2
+            sl_dep = _find_cam_dir(chunk, f"{cam_l}_depth")
+            sr_dep = _find_cam_dir(chunk, f"{cam_r}_depth")
+            if sl_dep is not None and sr_dep is not None:
+                _flip_zarrs_for_episodes(sr_dep, tgt_chunk / f"{cam_l}_depth",
+                                         episode_filter)
+                _flip_zarrs_for_episodes(sl_dep, tgt_chunk / f"{cam_r}_depth",
+                                         episode_filter)
+
+    # ── 5. meta files: episodes.jsonl filtered, info.json patched, tasks copied ──
+    print("[5/5] meta files (episodes.jsonl / info.json / tasks.jsonl) …")
+    src_meta = src_root / "meta"
+    tgt_meta = tgt_root / "meta"
+    tgt_meta.mkdir(parents=True, exist_ok=True)
+    kept = _filter_meta_jsonl(src_meta / "episodes.jsonl",
+                              tgt_meta / "episodes.jsonl", episode_filter)
+    # tasks.jsonl + relabel_meta.json are episode-agnostic — copy as is
+    for fname in ("tasks.jsonl", "relabel_meta.json"):
+        s = src_meta / fname
+        if s.is_file():
+            shutil.copy2(s, tgt_meta / fname)
+    # frame totals: re-read mirrored parquets
+    total_frames = 0
+    for pq in (tgt_root / "data").rglob("*.parquet"):
+        try:
+            import pyarrow.parquet as _pq
+            total_frames += _pq.read_metadata(str(pq)).num_rows
+        except Exception:
+            pass
+    n_cams_per_episode = max(1, n_cams_present // max(1, len(chunks) if src_videos.is_dir() else 1))
+    _patch_info_json(src_meta / "info.json", tgt_meta / "info.json",
+                     n_episodes=kept if episode_filter else n_eps,
+                     n_frames=total_frames,
+                     n_cams=n_cams_per_episode)
+
+    summary = {
+        "source": str(src_root), "target": str(tgt_root),
+        "episodes": kept if episode_filter else n_eps,
+        "total_frames": total_frames,
+        "joint_sign": eff_sign,
+    }
     print()
-    
-    # 3. Process parquet files
-    print("[3/5] Processing parquet files...")
-    src_data_dir = src_root / "data"
-    if src_data_dir.exists():
-        tgt_data_dir = tgt_root / "data"
-        process_parquet_files(src_data_dir, tgt_data_dir, None, left_dim, right_dim, num_workers)
-        print("✓ All parquet files processing complete")
-    else:
-        print("  Skipping: data directory does not exist")
-    print()
-    
-    # 4. Process video files
-    print("[4/5] Flipping video files...")
-    src_videos_dir = src_root / "videos"
-    if src_videos_dir.exists():
-        # Find all chunk directories
-        chunks = sorted([d for d in src_videos_dir.iterdir() if d.is_dir() and d.name.startswith("chunk-")])
-        
-        if not chunks:
-            print("  Warning: No chunk directories found")
-        else:
-            print(f"  Found {len(chunks)} chunk directories")
-            
-            for chunk_dir in chunks:
-                chunk_name = chunk_dir.name
-                tgt_chunk_dir = tgt_root / "videos" / chunk_name
-                
-                # Process top_head (direct flip)
-                top_head_src = chunk_dir / "observation.images.top_head"
-                if top_head_src.exists() and top_head_src.is_dir():
-                    top_head_tgt = tgt_chunk_dir / "observation.images.top_head"
-                    print(f"    Processing {chunk_name}/top_head...")
-                    process_videos(top_head_src, top_head_tgt, num_workers)
-                
-                # Swap hand_left and hand_right
-                # hand_right -> hand_left (flip and place in hand_left position)
-                hand_right_src = chunk_dir / "observation.images.hand_right"
-                if hand_right_src.exists() and hand_right_src.is_dir():
-                    hand_left_tgt = tgt_chunk_dir / "observation.images.hand_left"
-                    print(f"    Processing {chunk_name}/hand_right -> hand_left...")
-                    process_videos(hand_right_src, hand_left_tgt, num_workers)
-                
-                # hand_left -> hand_right (flip and place in hand_right position)
-                hand_left_src = chunk_dir / "observation.images.hand_left"
-                if hand_left_src.exists() and hand_left_src.is_dir():
-                    hand_right_tgt = tgt_chunk_dir / "observation.images.hand_right"
-                    print(f"    Processing {chunk_name}/hand_left -> hand_right...")
-                    process_videos(hand_left_src, hand_right_tgt, num_workers)
-        
-        print("✓ All video files processing complete")
-    else:
-        print("  Skipping: videos directory does not exist")
-    print()
-    
-    # 5. Copy other meta files
-    print("[5/5] Copying other meta files...")
-    src_meta_dir = src_root / "meta"
-    if src_meta_dir.exists():
-        tgt_meta_dir = tgt_root / "meta"
-        tgt_meta_dir.mkdir(parents=True, exist_ok=True)
-        
-        for meta_file in ["episodes.jsonl", "info.json", "tasks.jsonl"]:
-            src_file = src_meta_dir / meta_file
-            if src_file.exists():
-                shutil.copy2(src_file, tgt_meta_dir / meta_file)
-                print(f"  ✓ Copied {meta_file}")
-    
-    print("✓ Mirrored dataset creation complete")
+    print(f"✓ done — {summary['episodes']} episodes, {summary['total_frames']} frames")
+    print(f"  consider re-running compute_norm_stats on {tgt_root} for proper")
+    print(f"  normalization (current norm_stats.json has only sign-flipped mean).")
     print("=" * 60)
+    return summary
 
 
 def main():
@@ -607,6 +834,13 @@ Examples:
     parser_create.add_argument('--left-dim', type=int, default=7, help='Left arm dimension (default: 7)')
     parser_create.add_argument('--right-dim', type=int, default=7, help='Right arm dimension (default: 7)')
     parser_create.add_argument('--num-workers', type=int, default=4, help='Number of parallel worker processes (default: 4)')
+    parser_create.add_argument('--sign-pattern', type=str, default=None,
+        help=("comma-separated 7 floats overriding the per-joint sign vector "
+              "(default = Piper [-1,1,1,-1,1,-1,1]). "
+              "Use 'noflip' for legacy pure-swap (only correct if URDF doesn't need it)."))
+    parser_create.add_argument('--episodes', type=str, default=None,
+        help=("optional episode subset, e.g. '0-4' or '0,2,5' — useful for "
+              "quick verification before mirroring a full dataset."))
     
     # merge command
     parser_merge = subparsers.add_parser('merge', help='Merge datasets')
@@ -631,16 +865,44 @@ Examples:
     parser_full.add_argument('--robot-type', type=str, default='agilex', help='Robot type (default: agilex)')
     parser_full.add_argument('--features-json', type=str, default=None, help='Path to features.json file')
     parser_full.add_argument('--force', action='store_true', help='Force merge (ignore conflicts)')
+    parser_full.add_argument('--sign-pattern', type=str, default=None,
+        help='see create-mirror --sign-pattern')
+    parser_full.add_argument('--episodes', type=str, default=None,
+        help='see create-mirror --episodes')
     
     args = parser.parse_args()
-    
+
+    def _parse_sign(s):
+        if s is None:
+            return None
+        if s.lower() in ("noflip", "none", "off", "false"):
+            return False
+        return [float(x) for x in s.split(",")]
+
+    def _parse_episodes(s):
+        if s is None:
+            return None
+        out = []
+        for part in s.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if "-" in part:
+                a, b = part.split("-", 1)
+                out.extend(range(int(a), int(b) + 1))
+            else:
+                out.append(int(part))
+        return sorted(set(out))
+
     if args.command == 'create-mirror':
         create_mirror_dataset(
             args.src_path,
             args.tgt_path,
             args.left_dim,
             args.right_dim,
-            args.num_workers
+            args.num_workers,
+            sign_pattern=_parse_sign(args.sign_pattern),
+            episode_filter=_parse_episodes(args.episodes),
         )
     
     elif args.command == 'merge':
@@ -676,7 +938,9 @@ Examples:
             args.mirror_path,
             args.left_dim,
             args.right_dim,
-            args.num_workers
+            args.num_workers,
+            sign_pattern=_parse_sign(args.sign_pattern),
+            episode_filter=_parse_episodes(args.episodes),
         )
         print()
         

@@ -69,9 +69,29 @@ python train_deploy_alignment/data_augment/time_scaling.py \
 
 ## Space mirroring (`space_mirroring.py`)
 
-Create a left/right mirrored version of a LeRobot dataset (swap left/right arm state and action dimensions, horizontally flip images/videos), and optionally merge original + mirrored into one dataset.
+Create a left/right mirrored version of a LeRobot dataset and optionally merge
+original + mirrored into one dataset. Mirrors:
 
-**Commands:** `create-mirror` (only mirror), `merge` (only merge), `full` (mirror then merge in one go).
+- **Joint state/action**: swap L↔R **and** apply per-joint sign flip
+  (default `[-1, 1, 1, -1, 1, -1, 1]` for the Agilex Piper 6-DOF + gripper —
+  yaw j0, wrist yaw j3, wrist roll j5 are negated; pitches and gripper kept).
+  Without sign flip the arms reach a non-mirror configuration in body space —
+  see git log for the regression we hit and why this is the default now.
+  Override with `--sign-pattern <7-comma-floats>` for non-Piper robots, or
+  `--sign-pattern noflip` for legacy pure-swap.
+- **Color videos**: `top_head` flipped in place; `hand_left` ↔ `hand_right`
+  swapped *and* flipped. Accepts both bare (`top_head/`) and prefixed
+  (`observation.images.top_head/`) directory naming.
+- **Depth zarr** (`top_head_depth/`, `hand_*_depth/`): same swap+flip applied
+  per-frame (uint16 H×W tensors).
+- **Meta**: `episodes.jsonl` filtered (when `--episodes` given), `info.json`
+  totals patched, `tasks.jsonl` / `relabel_meta.json` copied as-is. The
+  transformed `norm_stats.json` flips only `mean` (sign+swap); `std/q01/q99`
+  are pure-swapped — re-run `compute_norm_stats` after mirroring for proper
+  normalization.
+
+**Commands:** `create-mirror` (only mirror), `merge` (only merge), `full`
+(mirror then merge in one go).
 
 **Run from repository root:**
 
@@ -111,8 +131,14 @@ python train_deploy_alignment/data_augment/space_mirroring.py full \
 ```bash
 python train_deploy_alignment/data_augment/space_mirroring.py create-mirror \
   --src-path /path/to/source --tgt-path /path/to/mirrored \
-  [--left-dim 7] [--right-dim 7] [--num-workers 4]
+  [--left-dim 7] [--right-dim 7] [--num-workers 4] \
+  [--sign-pattern -1,1,1,-1,1,-1,1] \
+  [--episodes 0-4]
 ```
+
+`--episodes` accepts ranges (`0-4`) or comma lists (`0,2,5`), useful for a
+quick subset before mirroring a full dataset. `--sign-pattern noflip` reverts
+to the legacy pure-swap (only correct if your robot's URDF doesn't need it).
 
 ### Command: `merge` (merge only)
 
