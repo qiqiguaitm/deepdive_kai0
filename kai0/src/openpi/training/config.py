@@ -2057,6 +2057,7 @@ _CONFIGS = [
             repo_id=f"{_KAI0_LOCAL_ROOT}/Task_A/self_built/mix_b6000_p1200/base",
             default_prompt="Flatten and fold the cloth.",
             use_delta_joint_actions=False,
+            assets=AssetsConfig(asset_id="mix_b6000_p1200"),  # ckpt-side norm_stats (sim01 inference)
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader(
             f"{_KAI0_DATA_ROOT}/checkpoints/Task_A/mixed_1/params"
@@ -3160,6 +3161,46 @@ _CONFIGS = [
 if len({config.name for config in _CONFIGS}) != len(_CONFIGS):
     raise ValueError("Config names must be unique.")
 _CONFIGS_DICT = {config.name: config for config in _CONFIGS}
+
+
+def _load_extra_config_from_env() -> None:
+    """Apply per-ckpt config override if OPENPI_EXTRA_CONFIG is set.
+
+    Sidecar contract — JSON file at <ckpt>/train_config.json:
+      {
+        "base_config_name": "<TrainConfig.name from main config.py>",
+        "override_asset_id": "<asset_id used in <ckpt>/assets/<asset_id>/norm_stats.json>"
+      }
+
+    Behavior: clones _CONFIGS_DICT[base_config_name] and overrides
+    `data.assets.asset_id` with override_asset_id. Lets a packed ckpt run on sim01
+    without editing src/openpi/training/config.py per-experiment.
+    """
+    extra = os.environ.get("OPENPI_EXTRA_CONFIG")
+    if not extra:
+        return
+    p = pathlib.Path(extra)
+    if not p.is_file():
+        raise FileNotFoundError(f"OPENPI_EXTRA_CONFIG points to missing file: {extra}")
+    import json as _json
+    spec = _json.loads(p.read_text())
+    base_name = spec["base_config_name"]
+    if base_name not in _CONFIGS_DICT:
+        raise ValueError(
+            f"{extra}: base_config_name {base_name!r} not in _CONFIGS_DICT (size={len(_CONFIGS_DICT)})."
+            " Sync src/openpi/training/config.py first."
+        )
+    base = _CONFIGS_DICT[base_name]
+    new_asset_id = spec.get("override_asset_id")
+    if new_asset_id is not None:
+        new_data = dataclasses.replace(
+            base.data, assets=AssetsConfig(asset_id=new_asset_id)
+        )
+        new_cfg = dataclasses.replace(base, data=new_data)
+        _CONFIGS_DICT[base_name] = new_cfg
+
+
+_load_extra_config_from_env()
 
 
 def cli() -> TrainConfig:
