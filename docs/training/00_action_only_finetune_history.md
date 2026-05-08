@@ -2,7 +2,7 @@
 
 > **作用**：集成本机所有训练实验的历史记录与结果，**含每步 inline-eval MAE@{1,10,25,50} 完整曲线**。涵盖训练类型: action-only freeze、全参数解冻 (full-finetune)、LoRA (r=16/32)、AWBC、cold-start 混合数据训练 (mix_vis600 / pure_vis600 / mixed_visrobot01) 等。
 > **范围**：Task E（扶起倒箱）+ Task P（抓放盒子）+ Task A（FlattenFold） — 三个任务下的所有 train run, 每条 run 的 best step / best MAE / 数据规模 / freeze 策略 / LoRA r 都在此聚合; 详细超参 / 数据配方移到下方 "关联详细文档" 列表的对应专题文件。
-> **最近更新**：2026-05-07 12:30 CST (uc01 实验1 mix_b6000_p1200_init_mixed_1 完成: best MAE@1=0.0108 @ step 44k, plateau 自 44k 不再下降. 7200 ep 大数据反不如 1143 ep 高质量 -new 数据 (#25 best 0.0105). 详见 `task_a_mix_b6000_p1200_mixed_1_results.md`)
+> **最近更新**：2026-05-08 14:55 CST (uc02 unfreeze_20k_v2 完成: Task_P/v2_aligned best MAE@1=**0.0070** @ step 16000, vs orig unfreeze_20k 0.0195 @ step 4k = **-64.1%**. 数据集版本对比, action=state + 30fps 真对齐 + seed=123 通过. 详见 `task_p_unfreeze_20k_v2_results.md`)
 > **数据来源**：`logs/train_*.log` 中 `[inline-eval] step=N MAE@1=… @10=… @25=… @50=…` 行（9 val ep × 20 frames，~30s/eval），与 `logs/eval_history_v2/v2_step_*.json` 离线归档（9 val ep × 50 queries）。
 > **命名前缀 `00_` 用于按文件名排序时置顶。**
 >
@@ -13,6 +13,7 @@
 > - **`norm_stats_ablation_apr28_450.md`** — norm_stats 消融实验 (new_norm vs inherit_norm, head-to-head 同 dataset 同 hparams)
 > - **`task_a_pure_1200_new_norm_results.md`** — pure_1200 系列两个实验 (-new 限定 vs 全日期, mixed_1 init + 50k)
 > - **`task_a_mix_b6000_p1200_mixed_1_results.md`** — uc01 实验1 大数据混合训练 (~7200 ep mix, mixed_1 init, 50k 步, best 0.0108)
+> - **`task_p_unfreeze_20k_v2_results.md`** — uc02 v2 数据集对比 (Task_P/v2_aligned 84 ep + action=state + 30fps interp + seed=123, best 0.0070, -64% vs orig)
 > - `kai0_mixed_1_results.md` — Task A 迁移 init 来源
 > - `training_plans.md` — kai0_mixed_1 / kai0_full 训练 recipe
 > - `project_complete_guide.md` — freeze_filter / inline eval 总览
@@ -45,6 +46,7 @@
 | 16 | t21_bs64³ | Task E | base_allgood + bs=64 | 25k | 14000 | 0.0418 | 0.0676 | 0.1163 | 0.2121 |
 | 16 | t22_bs128³ | Task E | base_allgood + bs=128 | 25k | 6000 | 0.0422 | 0.0702 | 0.1246 | 0.2307 |
 | 17 | v4_pi05_aug | Task E | full_aug 256ep | 15k | 10000 | 0.0452 | 0.0677 | 0.0978 | 0.1350 |
+| 对照 | **unfreeze_20k_v2** 🏆 | Task P | v2_aligned (84 ep, 50k frames, action=state, 30fps interp) | 20k | **16000** | **0.0070** | **0.0150** | **0.0272** | **0.0423** |
 | 对照 | **unfreeze_20k** ⚡ | Task P | base 24k frames | 20k | 4000 | **0.0195** | 0.0367 | 0.0600 | 0.0797 |
 | 对照 | unfreeze_8k ⚡ | Task P | base 24k frames | 8k | 3000 | 0.0206 | 0.0380 | 0.0610 | 0.0806 |
 | 对照 | p_t10_allgood_25k | Task P | base_allgood | 25k | 14000 | 0.0626 | 0.0860 | 0.1265 | 0.1842 |
