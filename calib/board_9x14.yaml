@@ -1,0 +1,8 @@
+# Calib.io cc300-20-15 (14 cols × 9 rows, sq 20mm / mk 15mm, DICT_5X5_100)
+# 物理: 280×180 mm; 9 是短边 squares, 14 是长边 squares.
+# (产品标牌的"9×15"是惯用记法, 与 OpenCV 的 squaresX × squaresY 不同)
+cols: 14
+rows: 9
+square_mm: 20.0
+marker_mm: 15.0
+dict: DICT_5X5_100
