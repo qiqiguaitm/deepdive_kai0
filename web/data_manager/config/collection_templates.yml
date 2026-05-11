@@ -47,3 +47,9 @@ templates:
   prompt: Pick blue block,stack on red
   enabled: true
   note: Task PS base
+- id: task_p_blue
+  task_id: Task_P
+  subset: base
+  prompt: Pick and place on blue
+  enabled: true
+  note: Task P and place on blue
