@@ -962,9 +962,23 @@ done
 - `--manifest`: 写所有 object 列表到 TSV, 后续重跑只读 manifest 不重新 list
 
 **实测速度** (单进程 32 并发):
-- ~100-130 files/sec, ~13 MB/s (受限于 TOS API 每请求 ~200ms 延迟, 不是带宽)
+- ~80-130 files/sec, ~12 MB/s (受限于 TOS API 每请求 ~200ms 延迟, 不是带宽)
 - 多进程并行不同 prefix 触发 TOS list_objects 限速 → 卡死, 不可行
-- KAI0/ 全量 (361 GB, 2.37M 文件) 单机预计 **6-7 小时** 拉完
+- KAI0/ 全量 (361.58 GiB, **2,370,051 文件**) 单机实测约 **9-10 小时** 拉完 (2026-05-12/13)
+
+**实测落地分布** (2026-05-13):
+| 子目录 | 文件数 | 大小 |
+|---|---|---|
+| Task_A | 1,752,192 | 235.0 GiB |
+| Task_E | 235,695 | 31.1 GiB |
+| Task_P | 167,123 | 42.7 GiB |
+| Task_PS | 201,369 | 27.7 GiB |
+| Task_H | 7,271 | 1.0 GiB |
+| Task_HP | 6,397 | 0.8 GiB |
+| 2 个 init ckpt tarballs | 2 | 24 GB |
+
+> ⚠️ **prefix 剥离 bug**: `from_tos_recursive.py` 把 `--prefix` 整段从 key 中剥离，所以 `--prefix KAI0/Task_A/` + `--dest /mnt/data/tim/dataset/KAI0` 会把 `KAI0/Task_A/base/...` 落到 `/mnt/data/tim/dataset/KAI0/base/...` 而非 `Task_A/base/...`。**正确做法**: `--dest` 包含完整目标路径如 `/mnt/data/tim/dataset/KAI0/Task_A`，或脚本改为不剥离 prefix。
+> 对 standalone 文件 (如 `KAI0/task_a_mix_..._step49999.tar` 走 `--prefix KAI0/task_a_mix`)，剥离后 `_..._step49999.tar` 文件名残缺，需手动 rename。建议未来用 `--prefix KAI0/` + 显式 object_key 拉单文件。
 
 **数据集落地后** — 4 台共用一份, 各机训练时:
 ```bash
