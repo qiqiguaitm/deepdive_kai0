@@ -2,7 +2,7 @@
 
 > **作用**：集成本机所有训练实验的历史记录与结果，**含每步 inline-eval MAE@{1,10,25,50} 完整曲线**。涵盖训练类型: action-only freeze、全参数解冻 (full-finetune)、LoRA (r=16/32)、AWBC、cold-start 混合数据训练 (mix_vis600 / pure_vis600 / mixed_visrobot01) 等。
 > **范围**：Task E（扶起倒箱）+ Task P（抓放盒子）+ Task A（FlattenFold） — 三个任务下的所有 train run, 每条 run 的 best step / best MAE / 数据规模 / freeze 策略 / LoRA r 都在此聚合; 详细超参 / 数据配方移到下方 "关联详细文档" 列表的对应专题文件。
-> **最近更新**：2026-05-08 14:55 CST (uc02 unfreeze_20k_v2 完成: Task_P/v2_aligned best MAE@1=**0.0070** @ step 16000, vs orig unfreeze_20k 0.0195 @ step 4k = **-64.1%**. 数据集版本对比, action=state + 30fps 真对齐 + seed=123 通过. 详见 `task_p_unfreeze_20k_v2_results.md`)
+> **最近更新**：2026-05-15 03:22 CST (js02 `task_a_new_pure_200_new_norm` resume 22k→49999 完成: MAE@1=**0.0065** ⭐⭐ **全任务 NEW SOTA**, 比老 SOTA `pure2_1800_6000` 0.0085 低 **24%**; 同时 js03+04 16-GPU `task_a_new_pure2_1800_new_norm_js` 完成: MAE@1=0.0090, 未超老 SOTA. **200 ep 精选 + mixed_1_clean init 完胜 7900 ep 大杂烩 + pi05_base init** — 数据质量 + 精选 > 数据规模. 详见 `task_a_new_pure_200_new_norm_results.md` 和 `task_a_new_pure2_1800_new_norm_js_results.md`)
 > **数据来源**：`logs/train_*.log` 中 `[inline-eval] step=N MAE@1=… @10=… @25=… @50=…` 行（9 val ep × 20 frames，~30s/eval），与 `logs/eval_history_v2/v2_step_*.json` 离线归档（9 val ep × 50 queries）。
 > **命名前缀 `00_` 用于按文件名排序时置顶。**
 >
@@ -12,7 +12,9 @@
 > - **`task_a_visrobot01_mixed_600.md`** — Task A 全参数微调系列 (mixed_gf0_173 / visrobot01_only / mix_vis600 / pure_vis600)
 > - **`norm_stats_ablation_apr28_450.md`** — norm_stats 消融实验 (new_norm vs inherit_norm, head-to-head 同 dataset 同 hparams)
 > - **`task_a_pure_1200_new_norm_results.md`** — pure_1200 系列两个实验 (-new 限定 vs 全日期, mixed_1 init + 50k)
-> - **`task_a_new_mixed_pure2_1800_6000_results.md`** — uc 集群大规模混合训练合并文档 ⭐ **SOTA 0.0085** (A: 7900 ep pi05_base init / B: 7200 ep mixed_1 init=0.0108)
+> - **`task_a_new_mixed_pure2_1800_6000_results.md`** — uc 集群大规模混合训练合并文档 (老 SOTA 0.0085, A: 7900 ep pi05_base init / B: 7200 ep mixed_1 init=0.0108)
+> - **`task_a_new_pure_200_new_norm_results.md`** ⭐⭐ — **NEW SOTA 0.0065** (js02 单机 8 GPU, 200 ep `-new` 精选 + mixed_1_clean init, resume 22k→49999, -24% vs 老 SOTA)
+> - **`task_a_new_pure2_1800_new_norm_js_results.md`** — 1800 ep `-new` + mixed_1_clean init, js03+04 16-GPU HSDP, MAE 0.0090 (未超老 SOTA, +5.9%)
 > - **`task_p_unfreeze_20k_v2_results.md`** — uc02 v2 数据集对比 (Task_P/v2_aligned 84 ep + action=state + 30fps interp + seed=123, best 0.0070, -64% vs orig)
 > - `kai0_mixed_1_results.md` — Task A 迁移 init 来源
 > - `training_plans.md` — kai0_mixed_1 / kai0_full 训练 recipe
@@ -62,8 +64,10 @@
 | Task A | visrobot01_only_2k_gf0 ⚡ | Task A | visrobot01-only 193+17 | 2k | 1999 | 0.0202 | 0.0411 | 0.0680 | 0.1017 |
 | Task A | **task_a_new_pure_1200_new_norm** 🔥⏳ | Task A | A_new_pure_1200 (1143 train, 仅 6 个 -new 日期, mixed_1 init) | 50k | 32000* | **0.0105*** | 0.0231 | 0.0386 | 0.0582 |
 | Task A | **mix_b6000_p1200_init_mixed_1** 🔥 | Task A | mix_b6000_p1200 (~7200 ep, base 6000 + pure 1200) + mixed_1 init | 50k | 44000 | **0.0108** | 0.0252 | 0.0457 | 0.0728 |
-| Task A | **task_a_new_pure2_1800_6000_new_norm** 🏆🔥 | Task A | **A_new_pure2_1800_6000 (7900 ep: 1790 v2-mirror + 3055 base + 3055 advantage)** + **pi05_base** init, 24-GPU uc cluster | 50k | **49999** | **0.0085** ⭐ | **0.0168** | **0.0254** | **0.0337** |
+| Task A | **task_a_new_pure2_1800_6000_new_norm** 🔥 (老 SOTA) | Task A | **A_new_pure2_1800_6000 (7900 ep: 1790 v2-mirror + 3055 base + 3055 advantage)** + **pi05_base** init, 24-GPU uc cluster | 50k | **49999** | **0.0085** | **0.0168** | **0.0254** | **0.0337** |
 | Task A | **task_a_pure_1200_new_norm** ⚡ | Task A | A_pure_1200 (1142 train, 全 8 日期 + -new, mixed_1 init) | 50k | 49999 | **0.0145** | 0.0255 | 0.0384 | 0.0539 |
+| Task A | **task_a_new_pure2_1800_new_norm_js** 🔥 | Task A | A_new_pure2_1800 (1800 ep `-new`) + **mixed_1_clean** init, js03+04 16-GPU HSDP `[2,8]`, batch=80 | 50k | **49999** | **0.0090** | **0.0175** | **0.0247** | **0.0328** |
+| Task A | **task_a_new_pure_200_new_norm** 🏆⭐⭐ NEW SOTA | Task A | **A_new_pure_200 (200 ep `-new` 精选)** + **mixed_1_clean** init, js02 单机 8 GPU, batch=120, **resume 22k→49999** | 50k | **49999** | **0.0065** ⭐ | **0.0072** | **0.0075** | **0.0079** |
 
 ¹ E3 (combo) 在 step ~8k 因 GPU 1 NUMA SIGSEGV 中断，best 在 step 12000 之前；step 10000=0.0284, step 12000=0.0277。
 ² v2 训练超过 nominal 15k 步，step 16000 实测最佳 (0.0382)；master plan 中 0.0411@14000 是 canonical 数。
@@ -76,7 +80,17 @@
 
 **pure_1200 系列 (mixed_1 init + new_norm + 50k, 2026-05-03)**: 头对头数据源对比 — **`-new` 限定 6 日期 (1143 train) 大幅领先全 8 日期 (1142 train)** — same hparams 下 new_pure_1200 在 step 32k 达 **MAE@1=0.0105**, 比 pure_1200 同步数 0.0154 低 **31.8%**。`-new` 日期是最新高质量采集, 早期日期数据可能含更多采集噪声。完整曲线见 `task_a_pure_1200_new_norm_results.md`。
 
-**新 SOTA: task_a_new_pure2_1800_6000_new_norm (uc 集群 24 GPU, pi05_base init, 50k, 2026-05-13)**: 数据规模 + 干净起点协同 — **A_new_pure2_1800_6000 (7900 ep = 1790 mirror-增强 + 3055 kai0_base + 3055 kai0_advantage)** + **pi05_base** init, step 49999 达 **MAE@1=0.0085**, 比之前 best (new_pure_1200=0.0105) 低 **19.0%**, 比 mix_b6000_p1200 (0.0108) 低 **21.3%**。**关键洞察**:
+**🆕 NEW SOTA: task_a_new_pure_200_new_norm (js02 单机 8 GPU, mixed_1_clean init, resume 22k→49999, 2026-05-15)**: **200 ep `-new` 精选数据** + **mixed_1_clean** (Task_A warmed-up) init, step 49999 达 **MAE@1=0.0065**, 全 horizon (@1/@10/@25/@50 = 0.0065/0.0072/0.0075/0.0079) 均胜过老 SOTA pure2_1800_6000 (0.0085/0.0168/0.0254/0.0337) — 整体改善 **-24% (@1)**, **-57% (@10)**, **-70% (@25)**, **-77% (@50)**。**关键洞察**:
+1. **数据质量 + 精选 > 数据规模**: 200 ep 干净数据 (1/40 of SOTA) 完胜 7900 ep 大杂烩 — `-new` 日期限定 + hflip mirror 增强是关键
+2. **mixed_1_clean init 在小数据下 > pi05_base init 在大数据下**: 推翻"pi05_base 干净起点上限更高"的假设 — 实际是**数据-init 适配度**决定上限, 小数据需要 Task_A 适配过的 init
+3. **long-horizon 大幅领先**: @50 = 0.0079 vs 老 SOTA 0.0337 (**-77%**) — chunk planner 在精选数据上学得极稳, gap (@1 vs @50) 仅 22% vs 老 SOTA 的 296%
+4. **同 init (mixed_1_clean), 1800 ep 反而比 200 ep 差 +38.5%**: 见 `task_a_new_pure2_1800_new_norm_js` (0.0090) — 加 same-distribution 数据反稀释信号
+
+完整曲线见 `task_a_new_pure_200_new_norm_results.md`。
+
+---
+
+**老 SOTA: task_a_new_pure2_1800_6000_new_norm (uc 集群 24 GPU, pi05_base init, 50k, 2026-05-13)**: 数据规模 + 干净起点协同 — **A_new_pure2_1800_6000 (7900 ep = 1790 mirror-增强 + 3055 kai0_base + 3055 kai0_advantage)** + **pi05_base** init, step 49999 达 **MAE@1=0.0085**, 比之前 best (new_pure_1200=0.0105) 低 **19.0%**, 比 mix_b6000_p1200 (0.0108) 低 **21.3%**。**关键洞察**:
 1. pi05_base 起点 MAE=0.0534 (vs mixed_1 起点 0.0161, 高 3.3x), 但**最终精度反而低 21%** — pi05_base 干净起点天花板更高
 2. **数据规模 + 干净起点 > 数据质量单一维度**: 推翻 B 实验 (mix_b6000_p1200) "数据质量 > 数据量" 的结论
 3. long-horizon (@50) 显著改善 (0.0337 vs B 0.0728, **-54%**) — chunk planner 受益于干净起点
