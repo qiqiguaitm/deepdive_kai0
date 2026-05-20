@@ -98,7 +98,13 @@ class RepackTransform(DataTransformFn):
 
     def __call__(self, data: DataDict) -> DataDict:
         flat_item = flatten_dict(data)
-        return jax.tree.map(lambda k: flat_item[k], self.structure)
+        out = jax.tree.map(lambda k: flat_item[k], self.structure)
+        # X-VLA soft prompt: preserve dataset_id stamped by InjectDatasetId before this
+        # transform runs. Otherwise it's silently dropped and obs.dataset_id ends up None,
+        # causing Pi0.embed_prefix to skip the soft_prompt_hub branch (grad_norm=0).
+        if "dataset_id" in flat_item:
+            out["dataset_id"] = flat_item["dataset_id"]
+        return out
 
 
 @dataclasses.dataclass(frozen=True)
@@ -108,6 +114,21 @@ class InjectDefaultPrompt(DataTransformFn):
     def __call__(self, data: DataDict) -> DataDict:
         if self.prompt is not None and "prompt" not in data:
             data["prompt"] = np.asarray(self.prompt)
+        return data
+
+
+@dataclasses.dataclass(frozen=True)
+class InjectDatasetId(DataTransformFn):
+    """X-VLA style soft prompt support: stamp every sample with its domain index.
+
+    Pi0 reads obs.dataset_id at inference time to query the soft prompt hub
+    (`nnx.Embed(num_domains, len * hidden_size)`). One transform per sub-dataset
+    in the ConcatDataset, each with its own `dataset_id`.
+    """
+    dataset_id: int
+
+    def __call__(self, data: DataDict) -> DataDict:
+        data["dataset_id"] = np.int32(self.dataset_id)
         return data
 
 @dataclasses.dataclass(frozen=True)

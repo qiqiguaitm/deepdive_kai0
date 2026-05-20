@@ -133,6 +133,7 @@ def _run_inline_eval(train_state, config, data_config, step, mesh):
             policy = _build_eval_policy(train_state, config, data_config)
             HORIZONS = (1, 10, 25, 50)
             acc = {h: [] for h in HORIZONS}
+            inline_did = getattr(config, "inline_eval_dataset_id", None)
             for s in samples:
                 for k in s["q_idx"]:
                     obs = {
@@ -140,6 +141,8 @@ def _run_inline_eval(train_state, config, data_config, step, mesh):
                         "state": s["state"][k],
                         "prompt": getattr(config.data, "default_prompt", "stand up the fallen box"),
                     }
+                    if inline_did is not None:
+                        obs["dataset_id"] = np.int32(inline_did)
                     res = policy.infer(obs)
                     pred = np.asarray(res["actions"])
                     for h in HORIZONS:

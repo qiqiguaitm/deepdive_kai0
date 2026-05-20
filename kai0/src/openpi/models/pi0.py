@@ -15,6 +15,12 @@ from openpi.shared import array_typing as at
 
 logger = logging.getLogger("openpi")
 
+# X-VLA-style init for the soft prompt hub. Cached as a module-level constant so that
+# eval_shape(init) and the actual jit(init) trace see the SAME function object —
+# otherwise nnx puts the closure in static_fields and the prefix tree (out_shardings)
+# vs full tree pytrees mismatch on closure identity.
+_SOFT_PROMPT_INIT = nnx.initializers.normal(stddev=0.02)
+
 
 def _dct2_last_time_axis(x: jnp.ndarray) -> jnp.ndarray:
     """Orthonormal DCT-II along axis=-2 (time). x shape [..., T, D]. Returns same shape.
@@ -125,6 +131,22 @@ class Pi0(_model.BaseModel):
             self.action_time_mlp_out = nnx.Linear(action_expert_config.width, action_expert_config.width, rngs=rngs)
         self.action_out_proj = nnx.Linear(action_expert_config.width, config.action_dim, rngs=rngs)
 
+        # X-VLA style soft prompt hub: per-domain learnable tokens prepended to LLM input.
+        # Only created when enabled in config; otherwise this attribute is absent and embed_prefix is a no-op.
+        self.soft_prompt_num_domains = int(getattr(config, "soft_prompt_num_domains", 0) or 0)
+        self.soft_prompt_len = int(getattr(config, "soft_prompt_len", 0) or 0)
+        if self.soft_prompt_num_domains > 0 and self.soft_prompt_len > 0:
+            # X-VLA paper uses nn.init.normal_(std=0.02) for soft prompts (matches
+            # GPT-style word-embedding initialization). nnx default variance_scaling
+            # gives std ≈ 0.011 here (close but not identical) — use explicit normal
+            # to match the X-VLA prototype.
+            self.soft_prompt_hub = nnx.Embed(
+                num_embeddings=self.soft_prompt_num_domains,
+                features=self.soft_prompt_len * paligemma_config.width,
+                embedding_init=_SOFT_PROMPT_INIT,
+                rngs=rngs,
+            )
+
         # Store augment_level so compute_loss can read it (Pi0 doesn't keep full config).
         self.augment_level = getattr(config, "augment_level", "mild")
         self.use_dct_loss = getattr(config, "use_dct_loss", False)
@@ -143,6 +165,21 @@ class Pi0(_model.BaseModel):
         input_mask = []
         ar_mask = []
         tokens = []
+        # X-VLA style soft prompt: prepend per-domain learnable tokens.
+        # Bidirectional (non-AR) — images/language can attend to them and vice versa.
+        if (
+            self.soft_prompt_num_domains > 0
+            and self.soft_prompt_len > 0
+            and obs.dataset_id is not None
+        ):
+            B = obs.dataset_id.shape[0]
+            soft = self.soft_prompt_hub(obs.dataset_id)
+            llm_width = self.soft_prompt_hub.features // self.soft_prompt_len
+            # Cast to bfloat16 to match image/language token dtype downstream.
+            soft = soft.astype(jnp.bfloat16).reshape(B, self.soft_prompt_len, llm_width)
+            tokens.append(soft)
+            input_mask.append(jnp.ones((B, self.soft_prompt_len), dtype=jnp.bool_))
+            ar_mask += [False] * self.soft_prompt_len
         # embed images
         for name in obs.images:
             image_tokens, _ = self.PaliGemma.img(obs.images[name], train=False)

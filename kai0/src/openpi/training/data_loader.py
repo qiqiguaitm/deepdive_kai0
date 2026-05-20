@@ -180,7 +180,7 @@ def create_torch_dataset(
             key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
         },
         video_backend="pyav",
-        tolerance_s=1.0,  # default 1e-4 is too strict vs. Task_A/advantage frame/video sync (off by ~10s in some samples)
+        tolerance_s=30.0,  # default 1e-4 is too strict; some kai/vis episodes have gaps up to ~7s
     )
 
     if data_config.prompt_from_task:
@@ -199,8 +199,13 @@ def _create_concat_torch_dataset(
     then ConcatDataset them. Each dataset uses its own fps for delta_timestamps (robust to
     heterogeneous FPS, though in practice should all be 30)."""
     from torch.utils.data import ConcatDataset
+    dataset_ids = getattr(data_config, "dataset_ids", None)
+    if dataset_ids is not None and len(dataset_ids) != len(repo_ids):
+        raise ValueError(
+            f"dataset_ids length ({len(dataset_ids)}) != repo_ids length ({len(repo_ids)})"
+        )
     parts: list[Dataset] = []
-    for rid in repo_ids:
+    for i, rid in enumerate(repo_ids):
         meta = lerobot_dataset.LeRobotDatasetMetadata(rid)
         ds = lerobot_dataset.LeRobotDataset(
             rid,
@@ -208,9 +213,15 @@ def _create_concat_torch_dataset(
                 key: [t / meta.fps for t in range(action_horizon)]
                 for key in data_config.action_sequence_keys
             },
+            tolerance_s=30.0,  # match single-repo path; raw kai0 fps timestamps are jittery
         )
+        transforms_to_apply: list = []
         if data_config.prompt_from_task:
-            ds = TransformedDataset(ds, [_transforms.PromptFromLeRobotTask(meta.tasks)])
+            transforms_to_apply.append(_transforms.PromptFromLeRobotTask(meta.tasks))
+        if dataset_ids is not None:
+            transforms_to_apply.append(_transforms.InjectDatasetId(int(dataset_ids[i])))
+        if transforms_to_apply:
+            ds = TransformedDataset(ds, transforms_to_apply)
         parts.append(ds)
     if not parts:
         raise ValueError("repo_ids is empty after parsing")

@@ -50,8 +50,12 @@ class CheckpointWeightLoader(WeightLoader):
     def load(self, params: at.Params) -> at.Params:
         # We are loading np.ndarray and relying on the training code to properly convert and shard the params.
         loaded_params = _model.restore_params(download.maybe_download(self.params_path), restore_type=np.ndarray)
-        # Add all missing LoRA weights.
-        return _merge_params(loaded_params, params, missing_regex=".*lora.*")
+        # Whitelist for keys present in the *model* but absent in the *ckpt*: keep the
+        # model's init for these (instead of erroring). Currently:
+        #   .*lora.*            — LoRA adapter ranks
+        #   .*soft_prompt_hub.* — X-VLA soft prompt hub (new keys when warming up
+        #                         from a pi05 base ckpt that predates the hub)
+        return _merge_params(loaded_params, params, missing_regex=".*(lora|soft_prompt_hub).*")
 
 
 @dataclasses.dataclass(frozen=True)

@@ -119,6 +119,10 @@ class Observation(Generic[ArrayT]):
 
     image_original: dict[str, at.Float[ArrayT, "*b H W C"]] | None = None
 
+    # X-VLA style domain conditioning: which dataset this sample came from.
+    # None when soft_prompt disabled. ∈ [0, soft_prompt_num_domains).
+    dataset_id: at.Int[ArrayT, "*b"] | None = None
+
     @classmethod
     def from_dict(cls, data: at.PyTree[ArrayT]) -> "Observation[ArrayT]":
         """This method defines the mapping between unstructured data (i.e., nested dict) to the structured Observation format."""
@@ -154,6 +158,7 @@ class Observation(Generic[ArrayT]):
             progress=data.get("progress", None),
             image_original=data.get("image_original", None),
             episode_index=data.get("episode_index", None),
+            dataset_id=data.get("dataset_id", None),
         )
 
     def to_dict(self) -> at.PyTree[ArrayT]:
@@ -264,6 +269,7 @@ def preprocess_observation(
         episode_length=observation.episode_length,
         image_original=observation.image_original,
         episode_index=observation.episode_index,
+        dataset_id=observation.dataset_id,
     )
 
 

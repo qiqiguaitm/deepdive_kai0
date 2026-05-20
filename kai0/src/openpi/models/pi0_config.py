@@ -52,6 +52,18 @@ class Pi0Config(_model.BaseModelConfig):
     # "aggressive" is for deploy-robustness (D435→D405, pose/arm-spacing variation).
     augment_level: str = "mild"
 
+    # X-VLA style soft prompt (per-domain learnable embeddings prepended to LLM input).
+    # `soft_prompt_num_domains > 0` enables the hub; obs.dataset_id ∈ [0, num_domains).
+    # `soft_prompt_len` = number of learnable tokens injected per sample.
+    # When disabled (default 0), the model behaves identically to upstream pi0/pi05.
+    soft_prompt_num_domains: int = 0
+    soft_prompt_len: int = 0
+    # Freeze policy. "none" = train all (default, LoRA still respected).
+    # "only_soft_prompt" = freeze everything except `soft_prompt_hub` (Stage 2 of
+    # the X-VLA 3-stage curriculum: align soft prompt for new domain before
+    # unfreezing the rest).
+    freeze_mode: str = "none"
+
     def __post_init__(self):
         if self.max_token_len is None:
             object.__setattr__(self, "max_token_len", 200 if self.pi05 else 48)
@@ -98,6 +110,16 @@ class Pi0Config(_model.BaseModelConfig):
 
     def get_freeze_filter(self) -> nnx.filterlib.Filter:
         """Returns the freeze filter based on the model config."""
+        # X-VLA Stage 2: freeze everything except soft_prompt_hub. Takes precedence
+        # over LoRA filters — if you need LoRA + soft-prompt-only, compose manually.
+        if self.freeze_mode == "only_soft_prompt":
+            if self.soft_prompt_num_domains <= 0 or self.soft_prompt_len <= 0:
+                raise ValueError(
+                    "freeze_mode='only_soft_prompt' requires soft_prompt_num_domains>0 "
+                    "and soft_prompt_len>0 (the module to keep trainable must exist)."
+                )
+            return nnx.Not(nnx_utils.PathRegex(".*soft_prompt_hub.*"))
+
         filters = []
         has_lora = False
         gemma_params_filter = nnx_utils.PathRegex(".*llm.*")

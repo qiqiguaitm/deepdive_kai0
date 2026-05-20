@@ -84,6 +84,10 @@ class DataConfig:
     # `repo_id` 仍保留用作 asset_id 回退 / 日志显示 (可以指任一条或共同目录).
     # 训练 CLI 侧通常不直接填这个, 用 DataConfigFactory.datasets_yaml 自动 populate.
     repo_ids: Sequence[str] | None = None
+    # X-VLA soft prompt support: per-repo domain index, parallel to `repo_ids`.
+    # Populated when yaml entries specify `domain_id`/`dataset_id`. None disables
+    # the InjectDatasetId transform (back-compat: hard-prompt training never sets this).
+    dataset_ids: Sequence[int] | None = None
     # Directory within the assets directory containing the data assets.
     asset_id: str | None = None
     # Contains precomputed normalization stats. If None, normalization will not be performed.
@@ -185,6 +189,62 @@ class ModelTransformFactory(GroupFactory):
                 )
 
 
+def _load_repos_and_domain_ids(path: str) -> tuple[list[str], list[int] | None]:
+    """Like _load_repo_ids_yaml but also returns per-repo domain indices when present.
+
+    Entries can be plain strings (no domain_id) or dicts with `root` + optional
+    `domain_id`/`dataset_id`. Returns (repo_ids, domain_ids). domain_ids is None
+    when no entry specified one (back-compat); otherwise it has the same length
+    as repo_ids with -1 filled for unspecified entries (caller must reject mixed).
+    """
+    import json, os
+    p = pathlib.Path(os.path.expanduser(path))
+    if not p.is_file():
+        raise FileNotFoundError(f"datasets_yaml not found: {p}")
+    ext = p.suffix.lower()
+    text = p.read_text(encoding="utf-8")
+    if ext in (".yaml", ".yml"):
+        import yaml
+        doc = yaml.safe_load(text)
+    elif ext == ".json":
+        doc = json.loads(text)
+    elif ext == ".txt":
+        doc = [ln.split("#", 1)[0].strip() for ln in text.splitlines() if ln.split("#", 1)[0].strip()]
+    else:
+        raise ValueError(f"unsupported datasets_yaml extension {ext!r}")
+    if isinstance(doc, dict):
+        doc = doc.get("roots") or doc.get("datasets") or doc.get("paths") or []
+    if not isinstance(doc, list) or not doc:
+        raise ValueError(f"{p} parsed to empty / non-list roots: {doc!r}")
+
+    repo_ids: list[str] = []
+    domain_ids: list[int] = []
+    any_domain = False
+    for entry in doc:
+        if isinstance(entry, str):
+            repo_ids.append(entry)
+            domain_ids.append(-1)
+        elif isinstance(entry, dict):
+            root = entry.get("root") or entry.get("path") or entry.get("repo_id")
+            if not root:
+                raise ValueError(f"entry in {p} has no 'root'/'path'/'repo_id' key: {entry!r}")
+            repo_ids.append(str(root))
+            did = entry.get("domain_id", entry.get("dataset_id", -1))
+            if did != -1:
+                any_domain = True
+            domain_ids.append(int(did))
+        else:
+            raise ValueError(f"unsupported entry type in {p}: {entry!r}")
+    if not any_domain:
+        return repo_ids, None
+    if any(d < 0 for d in domain_ids):
+        raise ValueError(
+            f"{p}: some entries specify domain_id/dataset_id and others don't. "
+            "Specify on every entry or none."
+        )
+    return repo_ids, domain_ids
+
+
 def _load_repo_ids_yaml(path: str) -> list[str]:
     """Parse a YAML / JSON / TXT file listing dataset roots and return the normalized list.
 
@@ -274,7 +334,10 @@ class DataConfigFactory(abc.ABC):
     def create_base_config(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
         repo_id = self.repo_id if self.repo_id is not tyro.MISSING else None
         asset_id = self.assets.asset_id or repo_id
-        repo_ids = _load_repo_ids_yaml(self.datasets_yaml) if self.datasets_yaml else None
+        repo_ids: list[str] | None = None
+        dataset_ids: list[int] | None = None
+        if self.datasets_yaml:
+            repo_ids, dataset_ids = _load_repos_and_domain_ids(self.datasets_yaml)
         if repo_ids and not repo_id:
             # datasets_yaml 有但 repo_id 缺失: 退而求其次用第一个作为 asset_id 锚点
             repo_id = repo_ids[0]
@@ -283,6 +346,7 @@ class DataConfigFactory(abc.ABC):
             self.base_config or DataConfig(),
             repo_id=repo_id,
             repo_ids=repo_ids,
+            dataset_ids=dataset_ids,
             asset_id=asset_id,
             norm_stats=self._load_norm_stats(epath.Path(self.assets.assets_dir or assets_dirs), asset_id),
             use_quantile_norm=model_config.model_type not in (ModelType.PI0, ModelType.PI0_RTC),
@@ -844,6 +908,11 @@ class TrainConfig:
     inline_eval_n_frames: int = 20
     # Run inline eval every Nth save_interval boundary (1 = every save).
     inline_eval_every: int = 1
+    # X-VLA soft prompt: domain index stamped on every inline-eval sample. Required
+    # when model.soft_prompt_num_domains > 0 (the val set comes from one specific
+    # domain — pass the matching index, e.g. 1 for vis val with soft_prompt order
+    # [kai=0, vis=1]). None means "no stamping" — fine for non-soft-prompt configs.
+    inline_eval_dataset_id: int | None = None
 
 #************************advantage estimator***************************
     advantage_estimator: bool = False
@@ -898,11 +967,317 @@ class TrainConfig:
 
 # Use `get_config` if you need to get a config by name in your code.
 _CONFIGS = [
+    # X-VLA Exp1: Hard Prompt Mixed (kai data + "kai " prefix, vis data + "vis " prefix)
+    # tasks.jsonl patched per dataset in xvla/data/mixed_hard/
+    TrainConfig(
+        name="xvla_exp1_hard_prompt_mixed",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/xvla/data/mixed_hard/kai0_base",  # norm_stats source
+            datasets_yaml="/vePFS/tim/workspace/deepdive_kai0/xvla/data/mixed_repos_hard.yaml",
+            default_prompt=None,
+            base_config=DataConfig(prompt_from_task=True),
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS/tim/workspace/openpi_cache/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=16,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
+
+    # Same exp1 hard prompt baseline as xvla_exp1_hard_prompt_mixed_uc but uses a single
+    # PRE-MERGED lerobot dataset instead of multi-dataset ConcatDataset. Avoids the uc02
+    # NCCL deadlock that happens when 3 LeRobotDataset instances each do slow metadata
+    # init + tolerance check. The merged dataset preserves the kai/vis hard prompt
+    # distinction via tasks.jsonl (2 entries, kai=0/vis=1) + per-row task_index column.
+    TrainConfig(
+        name="xvla_exp1_hard_prompt_merged_uc",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data/shared/ubuntu/workspace/dataset/Task_A/self_built/xvla_exp1_hard_merged",
+            default_prompt=None,
+            base_config=DataConfig(prompt_from_task=True),  # uses tasks.jsonl per-task lookup
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data/shared/ubuntu/workspace/base_init_ckpts/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=16,
+        batch_size=128,
+        fsdp_devices=16,
+        inline_eval_val_root="/data/shared/ubuntu/workspace/dataset/Task_A/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
+
+    # exp1 hard-prompt baseline, uc01+02 16-GPU version (mirrors xvla_exp1_hard_prompt_mixed
+    # but with uc-local data paths). Pairs with stage 1 on volc for full resource utilization.
+    TrainConfig(
+        name="xvla_exp1_hard_prompt_mixed_uc",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data/shared/ubuntu/workspace/deepdive_kai0/xvla/data/mixed_hard/kai0_base",
+            datasets_yaml="/data/shared/ubuntu/workspace/deepdive_kai0/xvla/data/mixed_repos_hard_uc.yaml",
+            default_prompt=None,
+            base_config=DataConfig(prompt_from_task=True),
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data/shared/ubuntu/workspace/base_init_ckpts/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=64,  # uc cluster — high parallel decode
+        batch_size=128,
+        fsdp_devices=16,
+        inline_eval_val_root="/data/shared/ubuntu/workspace/dataset/Task_A/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
+
+    # ──────────────────── X-VLA 3-stage curriculum (Exp2) ────────────────────
+    # Stage 1 — Warm up soft prompt + full model on official (kai) data.
+    # Both kai0_base and kai0_dagger stamped domain_id=0.
+    # Init: pi05_base ckpt. soft_prompt_hub initialized with N(0, 0.02) per X-VLA.
+    TrainConfig(
+        name="xvla_stage1_kai_warmup",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            soft_prompt_num_domains=2,
+            soft_prompt_len=32,
+        ),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_base",
+            datasets_yaml="/vePFS/tim/workspace/deepdive_kai0/xvla/data/stage1_kai_only.yaml",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS/tim/workspace/openpi_cache/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=16,
+        # Val: a small kai holdout would be more meaningful, but reuse vis_v2_merged_val
+        # for direct comparability across the 3 stages. dataset_id=1 (vis) at eval time
+        # tests how well the vis soft prompt (uninitialized in stage 1) generalizes.
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+        inline_eval_dataset_id=1,
+    ),
+
+    # Stage 2 — Freeze backbone, only train soft_prompt_hub on vis (~5k step, lr 5e-4).
+    # Init: Stage 1 final ckpt. Goal: align the vis soft prompt slot before unfreezing.
+    TrainConfig(
+        name="xvla_stage2_soft_prompt_only_vis",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            soft_prompt_num_domains=2,
+            soft_prompt_len=32,
+            freeze_mode="only_soft_prompt",  # documentation; the freeze_filter below enforces it
+        ),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged",
+            datasets_yaml="/vePFS/tim/workspace/deepdive_kai0/xvla/data/stage2_3_vis_only.yaml",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            # ← update to final stage 1 ckpt path once stage 1 finishes
+            "/vePFS/tim/workspace/deepdive_kai0/kai0/checkpoints/xvla_stage1_kai_warmup/xvla_stage1_kai_warmup/49999/params"
+        ),
+        # Freeze everything except soft_prompt_hub (matches Pi0Config.freeze_mode but inline here).
+        freeze_filter=nnx.Not(nnx_utils.PathRegex(".*soft_prompt_hub.*")),
+        lr_schedule=_optimizer.CosineDecaySchedule(warmup_steps=200, peak_lr=5e-4, decay_steps=5_000, decay_lr=5e-5),
+        ema_decay=None,           # EMA meaningless with ~64K trainable params
+        num_train_steps=5_000,
+        keep_period=1_000,
+        save_interval=1_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=16,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=1,
+        inline_eval_dataset_id=1,
+    ),
+
+    # Stage 3 — Full unfreeze on vis (50k step, cosine 1.5e-5 → 1.5e-6).
+    # Init: Stage 2 final ckpt (soft prompt already adapted, now jointly fine-tune all params).
+    TrainConfig(
+        name="xvla_stage3_full_finetune_vis",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            soft_prompt_num_domains=2,
+            soft_prompt_len=32,
+        ),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged",
+            datasets_yaml="/vePFS/tim/workspace/deepdive_kai0/xvla/data/stage2_3_vis_only.yaml",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            # ← update to final stage 2 ckpt path once stage 2 finishes
+            "/vePFS/tim/workspace/deepdive_kai0/kai0/checkpoints/xvla_stage2_soft_prompt_only_vis/xvla_stage2_soft_prompt_only_vis/5000/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=16,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+        inline_eval_dataset_id=1,
+    ),
+
+    # Task A: 100 ep originals (no mirror) + init from Task_A/mixed_1.
+    # Submitted as volc 8-GPU job, batch 128, 50k step, cosine LR 1.5e-5 → 1.5e-6.
+    TrainConfig(
+        name="pi05_flatten_fold_a_new_100_base_mixed1",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_new_100",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS/tim/workspace/deepdive_kai0/kai0/checkpoints/Task_A/mixed_1/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_new_pure_200_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
 
 
+    # Task A: 5/16-v2 (2 ep) + 5/19-v2 (46 ep) = 48 ep merged. Init from pi05_base.
+    # Dataset prepared by build_task_a_new_100_5_16_5_19.py + gen_episodes_stats.py,
+    # norm_stats recomputed via compute_norm_states_fast.py. uc-NFS shared path so
+    # uc02/03 read same. Use exp-name="task_a_new_100_new_norm_base_pi0.5" on CLI.
+    TrainConfig(
+        name="pi05_flatten_fold_a_new_100_5_16_5_18_base_pi0.5",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/data/shared/ubuntu/workspace/dataset/Task_A/self_built/A_new_100_5_16_5_18",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/data/shared/ubuntu/workspace/base_init_ckpts/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=64,            # uc convention
+        batch_size=120,            # uc single-host 8 GPU = 15/card
+        fsdp_devices=8,
+        inline_eval_val_root="/data/shared/ubuntu/workspace/dataset/Task_A/self_built/A_new_100_5_16_5_18_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
 
 
+    # ─────────────────────────────────────────────────────────────────────
+    # X-VLA hard-prompt domain conditioning ablation (2026-05-18)
+    # Two paired experiments; same init/optim/steps, only prompt prefix + data domain differ.
+    # ─────────────────────────────────────────────────────────────────────
 
+    # 实验1: kai0 official (kai0_base + kai0_dagger), prompt prefix "kai ", 16-GPU uc01+02 cluster.
+    TrainConfig(
+        name="pi05_flatten_fold_kai0_official_kai_prompt",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_base",
+            datasets_yaml="/vePFS/tim/workspace/deepdive_kai0/train_scripts/data/kai0_official_repos.yaml",
+            default_prompt="kai Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS/tim/workspace/openpi_cache/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=16,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/val_kai0_official",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
+
+    # 实验2: vis_v2_merged (10 v2 subdirs merged to 895 ep contiguous), prompt prefix "vis ", 16-GPU volc 2-host.
+    TrainConfig(
+        name="pi05_flatten_fold_vis_base_v2_all_vis_prompt",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged",
+            default_prompt="vis Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS/tim/workspace/openpi_cache/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6
+        ),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=16,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
 
 
     # Task E: stand up the fallen box — 73 ep, small dataset, sim01 local 5090s.
