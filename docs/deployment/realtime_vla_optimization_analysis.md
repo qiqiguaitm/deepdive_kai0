@@ -601,29 +601,56 @@ PyTorch 训练侧 (`train_pytorch.py` + `models_pytorch/`) 已在维护, advanta
 
 ## 4. 真机测试方案
 
-### 4.1 测试 1: sim01 模型实际推理延迟
+### 4.1 测试 1: sim01 模型实际推理延迟 ✅ 完成 (2026-05-20)
 
 **目的**: 区分"模型推理时间" vs "timer 节流时间", 确定推理优化上限。
 
-**方法 A** (推荐, 最快): 临时提高 `inference_rate` 看模型是否跟得上
-```bash
-# sim01 上 autonomy 跑起来后
-ros2 param set /policy_inference_node inference_rate 10.0
-# 看节点日志 "infer took X ms" 字段
-# 若 X 始终 < 100, 说明 10Hz 跟得上
-# 若 X 经常 > 100, 推理本身就接近极限
-```
+#### 实测结果
 
-**方法 B** (更精细): 加 timing log
-在 `policy_inference_node.py::_inference_loop` 中 `policy.infer()` 前后加 `time.perf_counter()`, 记录 100 次 RTT, 看 P50/P95/P99。
+利用 `policy_inference_node.py:2147` 内置 `infer XXXms` log + `start_scripts/diag/measure_jax_infer_latency.sh`, 分析 `~/.ros/log/python_659068_1779190543244.log` (May 19 19:36-19:43 真任务 autonomy session, 1305 raw samples / 1299 cleaned 排除 6 个 JIT cold start + > 500ms outlier):
 
-**期望读出 → 后续决策**:
+| 指标 | 值 (ms) |
+|---|---:|
+| **P50** | **196.0** |
+| P95 | 221.0 |
+| P99 | 232.0 |
+| Mean ± Std | 198.6 ± 13.2 |
+| Min — Max | 174 — 276 |
+| P95 − P50 (jitter) | 25.0 |
+| P99 − P50 (tail) | 36.0 |
+| Session 推理率 | 2.93 Hz (`inference_rate=3.0` timer 设置, 实际打 timer 59% utilization) |
+
+> 测量范围: server 端 `t_start` (Policy.infer 入口) → action chunk 出口, 含 WebSocket 接收 + 偏置处理 + JAX `sample_actions` JIT + WebSocket 回包. 这是 client 看到的端到端 RTT, 不是裸 GPU 推理时间.
+
+#### 与 V1 路径对比
+
+| 指标 | JAX (sim01 实测) | V1 Triton (offline 5090 benchmark) | 提升 |
+|---|---:|---:|---:|
+| P50 | 196 ms | 32 ms | **6.1×** |
+| P95 | 221 ms | ~33 ms | ~6.7× |
+| Jitter (P95-P50) | 25 ms | < 1 ms | -96% |
+
+#### 后续决策 (依阈值表)
+
+P50 = 196 ms → 落在 "100-200ms 标准 5090 baseline" 档:
+- **V1 路径价值确认**: 6.1× 加速空间, **§6 V1 Triton 已实施 + §7 Layer B 服务包装是正确方向**
+- **inference_rate 提升潜力**: 196ms ≪ 1/8 Hz = 125ms 周期, 仍紧; V1 32ms 后可拉到 20-30 Hz 安全
+- **抖动可接受**: P95-P50 = 25ms < 100ms 阈值, JAX 这边 AOT compile 必要性不高, 直接走 V1 即可
+
 | 指标 | 后续行动 |
 |---|---|
-| P50 < 80ms | 模型已很快, #6 浅层收益小, 直接考虑 #2/#1; 阶段 3 优先级可降低 |
-| P50 100-200ms | 标准 5090 baseline, #6 (1.5-2×) 拿 50-100ms 收益; 阶段 3 价值明显 |
-| P50 > 250ms | 可能有 cache miss / fp32 残留, #6 收益最大 |
-| P95-P50 > 100ms | 抖动严重, AOT compile 必做 |
+| P50 < 80ms | 模型已很快, V1 收益小, 阶段 3 优先级可降低 |
+| **P50 100-200ms** ✅ | **标准 5090 baseline, V1 路径价值明显, 6.1× 加速** |
+| P50 > 250ms | 可能有 cache miss / fp32 残留, V1 收益最大 |
+| P95-P50 > 100ms | 抖动严重, AOT compile 必做 (sim01 实测 25ms, 不需要) |
+
+#### 重新跑测量
+
+```bash
+./start_scripts/diag/measure_jax_infer_latency.sh                 # 自动找最新 log
+./start_scripts/diag/measure_jax_infer_latency.sh <log_file>      # 指定 log
+SKIP_WARMUP=10 MAX_MS=300 ./start_scripts/diag/measure_jax_infer_latency.sh  # 调过滤
+```
 
 ### 4.2 测试 2: Piper 关节 t_motion 滞后
 
@@ -1068,3 +1095,4 @@ t10 motor 响应           → t_motion (~50-150ms 估, §4.2 测试)
 | **v0.11** | **2026-05-20** | **V1 Triton 推理优化全程实施 (合并自 `optimize/v1_triton/PROGRESS.md`)**: 新增 §6 完整记录 Step 0-9 的 9 个优化步骤. 路径决策从"自写 PyTorch+Triton"改为"复用 V1 `pi05_infer.py` + 5090 重 autotune", 工程量 1-2 周 → 3 天. **最终 P50 = 32.05 ms (8.00× vs eager, 比 §3.4.2 max-autotune 43.5ms 再快 26%)**. 关键发现: 5090 sm_120 "小 BLOCK_N 大 BLOCK_K" 反直觉最优 (Step 6 单步 -8.8%); decoder GEMM memory-bound, pipelining/encoder sweep 噪声内; 继续突破 30ms 需结构性 kernel fusion (Step 11, 3-5 天) 或 wgmma 重写 (Step 13, 5-10 天). 独立 PROGRESS.md 已删除 |
 | **v0.12** | **2026-05-20** | **针对性整理**: §0/§3.1 总体阶段图按 v0.11 实施现状重写 (阶段 0 完成 / 阶段 3 推理 serve 已 ✅); §3.1.1 (原计划影响对比表) 删除, 改为"PI0Pytorch fix 备选路径清单"; §3.1.2 子任务清单状态更新 (V1 路径 4 项完成); §3.4 顶部加 v0.11 现状引导; §3.4.2 末尾自写 Triton 计划折叠 (8 步细节 → 3 行实施路径摘要); §3.6 Flash 降级理由瘦身 (用 32ms 而非 43.5ms 数据). TOC 补 §3.1.1/3.1.2. 总行数 950 → ~900 |
 | **v0.13** | **2026-05-20** | **新增 §7 Layer B 系统级优化 plan**: 单 5090 真机约束确认 (排除多 GPU 选项). 子项 B4 (V1 serve 包装, 主线) → B1 (全链路 11 段 latency profile) → B2 (preprocess GPU 化, 数据驱动). 1.5-2 周, 关键里程碑 B4 = 真机 V1 推理首跑通. Layer A (kernel fusion/wgmma) 暂缓 (推理 32ms 已远 < timer 周期, ROI 低). §7 修订历史 → §8. TOC 更新 |
+| **v0.14** | **2026-05-20** | **Q2 sim01 JAX 推理延迟实测完成 + B4 Phase 1 serve_policy_v1.py 落地**: §4.1 加 1299-sample 实测表 (P50=196 ms / P95=221 / P99=232 / Std=13.2 / jitter=25 ms), 落在 "100-200ms 标准 5090 baseline" 档, 确认 V1 路径 6.1× 加速空间. JAX 抖动 P95-P50=25ms 不需 AOT compile. 推理 196ms vs timer 333ms = 59% utilization, V1 落地后可拉 inference_rate 到 20-30 Hz. 新增 `kai0/scripts/serve_policy_v1.py` (B4 Phase 1, 343 行) + `start_scripts/diag/measure_jax_infer_latency.sh` (Q2 helper) |

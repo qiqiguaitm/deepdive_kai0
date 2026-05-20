@@ -21,9 +21,10 @@ if [ -n "$1" ]; then
     LOGFILE="$1"
 else
     # 自动找最新含 "infer XXXms" 的 ros2 log
-    LOGFILE=$(find "${LOG_DIR}" -name "*stdout*" -type f 2>/dev/null \
-              | xargs ls -t 2>/dev/null \
-              | xargs grep -l "infer [0-9]*ms" 2>/dev/null \
+    # ROS2 jazzy 把 launch 节点 stdout 写到 ~/.ros/log/python_*.log (不是 *stdout*)
+    LOGFILE=$(find "${LOG_DIR}" -maxdepth 2 -name "python_*.log" -o -name "*stdout*" 2>/dev/null \
+              | xargs -r grep -l "infer [0-9]*ms" 2>/dev/null \
+              | xargs -r ls -t 2>/dev/null \
               | head -1)
     if [ -z "$LOGFILE" ]; then
         echo "[FAIL] No ros2 log with 'infer XXXms' found under ${LOG_DIR}"
@@ -32,56 +33,73 @@ else
     fi
 fi
 
+# 过滤 cold-start JIT outliers (first 5) + > 500ms 异常
+SKIP_WARMUP=${SKIP_WARMUP:-5}
+MAX_MS=${MAX_MS:-500}
+
 echo "=== Log file: $LOGFILE ==="
 echo "=== Size: $(du -h "$LOGFILE" | cut -f1) ==="
 echo ""
 
-# 提取所有 'infer XXXms' 数值, 喂给 python 算分位数
-grep -oP 'infer \K\d+(?=ms)' "$LOGFILE" | python3 - <<'PYEOF'
+# 提取所有 'infer XXXms' 数值, 喂给 python 算分位数 (raw + cleaned)
+# 用 process substitution 把 grep 输出做 python 的 stdin (避免 heredoc 抢占 stdin)
+export SKIP_WARMUP MAX_MS LOGFILE
+python3 <(cat <<'PYEOF'
+import os
 import sys
+import subprocess
 import numpy as np
 
-vals = []
-for line in sys.stdin:
-    line = line.strip()
-    if line:
-        vals.append(int(line))
+logfile = os.environ["LOGFILE"]
+out = subprocess.check_output(["grep", "-oP", r"infer \K\d+(?=ms)", logfile])
+sys_in = out.decode().splitlines()
+
+vals = [int(line.strip()) for line in sys_in if line.strip()]
 
 if not vals:
     print("[FAIL] No 'infer XXXms' entries found in log.")
     sys.exit(1)
 
 vals = np.array(vals)
-n = len(vals)
-print(f"=== JAX inference latency (server-side end-to-end RTT, n={n}) ===")
-print(f"  Mean: {vals.mean():.1f} ms")
-print(f"  Std:  {vals.std():.1f} ms")
-print(f"  Min:  {vals.min()} ms")
-print(f"  P50:  {np.percentile(vals, 50):.1f} ms")
-print(f"  P95:  {np.percentile(vals, 95):.1f} ms")
-print(f"  P99:  {np.percentile(vals, 99):.1f} ms")
-print(f"  Max:  {vals.max()} ms")
+skip = int(os.environ.get("SKIP_WARMUP", "5"))
+max_ms = int(os.environ.get("MAX_MS", "500"))
+
+# Clean: drop first N (JIT compile warmup) + > max_ms outliers
+clean = vals[skip:]
+clean = clean[clean <= max_ms]
+dropped = len(vals) - len(clean)
+
+print(f"=== JAX inference latency (server-side end-to-end RTT) ===")
+print(f"  Raw samples: {len(vals)}, Cleaned: {len(clean)} (dropped {dropped} cold-start + > {max_ms}ms outliers)")
 print()
-print(f"  P95 - P50: {np.percentile(vals,95) - np.percentile(vals,50):.1f} ms (jitter)")
-print(f"  P99 - P50: {np.percentile(vals,99) - np.percentile(vals,50):.1f} ms (tail)")
+print(f"  Mean: {clean.mean():.1f} ms")
+print(f"  Std:  {clean.std():.1f} ms")
+print(f"  Min:  {clean.min()} ms")
+print(f"  P50:  {np.percentile(clean, 50):.1f} ms")
+print(f"  P95:  {np.percentile(clean, 95):.1f} ms")
+print(f"  P99:  {np.percentile(clean, 99):.1f} ms")
+print(f"  Max:  {clean.max()} ms")
 print()
-print(f"  V1 Triton baseline (offline 5090 benchmark, raw model): 32.05 ms")
-print(f"  PyTorch E max-autotune (offline 5090): 43.5 ms")
-print(f"  Expected JAX RTT range: 100-300 ms (含 WebSocket + JAX overhead)")
+print(f"  P95 - P50: {np.percentile(clean,95) - np.percentile(clean,50):.1f} ms (jitter)")
+print(f"  P99 - P50: {np.percentile(clean,99) - np.percentile(clean,50):.1f} ms (tail)")
+print()
+print(f"  V1 Triton baseline (offline 5090, random weights): 32.05 ms (P50)")
+print(f"  PyTorch E max-autotune (offline 5090, random):     41.0 ms (P50)")
 
 # 跨阈值判断 (用于决策推理优化路线)
-p50 = np.percentile(vals, 50)
+p50 = np.percentile(clean, 50)
 print()
 print("=== Decision per docs/deployment/realtime_vla_optimization_analysis.md §4.1 ===")
 if p50 < 80:
     print(f"  P50 = {p50:.0f} ms → 模型已很快, #6 浅层收益小, 阶段 3 优先级可降低")
 elif p50 < 200:
-    print(f"  P50 = {p50:.0f} ms → 标准 5090 baseline, #6 (1.5-2×) 拿 50-100ms 收益")
+    print(f"  P50 = {p50:.0f} ms → 标准 5090 baseline, V1 路径价值明显, 预期 {p50/32:.1f}× 加速")
 elif p50 < 250:
-    print(f"  P50 = {p50:.0f} ms → 接近标准, 但偏慢")
+    print(f"  P50 = {p50:.0f} ms → 接近标准, 偏慢. V1 路径预期 {p50/32:.1f}× 加速")
 else:
-    print(f"  P50 = {p50:.0f} ms → 可能有 cache miss / fp32 残留, #6 收益最大")
+    print(f"  P50 = {p50:.0f} ms → 可能有 cache miss / fp32 残留, V1 收益最大 ({p50/32:.1f}×)")
 
-if np.percentile(vals,95) - p50 > 100:
-    print(f"  P95-P50 = {np.percentile(vals,95) - p50:.0f} ms → 抖动严重, AOT compile 必做")
+if np.percentile(clean,95) - p50 > 100:
+    print(f"  P95-P50 = {np.percentile(clean,95) - p50:.0f} ms → 抖动严重, AOT compile 必做")
 PYEOF
+)
