@@ -83,15 +83,25 @@ _base_policy = None  # type: ignore[assignment]
 
 
 def _resize_image_to_224(img_uint8: np.ndarray) -> np.ndarray:
-    """Resize HxWx3 uint8 → 224x224x3 uint8.
+    """Normalize image to HxWx3 uint8 224×224.
 
-    Uses PIL (avoids opencv dependency). Bilinear interpolation.
+    Accepts both HWC (H,W,3) and CHW (3,H,W) input. kai0 ROS2 client sends
+    CHW per policy_inference_node.py:1963 (imgs.transpose(2,0,1) into obs);
+    openpi JAX path absorbs it via input_transforms but V1Policy needs to
+    normalize layout here.
     """
     from PIL import Image as _PIL_Image
 
-    if img_uint8.shape[:2] == (224, 224):
-        return img_uint8
-    pil = _PIL_Image.fromarray(img_uint8)
+    arr = np.asarray(img_uint8)
+    # CHW → HWC detection: (3, H, W) with H,W >> 3
+    if arr.ndim == 3 and arr.shape[0] == 3 and arr.shape[1] > 3 and arr.shape[2] > 3:
+        arr = np.ascontiguousarray(arr.transpose(1, 2, 0))  # CHW → HWC
+
+    # If already 224×224×3 after normalization, return as-is
+    if arr.ndim == 3 and arr.shape[:2] == (224, 224) and arr.shape[2] == 3:
+        return arr
+
+    pil = _PIL_Image.fromarray(arr)
     pil = pil.resize((224, 224), _PIL_Image.BILINEAR)
     return np.asarray(pil, dtype=np.uint8)
 

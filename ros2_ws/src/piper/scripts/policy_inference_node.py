@@ -392,6 +392,14 @@ class PolicyInferenceNode(Node):
         self._rtc_lock = threading.Lock()
         self._rtc_prev_chunk = None
         self._last_infer_ms = 0.0
+        # _norm_action_{mean,std}: action norm_stats for RTC prev_chunk normalize
+        # (used at inference_loop:2267). Init to None as default; _load_jax_policy
+        # populates from <ckpt>/assets/<asset>/norm_stats.json if found, otherwise
+        # remains None → pc_send = pc (raw). In websocket mode (mode=websocket,
+        # connecting to external V1/JAX serve), defaults to None — server side
+        # does the denormalize, so client RTC sends raw prev_chunk by default.
+        self._norm_action_mean = None
+        self._norm_action_std = None
 
         # ── Sensor deques (原版帧同步模式: 回调 append, get_synced_frame 消费) ──
         self._sensor_lock = threading.Lock()
