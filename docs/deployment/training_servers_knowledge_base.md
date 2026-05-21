@@ -544,7 +544,10 @@ print(r['Result'].get('State'))    # Running / Success / Failed / Stopped
 模板: `train_scripts/volc/gf3_cluster_smoke_16gpu.yaml` (2 节点 × 8 H20 = 16 GPU, FSDP=16)。
 
 ```yaml
-ImageUrl:        "visincept-cn-beijing.cr.volces.com/grasp/h2r:1.0"   # cn-beijing CR (与 cn-shanghai CR 是不同 region)
+# 实测可工作 (2026-05-21 X-VLA Stage 1 76d44):
+ImageUrl: "dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1"     # ⭐ kai0 标准训练镜像 (vis_robot CR)
+# 备选 (smoke / grasp-h2r 任务):
+# ImageUrl: "visincept-cn-beijing.cr.volces.com/grasp/h2r:1.0"
 ResourceQueueName: "Robot-North-H20"                                   # auto: cn-beijing / cn-beijing-e
 TaskRoleSpecs:
   - RoleName: "worker"
@@ -553,8 +556,19 @@ TaskRoleSpecs:
 Storages:
   - Type: "Vepfs"
     VepfsId: "vepfs-cnbj875793a96d6b"                                  # 华北 vePFS, 与 gf3 共享
-    MountPath: "/vePFS-North-E"
+    MountPath: "/vePFS-North-E/vis_robot"                              # ⚠️ 必须配 SubPath=/vis_robot
+    SubPath: "/vis_robot"                                              # IAM 限定到 /vis_robot 子路径, 否则 AccessDenied
 ```
+
+> ⚠️ **镜像 URL 易错点 (2026-05-21 踩坑)**:
+> - 正确: `dvs-cr-cn-**beijing**.cr.volces.com` (beijing 拼写完整)
+> - 错误: `dvs-cr-cn-**bejing**.cr.volces.com` (少一个 i) → DNS 不解析, 任务卡 Deploying 25+ 分钟无报错, 直到自动失败
+> - 通过 `curl -sI https://dvs-cr-cn-beijing.cr.volces.com/v2/` 验证 — 应返回 401 Unauthorized (说明 endpoint 存在)
+>
+> ⚠️ **vePFS 权限 (2026-05-21 踩坑)**:
+> - cn-beijing 队列 IAM 用户对 vepfs-cnbj 根目录无 RDWR 权限, 必须 `SubPath: "/vis_robot"` 限定到用户拥有的子目录
+> - 不设 SubPath → 提交立刻返回 `403 AccessDenied: You are not authorized [dir: /, mode: RDWR]`
+> - MountPath 也要相应改为 `/vePFS-North-E/vis_robot` (而非 `/vePFS-North-E`), 这样 entrypoint 中的路径 `/vePFS-North-E/vis_robot/workspace/...` 才能正确映射
 
 提交:
 ```bash
@@ -702,15 +716,22 @@ from volcengine.Credentials import Credentials
 from volcengine.ServiceInfo import ServiceInfo
 from volcengine.base.Service import Service
 
-# Queue → region/zone mapping
+# Queue → region/zone mapping. image_cr 是默认 kai0 训练镜像;
+# YAML 里可显式 ImageUrl 覆盖 (例如 grasp/h2r smoke 镜像)
 QUEUES = {
     "Robot-North-H20": {"id": "q-20260516104642-khch9", "region": "cn-beijing",  "zone": "cn-beijing-e",
-                        "vepfs_id": "vepfs-cnbj875793a96d6b", "vepfs_mount": "/vePFS-North-E",
-                        "image_cr": "visincept-cn-beijing.cr.volces.com/grasp/h2r:1.0"},
+                        "vepfs_id": "vepfs-cnbj875793a96d6b",
+                        "vepfs_mount": "/vePFS-North-E/vis_robot",     # 配合 SubPath=/vis_robot
+                        "vepfs_subpath": "/vis_robot",                 # IAM 限定
+                        "image_cr": "dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1"},  # kai0 训练镜像
     "robot-task":      {"id": "q-20251204185107-fvnpx",  "region": "cn-shanghai", "zone": "cn-shanghai-a",
                         "vepfs_id": "vepfs-cnsh075262e1f815", "vepfs_mount": "/vePFS",
+                        "vepfs_subpath": "",
                         "image_cr": "visincept-cn-shanghai.cr.volces.com/grasp/h2r:1.0"},
 }
+# 额外镜像备选 (按需手动写入 YAML 的 ImageUrl):
+#   visincept-cn-beijing.cr.volces.com/grasp/h2r:1.0    — grasp h2r smoke / vis_robot
+#   visincept-cn-shanghai.cr.volces.com/grasp/h2r:1.0   — grasp h2r smoke / cnsh
 
 def submit(yaml_path):
     cfg = yaml.safe_load(open(yaml_path))
