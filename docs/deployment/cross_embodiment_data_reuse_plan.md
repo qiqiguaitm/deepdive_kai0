@@ -1,14 +1,40 @@
-# 跨本体数据复用 — 战略评估与执行计划
+# 跨本体数据复用 — 战略与执行计划 (Consolidated)
 
-> **作者**: 综合外部研究员讨论 + 项目实测数据 (2026-05-19)
-> **背景**: A=官方 KAI0 双臂 piper (D435i wrist), B=自有双臂 piper (D405 wrist), 共享同一型号机械臂但 wrist 相机+机械装配有差异。当前实测发现 naive 混合训练 (A+B) 在 B 真机上抖动**反而**超过纯 B 训练 → 需要系统化复用方案。
-> **目标**: 把 A 的 **6,512 ep** 数据价值榨干, 同时不污染 B 真机部署性能, 并为 CoRL/NeurIPS paper 铺路。
+> **更新时间**: 2026-05-21
+> **作者**: Tim + 综合外部研究员讨论 + 项目实测数据
+> **背景**: A=官方 KAI0 双臂 piper (D435 wrist), B=自有双臂 piper (D405 wrist), 共享同一型号机械臂但 wrist 相机+机械装配有差异。当前实测发现 naive 混合训练 (A+B) 在 B 真机上抖动**反而**超过纯 B 训练 → 需要系统化复用方案。
+> **目标**: 把 A 的 **6,512 ep** + XVLA-Soft-Fold **1,729 ep** 数据价值榨干, 同时不污染 B 真机部署性能, 并为 CoRL/NeurIPS paper 铺路。
 
 ---
 
-## 1. 设备差异定量
+## 目录
+
+- [Part I — 战略评估](#part-i--战略评估)
+  - [1. Embodiment Gap 定量](#1-embodiment-gap-定量)
+  - [2. 4-层 ROI 战略框架](#2-4-层-roi-战略框架)
+  - [3. 数据规模与现状校准](#3-数据规模与现状校准)
+  - [4. 核心假说矩阵 (H1-H4)](#4-核心假说矩阵-h1-h4)
+- [Part II — 技术参考](#part-ii--技术参考)
+  - [5. EE-relative Action 可行性](#5-ee-relative-action-可行性)
+  - [6. 与 π0.5 / X-VLA 默认对照](#6-与-π05--x-vla-默认对照)
+- [Part III — 执行计划](#part-iii--执行计划)
+  - [7. Milestone 总览 (M1-M4)](#7-milestone-总览-m1-m4)
+  - [8. M2 SSL Pretraining 详细 Phase 0-4](#8-m2-ssl-pretraining-详细-phase-0-4)
+  - [9. 资源 + 数据 + 网络](#9-资源--数据--网络)
+- [Part IV — 跟踪 + 风险](#part-iv--跟踪--风险)
+  - [10. 状态跟踪 (持续更新)](#10-状态跟踪-持续更新)
+  - [11. 风险预警 + 关键陷阱](#11-风险预警--关键陷阱)
+  - [12. 决策点](#12-决策点)
+  - [13. 修订历史](#13-修订历史)
+
+---
+
+# Part I — 战略评估
+
+## 1. Embodiment Gap 定量
 
 ### 1.1 共享 (跨本体的"同"部分)
+
 | 维度 | A (官方 KAI0) | B (自有) |
 |---|---|---|
 | 机械臂型号 | piper 双臂 (6 DOF + gripper) | 同 |
@@ -19,58 +45,72 @@
 | Top 俯视角度 | ~30° | 同 (略差) |
 | Action 语义 | "Flatten and fold the cloth." | 同 |
 
-### 1.2 差异 (跨本体的"异"部分)
-| 维度 | A | B | 量化差异 | 严重度 |
-|---|---|---|---:|---:|
-| **Wrist 相机** | RealSense **D435** (RGB FOV 69°×42°, rolling shutter, min 28cm) | RealSense **D405** (RGB FOV 87°×58°, global shutter, min 7cm, RGB-IR 共光路) | brightness ↓12%, sharpness ↓31%, near-field depth A 失效 | 🔥 最严重 |
-| **Wrist 相机 flange 安装** | 一致设计 | 一致设计但高度/角度略差 | 待精确测量 | ⚠️ 中-高 |
-| **双臂间距** | 标准 | 略差 (毫米级未测) | state joint 3 std +61%, joint 5 std +83% (摇操员 + 几何叠加) | ⚠️ 中 |
-| **Top 高度/角度** | 标准 | 略差 (<5cm, <5°) | mean brightness 接近 | ✅ 最小 |
+### 1.2 差异 (按影响从大到小)
 
-### 1.3 实测真机症状回顾 (来自 `dataset_diagnostic_report.md`)
-1. **Cloth loop** (复杂场景): mixed_1 baseline (纯 A 训练) 部署 B 出现循环卡死 — D435i→D405 视觉 OOD 累积漂移
+| Gap 类型 | A | B | 量化差异 | 严重度 |
+|---|---|---|---|---|
+| **Wrist 相机** | RealSense **D435** (RGB FOV 69°×42°, rolling, min depth 28cm) | RealSense **D405** (RGB FOV 87°×58°, global shutter, min depth 7cm, RGB-IR 共光路) | brightness ↓12%, sharpness ↓31%, 近距 RGB-D 行为完全不同 | 🔴 **最严重** |
+| **Wrist 安装** | 一致设计 | 一致设计但高度/角度略差 (毫米级) | 待精确测量 | 🟠 第二严重 — wrist view 物体 pos/scale 受影响 |
+| **双臂间距** | 标准 | 略差 (毫米级未测) | state joint3 std +61%, joint5 std +83% | 🟡 absolute EE 时 systematic bias |
+| **Top 相机** | 标准 | 略差 (<5cm, <5°) | mean brightness 接近 | 🟢 < 5cm/5° 时 augmentation cover |
+
+### 1.3 实测真机症状回顾
+
+引自 [dataset_diagnostic_report.md](../training/dataset_diagnostic_report.md):
+
+1. **Cloth loop** (复杂场景): mixed_1 baseline (纯 A 训练) 部署 B 出现循环卡死 — D435→D405 视觉 OOD 累积漂移
 2. **空桌面抖动**: vis SFT 后 prior 被高 jump 帧拉宽, 空桌面 condition 弱 → 抽到大 action
 3. **混训抖动 > 纯 B**: `mixed_pure2_1800_6000` 真机抖 > `pure_1200_new_norm` → naive 混训创造双模式策略, chunk 间切换抖
 
 ---
 
-## 2. 战略框架: A 数据的 4 层 ROI
+## 2. 4-层 ROI 战略框架
 
-判断标准: **某 loss/objective 是否依赖 A 和 B 的 action space 对齐?**
+**判断标准**: 某 loss / objective 是否依赖 A 和 B 的 action space 对齐?
 
-| 层 | 内容 | 依赖 action 对齐? | A 价值 | 工程复杂度 |
+| Layer | 内容 | 依赖 action 对齐? | A 价值 | 工程复杂度 |
 |---|---|---|---|---|
-| **L1** Visual SSL / World Model | V-JEPA + point track + flow, dynamics | ❌ 不依赖 | **全功率可用** | 高 |
-| **L2** Embodiment-conditioned policy | A+B 共训, 通过 embedding 区分 | ⚠️ 弱依赖 (需 conditioning) | **可用, 需对齐** | 中 |
-| **L3** Auxiliary tasks | Inverse dynamics, future prediction (head) | ⚠️ 部分依赖 | **可用, 不入主 loss** | 中 |
-| **L4** Data engine / Sim2Real | Retargeting, replay-augmentation | ✅ 强依赖 | 低 (需高保真 retarget) | 高 |
+| **L1: Visual SSL / World Model** ⭐ | V-JEPA + point track + flow, dynamics | ❌ 不依赖 | **全功率可用** | 高 |
+| **L2: Embodiment-cond Policy** | A+B 共训, 通过 embedding 区分 | ⚠️ 弱依赖 (需 conditioning) | 可用, 需对齐 | 中 |
+| **L3: Auxiliary tasks** | Inverse dynamics, future frame pred | ⚠️ 部分依赖 | 可用, 不入主 loss | 中 |
+| **L4: Data engine / Sim2Real** | Retargeting, replay-augmentation | ✅ 强依赖 | 低 (需高保真 retarget) | 高 |
 
-**关键原则**: A 的价值不在"直接帮 B 做 task", 而在 **representation / dynamics / prior** 这些更上游的层次。
+> **核心原则**: A 的价值不在"直接帮 B 做 task", 而在 **representation / dynamics / prior** 这些更上游的层次。
+>
+> 本文档主线: **L1 + L2 dynamics + L3** 端到端实验 (详见 §8 M2 计划)。
 
 ---
 
-## 3. 现有数据规模与状态校准
+## 3. 数据规模与现状校准
 
-| 数据 | episodes | 当前用途 | 后续分层 |
-|---|---:|---|---|
-| **A: kai0_base** (官方 D435i, base) | **3,055** | mixed_1 init 训练用过 | L1 (SSL) + L2 (主 A 数据) |
-| **A: kai0_dagger** (官方修正样本) | **3,457** | mixed_1 训练用过, 抖动+62% | **仅 L1 / L3** (不进 policy) |
-| **B: vis_base_clean_v2** (D405, 已清理) | **837** (-7% from 895) | task_a_new_smooth_800 训练用 | L2 主力 (oversample 3-5×) |
-| **A 总和** | **6,512** | — | — |
-| **A+B 总和** | **7,349** | — | L1 SSL pretraining 全用 |
-| 已删除 (清理) | 58 vis ep | — | — |
+### 3.1 训练数据池 (2026-05-21 实测路径)
 
-### 3.1 当前模型 SOTA 对比 (val MAE@1)
+| 来源 | Episodes | 总帧数 | Avg/ep | 视频路径 | Size |
+|---|---:|---:|---:|---|---:|
+| **A: Kai0 base** | 3055 | 3.36M | 1101 | `/data/shared/ubuntu/workspace/dataset/Kai0_official/Task_A/base/videos/` | 46G |
+| **A: Kai0 dagger** | 3457 | 2.42M | 699 | `/data/shared/ubuntu/workspace/dataset/Kai0_official/Task_A/dagger/videos/` | 39G |
+| **B: vis_v2_merged** | 895 | 1.06M | 1188 | `/data/shared/ubuntu/workspace/dataset/Task_A/vis_v2_merged/videos/` | 6.3G |
+| **XVLA-Soft-Fold** | 1729 | ~? | — | 见 §9.2 多地副本表 | 444G |
+| **合计** | **9136 ep** | **~7M frames** | — | 3 views (top_head, hand_left, hand_right) per ep | **~535G** |
+
+**视角统一命名** (LeRobot v2.1 convention, 也用于 SSL data loader):
+- `observation.images.top_head` — top 相机 (A 全是 D435, B 用 D435)
+- `observation.images.hand_left` — 左 wrist (A 用 D435, B 用 D405) ⚠️ embodiment gap
+- `observation.images.hand_right` — 右 wrist (同上)
+
+### 3.2 当前模型 SOTA 对比 (val MAE@1)
+
 | 实验 | Init | 数据 | Best MAE@1 | 真机表现 |
 |---|---|---|---:|---|
 | `task_a_new_pure_200` (js02 resume) | mixed_1 step 22k | vis 200 ep | **0.0065** ⭐ | 待测 |
 | `task_a_new_pure2_1800_6000` (uc SOTA) | pi05_base | 7900 ep mix | 0.0085 | **抖动严重** |
 | `task_a_new_pure2_1800_js` (js cluster) | pi05_base | 1800 ep | 0.0090 | 待测 |
-| `task_a_new_smooth_800` (uc03 进行中) | mixed_1 | vis_clean 800 | TBD | 待测 |
+| `task_a_new_smooth_800` (uc03) | mixed_1 | vis_clean 800 | 完成 | 待测 |
 
-**重要观察**: val MAE 漂亮的 SOTA `mixed_pure2_1800_6000` 真机抖动严重 — val MAE ≠ 真机平滑度。
+**重要观察**: val MAE 漂亮的 SOTA `mixed_pure2_1800_6000` 真机抖动严重 — **val MAE ≠ 真机平滑度**。
 
-### 3.2 已隐式执行的 Layer 2 (但未显式标识)
+### 3.3 已隐式执行的 L2 (但未显式标识)
+
 当前 SOTA 链 `pi05_base → mixed_1 → task_a_new_pure_200` 本质上是 **A-heavy pretrain → B-only finetune** 的 curriculum, 但缺失:
 - ❌ 没有显式 embodiment conditioning (model 不知道哪是 A 哪是 B)
 - ❌ 没有 EE-relative action (用绝对关节角)
@@ -81,9 +121,23 @@
 
 ---
 
-## 4. EE-relative Action 可行性 (验证)
+## 4. 核心假说矩阵 (H1-H4)
 
-### 4.1 可用资源
+| ID | 假说 | 关键实验 | 成功标准 |
+|---|---|---|---|
+| **H1** | SSL pretrain on A+XVLA+B 提供的 visual repr 在 cloth 任务上 > π0.5 default | E3.1 vs E3.0 | B finetune val MAE 降低 ≥10%, 真机抖动减少 |
+| **H2** | Multi-objective (V-JEPA + track + flow + xview) > 单 V-JEPA | E1.5 vs E1.1 | Downstream val MAE 进一步降低 |
+| **H3** | Embodiment-conditioned dynamics 让 A 的物理 prior 不污染 B policy | E3.3 vs E3.2 | 真机平滑度 + 复杂场景成功率 提升 |
+| **H4** | Motion-residual decomposition: cloth_residual 部分 embodiment-invariant | E2.3 latent 分析 | A vs B cloth_residual latent 的 MMD < 0.1 |
+
+---
+
+# Part II — 技术参考
+
+## 5. EE-relative Action 可行性
+
+### 5.1 可用资源
+
 | 资源 | 位置 |
 |---|---|
 | **piper URDF** | `calib/piper_local.urdf` (SolidWorks 完整导出) |
@@ -92,7 +146,8 @@
 | **Hand-eye 标定 (camera↔arm base)** | `config/calibration.yml` (DANIILIDIS, reproj <0.3px) |
 | **双臂 CAN 配置** | `config/pipers.yml` |
 
-### 4.2 三种 EE-relative 方案对比
+### 5.2 三种 EE-relative 方案对比
+
 | 方案 | 公式 | 跨本体优势 | 实现成本 |
 |---|---|---|---|
 | **A. Delta joints** | a_t = q_t − q_{t−1} | ✅ 完全绕开几何, 最简单 | 极低 (parquet 改 1 列) |
@@ -101,7 +156,8 @@
 
 **推荐方案 B**: Delta EE pose 是物理最干净的 embodiment-invariant 表示 — "gripper 在自己 frame 里挪了多少", 同 piper 不同 base 安装位置完全无关。
 
-### 4.3 实施步骤 (估 1 天)
+### 5.3 实施步骤 (~1 天)
+
 ```python
 # 1. 离线预处理脚本
 from calib.piper_fk import PiperFK
@@ -109,425 +165,372 @@ fk = PiperFK()
 
 for ep in dataset:
     actions = ep["action"]  # (T, 14) — joint angles
-    # Split L/R arms
     q_left = actions[:, 0:7]; q_right = actions[:, 7:14]
     # Compute EE pose per arm
-    T_left = np.stack([fk.fk_homogeneous(q[:6]) for q in q_left])  # (T, 4, 4)
+    T_left = np.stack([fk.fk_homogeneous(q[:6]) for q in q_left])
     T_right = np.stack([fk.fk_homogeneous(q[:6]) for q in q_right])
     # Delta in EE frame: dT_t = T_{t-1}^{-1} @ T_t
     dT_left = np.linalg.inv(T_left[:-1]) @ T_left[1:]
     dT_right = np.linalg.inv(T_right[:-1]) @ T_right[1:]
-    # Convert to 6-DOF se(3) log map (3 trans + 3 rot)
-    twist_left = se3_log(dT_left)  # (T-1, 6)
+    # se(3) log map
+    twist_left = se3_log(dT_left)
     twist_right = se3_log(dT_right)
-    # Concat with gripper (still abs):
-    new_action = concat([twist_left, twist_right, gripper_L, gripper_R])  # (T-1, 14)
+    new_action = concat([twist_left, twist_right, gripper_L, gripper_R])
     # Write back parquet
 ```
 
-### 4.4 推理时反变换
+### 5.4 推理时反变换
+
 ```python
 # 部署时: model outputs delta EE → 累积回 EE pose → IK → joints
 T_current = fk.fk_homogeneous(q_current)
 for delta in predicted_chunk:
     T_next = T_current @ se3_exp(delta[:6])
-    q_next = ik_solve(T_next, q_current)  # warm start with current
+    q_next = ik_solve(T_next, q_current)  # warm start
     send_to_arm(q_next)
     T_current = T_next
 ```
 
-**风险**: IK 解可能不唯一 / 不连续 → 需要 warm-start 保证 joint-space 连续性。**可选**: 训练时同时输出 delta EE + delta joints, 部署时优先 delta joints (避开 IK)。
+**风险**: IK 解可能不唯一 / 不连续 → 需要 warm-start。**备选**: 训练时同时输出 delta EE + delta joints, 部署时优先 delta joints (避开 IK)。
 
 ---
 
-## 5. 推荐执行计划 (按 milestone)
+## 6. 与 π0.5 / X-VLA 默认对照
 
-### 🚀 M1 (本周-下周): Layer 2 落地, 修复真机抖动 [短期 ROI 最高]
+### 6.1 Action 表示决策 (实证调研, 见 [delta_vs_absolute_research](.))
 
-| Step | 内容 | 输出 |
+| 模型 | 默认 Action | 备注 |
 |---|---|---|
-| M1.1 | 写 `convert_to_delta_ee.py`: 跑 FK + se3 log, 重写 parquet | `kai0_base_dee/`, `vis_clean_dee/` |
-| M1.2 | 改 prompt: `"[D435i wrist] Flatten ..."`, `"[D405 wrist] Flatten ..."` (轻量 conditioning) | data_config 调整 |
-| M1.3 | 训练: `pi05_flatten_fold_xemb_kai0base_visclean` <br> data = kai0_base × 1 + vis_clean × 3 (不混 dagger) <br> init = pi05_base (干净起点) <br> LR 1.5e-5 → 1.5e-6, 50k step <br> uc 集群 24 GPU, ~9h | M1 ckpt |
-| M1.4 | Phase B-only finetune: 接 M1.3, 仅 vis_clean × 3, LR 1.5e-6 → 1.5e-7, 10k step, 强制 [D405] prompt | M1-finetune ckpt |
-| M1.5 | 真机分级测试 (平铺/皱缩/堆叠/复杂) vs `task_a_new_smooth_800` baseline | 报告 |
+| **π0 (老)** | Delta (relative to chunk start) | OpenPI docs |
+| **π0.5 (新)** | **Absolute** (默认), 可选 relative | LeRobot pi05 docs |
+| **OpenPI Aloha 数据** | DeltaActions transform on (use_delta_joint_actions=True) | 内部 pipeline 转 delta |
+| **本地 mixed_1 ckpt** | **Absolute** (实测 norm_stats: mean[1]=1.48, std=0.63, 与 state 同分布) | 已通过 norm_stats 分析确认 |
+| **KAI0 数据集 (raw)** | **Absolute** (joint angles ±π) | 数据库实测 |
+| **X-VLA** | EE6D absolute pose (20D = xyz+Rot6D+grip per arm) | ICLR 2026 |
 
-**预期**: 真机抖动 < 当前混训, 复杂场景成功率 > 纯 vis_clean。
-**关键决策点**: 如果 M1.5 显示真机已足够好, **M2-M4 转为 paper-focused 长线投入**。
+**最权威实证研究** ([Demystifying Action Space Design, arxiv 2602.23408](https://arxiv.org/abs/2602.23408)): 13000+ rollouts 表明:
+- **单机器人 / 单任务 / long-horizon** → **absolute** 更稳 (我们的场景 ✓)
+- **多 embodiment / 跨设备** → delta 更稳
+- **混合 mask** (joint delta + gripper absolute) 是 pragmatic 选择
 
----
+### 6.2 Embodiment Conditioning 选项
 
-### 🔬 M2 (4-6 周): Layer 1 SSL Pretraining [paper 价值最高]
-
-| Step | 内容 | 输出 |
+| 方式 | 复杂度 | 推荐度 |
 |---|---|---|
-| M2.1 | 数据预处理 (1 周): CoTracker3 跑 7349 轨迹 dense point tracks; RAFT 跑 flow; SAM3 跑 cloth mask | pseudo-labels |
-| M2.2 | Wrist FOV 处理: 接受 D435 (69°×42°) vs D405 (87°×58°) 无法对齐 (D435 更窄), 用 view-conditioned token 让 model 学 differentiate | preprocess pipeline |
-| M2.3 | Multi-objective SSL (2-3 周): <br> L = w_VJEPA·L_vjepa + w_track·L_track + w_flow·L_flow + w_xview·L_xview <br> Phase 1: 1.0/0.5/0.3/0.2 (前 50%) <br> Phase 2: 0.5/1.0/0.5/0.3 (后 50%) <br> Init π0.5 PaliGemma vision backbone (continual pretrain, layer-wise lr decay, peak 1e-5) | `AtomWorld Vision Backbone v0.1` |
-| M2.4 | Cloth-specific 调整: Saliency-guided masking (cloth edges 高 mask 率), multi-scale temporal (k=4-8 + k=32-64), top/wrist 统一 backbone + view token | model arch |
+| Prompt token only (`"[D405 wrist] ..."`) | 极低 (改 prompt 字符串) | ⭐⭐⭐ 先做 |
+| Soft prompt (X-VLA style, 每个 domain 32×1024 vec) | 中 (改 model arch) | ⭐⭐ 后做 |
+| Action head embedding | 中 | ⭐⭐ 后做 |
+| 三者结合 | 高 | ⭐ 最终方案 |
+
+> X-VLA Soft Prompt 已在 290K episodes 跨 7 个 platforms × 5 个 arm types 验证可行 (ICLR 2026)。每域仅 33K 参数 (32×1024), 整体 0.04% 非共享参数。
 
 ---
 
-### 🌍 M3 (6-10 周): Embodiment-conditioned Dynamics
+# Part III — 执行计划
 
-| Step | 内容 |
-|---|---|
-| M3.1 | Latent dynamics: z_{t+1} = f(z_t, embodiment_emb, action_t), [A_emb, B_emb] 各一份 (dim=128), action_t 各自 norm |
-| M3.2 | Motion-residual decomposition: ego motion (embodiment-specific) vs cloth residual (embodiment-invariant), loss 拆分 |
-| M3.3 | Inverse dynamics aux head (embodiment-conditioned), 全部 7349 数据 |
+## 7. Milestone 总览 (M1-M4)
+
+### 🚀 M1 (1-2 周): 短期真机修复 — **已 deprioritize**
+
+> 用户决策 (2026-05-21): 先专注 L1 SSL 路线 (M2), 暂不展开 X1/X2/X3 系列。M1 计划保留但不立即执行, 待 M2 完成首轮 ablation 后回看。
+
+简要内容: EE-relative action + embodiment prompt + B oversample 修复真机抖动 (详细方案见 git 历史)。
+
+### 🔬 M2 (~9 周): L1 SSL Pretraining + Dynamics + Policy ⭐ **主线**
+
+完整 4 个 Phase 详见 §8。**当前进度**: Phase 0 in_progress (E0.1 Kai0_base CoTracker3 跑在 uc02)。
+
+### 🌍 M3 (M2 之后): 真机 + Paper 收尾
+
+- 真机大规模测试 (60-100 ep per ablation)
+- Paper figures + writing
+- CoRL / NeurIPS submission
+
+### 📝 M4 (long-tail): ATOM Policy 扩展
+
+- ATOM stack: frozen M2 visual + dynamics → object tokenizer (per-point/region) → policy head
+- 适用于跨任务扩展 (Task B 检索, Task C 挂衣)
 
 ---
 
-### 📝 M4 (8-12 周): ATOM Policy + Paper
+## 8. M2 SSL Pretraining 详细 Phase 0-4
 
-| Step | 内容 |
-|---|---|
-| M4.1 | ATOM stack: frozen M2 vision → frozen M3 dynamics → object tokenizer (per-point/region) → policy head |
-| M4.2 | Policy 训练: 仅 vis_clean × 4 + (dagger 作为 aux only, 不入 main action loss) |
-| M4.3 | Ablation table for paper: 纯 π0.5 / + Embodiment cond / + SSL pretrain / + Dynamics / Full ATOM |
-| M4.4 | Paper story: "Object-centric representation enables efficient cross-embodiment data reuse, 6000+800 setup as controlled experiment" |
+### 8.1 整体目标
 
----
+> 训一个 cloth-folding-specific visual encoder (基于 π0.5 PaliGemma/SigLIP backbone continual-pretrain), 用作下游 B-only policy 的 vision tower, 真机性能优于直接用 π0.5 default。
 
-## 6. 风险预警 (从外部分析吸收)
+**总 GPU-day 预算**: ~140 GPU-day on Robot-North-H20 (39 GPU free / 56 total)。
 
-| # | 风险 | 缓解 |
+### 8.2 Phase 0 — 数据预处理 + 伪标签生成 (Week 1-2)
+
+**目标**: 把 9136 ep 视频 (7M frames × 3 view = 21M frame-views) 跑过 CoTracker3 / RAFT / SAM, 生成离线 pseudo-labels 给 Phase 1 SSL 用。
+
+**资源分配 (并行)**: uc02 跑 CoTracker + flow (8 A800 80GB), Robot-North-H20 1 节点 (8 H20) 跑 SAM。
+
+| Exp | Tool | 输入 (有效) | 输出 | Resource | ETA |
+|---|---|---|---|---|---|
+| **E0.1** Pseudo-track | CoTracker3 (scaled_offline.pth, v3.0 windowed) | T=24 window, stride=12 → ~580k windows × 3 view | `tracks/{ep_id}/{view}.npz` (W, T, N=36, 2) | uc02 8 A800 | ~17h (实测) |
+| **E0.2** Optical flow | RAFT-Large | adjacent pair, **temporal stride 3** → ~2.3M pairs × 3 view | `flow/{ep_id}/{view}.npz` (H/8, W/8, 2) | uc02 4 GPU 并行 | ~20h |
+| **E0.3** Cloth mask | SAM2 (Hiera-L) | 1 frame/sec × 9136 ep × 3 view ≈ 820k mask | `mask/{ep_id}/{view}.npz` | Robot-North-H20 8 H20 | ~12h |
+| **E0.4** FOV align | OpenCV | D405 wrist (B 数据 895 ep × 双 wrist) | `rgb_d405_d435align/{ep_id}/wrist_*.npy` (D405 crop 到 D435 等效 FOV) | CPU | 几小时 |
+| **E0.5** EE-relative action | Python + PiperFK | A + B + XVLA actions | `action_ee_relative/{ep_id}.npz` (T, 14) | CPU | 几小时 |
+
+**优化策略**:
+1. **Temporal stride 3**: 7M → 2.3M effective frames
+2. **CoTracker windowed**: T=24 window stride=12 (避免 OOM)
+3. **SAM 稀疏化**: 1 frame/sec (cloth 形态变化慢)
+4. **断点续传**: .npz 已存在且 > 100 byte 即 skip
+
+**输出位置 (统一约定)**:
+```
+/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/ssl_phase0/
+├── tracks/<dataset>/ep_XXXXXX/{top_head,hand_left,hand_right}.npz
+├── flow/<dataset>/...   (同结构)
+├── masks/<dataset>/...  (同结构, 稀疏 1/sec)
+├── rgb_d405_d435align/  (仅 B 数据)
+├── action_ee_relative/{ep_XXXXXX}.npz
+└── logs/                (每 GPU shard 一个 log)
+```
+
+**质量检查**: 抽样 50 ep 人工 inspect, 不合格的 ep 记 `skip_list.txt`。
+
+### 8.3 Phase 1 — SSL Visual Encoder Pretrain (Week 2-4)
+
+**核心**: 从 π0.5 SigLIP/PaliGemma vision tower **continual-pretrain** (不 from scratch), 输出 cloth-fold-specific encoder。
+
+> **并行调度 (per user 决策)**: 跑 3 jobs in parallel — E1.1 (baseline) / E1.4 (xview) / E1.5 (full multi-objective)。跳过 E1.2/E1.3 中间点 (从 E1.5 内置 ablation 反推单项贡献)。
+
+#### E1.1 — V-JEPA Baseline (单目标)
+```yaml
+backbone:     π0.5 SigLIP (continual-pretrain)
+input:        T=16 frames, 3 views, 224×224
+objective:    masked latent prediction (V-JEPA 2.1)
+mask:         tube 30%, edge-saliency 2× boost on cloth edges (用 E0.3 mask)
+lr:           5e-5 layer-wise decay (peak), warmup 2k, cosine to 5e-7
+batch:        128 total (16 H20 × 8/gpu)
+steps:        50k
+data:         A + XVLA + B 全量 (~9000 ep)
+embodiment:   不区分 (统一 backbone)
+output:       /vePFS-North-E/vis_robot/.../ssl_ckpts/E1.1_vjepa_base/
+```
+
+#### E1.4 — V-JEPA + Track + Flow + Cross-view
+```yaml
+继承 E1.1, 加 3 个 head:
+  - track_head: 8M param, predict 36 keypoint tracks over T=16
+                loss = L2(xy) + BCE(visibility), w=0.5
+  - flow_head:  predict dense flow from latent
+                loss = EPE vs RAFT pseudo, masked by cloth mask, w=0.3
+  - xview_head: top latent → wrist latent (autoregressive)
+                loss = cosine + L2, w=0.2
+weights:      固定 (w_vjepa=1.0, w_track=0.5, w_flow=0.3, w_xview=0.2)
+```
+
+#### E1.5 — Full Multi-objective + Phase Weights + Saliency + Multi-scale
+```yaml
+继承 E1.4:
+  - Phase 1 weights (step 0-25k):  w_vjepa=1.0, w_track=0.5, w_flow=0.3, w_xview=0.2
+  - Phase 2 weights (step 25k-50k): w_vjepa=0.5, w_track=1.0, w_flow=0.5, w_xview=0.3
+  - Saliency mask: edges 2×, interior 0.5×
+  - Multi-scale temporal: 一半 batch T=8 (short), 一半 T=48 (long)
+  - Anchor loss: 1% batch on LAION subset (防 catastrophic forget)
+```
+
+**Phase 1 验收 (downstream micro-eval)**:
+- 每个 E1.x 跑完 → 小规模 B-only policy finetune: 3k step, batch 32, 8 GPU on uc02
+- 比较 val MAE on B val set
+- E1.5 应该明显胜 E1.1 (H2 验证)
+
+### 8.4 Phase 2 — Dynamics Pretrain (Week 5-6)
+
+**核心**: 在 frozen visual encoder 上训 latent dynamics model, 引入 embodiment conditioning + motion-residual decomposition。
+
+| Exp | 内容 | 关键改动 |
 |---|---|---|
-| 1 | CoTracker3 在 heavy occlusion (crumpled cloth) 失败 | Filter low-confidence tracks, 不硬训 |
+| **E2.1** | Latent Dynamics baseline (无 embodiment) | `(z_t, action_t) → z_{t+1}`, L2 loss |
+| **E2.2** | + Embodiment Conditioning | input 加 `embodiment_emb` (A_emb, XVLA_emb, B_emb, dim=128) |
+| **E2.3** ⭐ | + Motion-Residual Decomposition (paper 原创) | 分两 head: `ego_motion_head` (embodiment-specific) + `cloth_residual_head` (embodiment-invariant) |
+| **E2.4** | + Inverse Dynamics Auxiliary | predict `a_t | (z_t, z_{t+1}, emb_e)`, weight 0.2 |
+
+**E2.3 paper claim**: cloth_residual 部分在 A vs B 上分布相同 (用 MMD < 0.1 验证)。
+
+**Phase 2 验收**:
+- E2.3 latent 上 t-SNE / MMD: A vs B 在 cloth_residual 部分应近, 在 ego_motion 部分应远
+- 如 motion-residual 分不开 → 回退 E2.2 全联合
+
+### 8.5 Phase 3 — Downstream Policy + Ablation (Week 7-8)
+
+**核心**: 把 Phase 1+2 产出接到 π0.5 policy, B-only finetune, 真机评估。
+
+| Exp | Visual | Dynamics | Action | Data | 用途 |
+|---|---|---|---|---|---|
+| **E3.0** baseline | π0.5 default | × | absolute | B (smooth_800) | 当前 SOTA, baseline |
+| **E3.1** | E1.5 frozen | × | absolute | B | 测 H1 (visual repr 单独 value) |
+| **E3.2** | E1.5 LoRA | × | absolute | B | 测 fine-tunable 是否更好 |
+| **E3.3** | E1.5 LoRA | E2.3 frozen | absolute | B | 测 H3 (dynamics 额外贡献) |
+| **E3.4** Full Stack | E1.5 LoRA | E2.3 frozen | EE-relative | B + A weighted (embodiment cond) | 终态最强 |
+
+**训练设置**:
+- 16 H20 × 50k step ≈ 35h/exp
+- batch 128, lr 1.5e-5 → 1.5e-6, num-workers 64
+- EMA 0.999
+
+**真机测试 protocol**:
+- 30 episode per exp, 固定场景 + 3 OOD 场景 (布料/姿态/光线)
+- 指标: 抓衣角成功率, 完整折叠成功率, 平均执行时长, 抖动 metric (action diff p99)
+
+### 8.6 Phase 4 — Real Machine + Paper (Week 9)
+
+- 真机大规模测试 (60-100 episodes/exp)
+- Final ablation table (见 §10.4)
+- Failure case analysis
+- Paper figures (architecture diagram, latent t-SNE, ablation curve)
+
+### 8.7 时间线 (Gantt)
+
+```
+Week 1   ┌────[Phase 0] 数据预处理 (uc02 + Robot-North-H20 并行)
+         │       ↓ Phase 0 完成
+Week 2-4 │   ┌──[Phase 1] SSL (3 并发: E1.1 + E1.4 + E1.5) on Robot-North-H20
+         │   │
+Week 5-6 │   │  ┌──[Phase 2] Dynamics (4 串行: E2.1→E2.2→E2.3→E2.4)
+         │   │  │
+Week 7-8 │   │  │  ┌──[Phase 3] Policy + Ablation (5 jobs)
+         │   │  │  │
+Week 9   │   │  │  │  ┌──[Phase 4] 真机 + Paper
+         └───┴──┴──┴──┘
+```
+
+**总 9 周** (并行可压缩到 7-8 周)。
+
+---
+
+## 9. 资源 + 数据 + 网络
+
+### 9.1 GPU 资源 (2026-05-21 实测可用)
+
+| 资源 | GPU | 状态 | M2 分配 |
+|---|---:|---|---|
+| **Robot-North-H20** (cn-beijing) | 39 H20 free / 56 total | active | SSL 主战场 (单 exp 16 GPU, 可 2-3 并发) |
+| **uc02** | 8 A800 | free | 数据预处理 (Phase 0) + dev / smoke |
+| **gf3** | 1 H20 | active (smoke) | 单卡 smoke / debug |
+| uc01, uc03 | busy | 其他 exp 占用 | 不动 |
+
+> 控制平面: 所有 volc + uc 任务通过 **gf0** 统一管理 (见 [training_servers_knowledge_base.md §5.6.c-d](./training_servers_knowledge_base.md))。
+
+### 9.2 XVLA-Soft-Fold 多地副本
+
+| 服务器 | 路径 | 用途 | 状态 (2026-05-21) |
+|---|---|---|---|
+| **uc02 本地** | `/data/tim/datasets/xvla_soft_fold/` | 原始下载位置 | ✅ 完整 (1729 files, 444G) |
+| **uc01/02/03 NFS** | `/data/shared/ubuntu/workspace/deepdive_kai0/xvla/data/xvla_soft_fold/` | uc 集群训练用 (走 NFS 到 uc01 disk) | ✅ 完整 (1729 files, 444G) |
+| **gf0 vePFS-cnsh** | `/vePFS/tim/xvla/data/xvla_soft_fold/` | robot-task (cn-shanghai) volc job 共享 | 🔄 下载中 (gf0 ← hf-mirror, ~7h ETA) |
+| **gf3 vePFS-cnbj** ⭐ | `/vePFS-North-E/vis_robot/workspace/deepdive_kai0/xvla/data/xvla_soft_fold/` | **Robot-North-H20** (cn-beijing) 集群 job 共享 | 🔄 下载中 (gf3 ← hf-mirror, ~8h ETA) |
+
+> gf3 副本到位后, Phase 1 SSL pretrain on Robot-North-H20 集群 jobs 挂 vePFS-cnbj 即可见 XVLA。
+
+### 9.3 数据 sync 架构 (TOS 为中心枢纽)
+
+完整架构见 [training_servers_knowledge_base.md §6](./training_servers_knowledge_base.md):
+```
+[sim01] → TOS → {uc01-03, gf0, gf3}
+   (源)        (训练消费者)
+```
+
+KAI0 原始数据从 sim01 上传 TOS, 各训练服务器从 TOS 拉到本地 mirror。
+
+---
+
+# Part IV — 跟踪 + 风险
+
+## 10. 状态跟踪 (持续更新)
+
+### 10.1 Phase 0 — 数据预处理 🔄 in_progress (启动 2026-05-21)
+
+| Sub-task | 状态 | 启动 | 完成 | 备注 |
+|---|---|---|---|---|
+| **环境安装** (uc02 kai0 venv) | ✅ done | 2026-05-21 06:05 | 2026-05-21 06:14 | cotracker3 (local git clone + uv pip -e), decord 0.6.0, einops 0.8.1, opencv 4.11, pyarrow 20.0. CoTracker3 ckpt 从 hf-mirror 下载 (96MB) |
+| **真实视频 timing 实测** | ✅ done | 2026-05-21 06:19 | 2 ep 123s = **60s/ep × 3 view** | 8 GPU 并行预估总 ~17h |
+| **E0.1 Kai0_base** (3055 ep) | 🔄 running | 2026-05-21 06:20 | — | uc02 8 GPU 并行, 每 GPU 382 ep, ETA ~6.4h |
+| E0.1 Kai0_dagger (3457 ep) | 待启动 | — | — | 等 Kai0_base 完成 |
+| E0.1 vis_v2_merged (895 ep) | 待启动 | — | — | 同上 |
+| E0.1 XVLA-Soft-Fold (1729 ep) | 待启动 | — | — | hdf5 格式, 需不同 dataset adapter |
+| E0.2 RAFT optical flow | 待启动 | — | — | 待 E0.1 完成, 复用 uc02 GPU |
+| E0.3 SAM2 cloth mask | 待启动 | — | — | Robot-North-H20 1 节点跑 |
+| E0.4 FOV alignment | 待启动 | — | — | CPU 任务 |
+| E0.5 EE-relative action | 待启动 | — | — | CPU + PiperFK, 脚本 `/tmp/e0_5_ee_pose.py` 已就位 |
+| **Phase 0 整体** | 🔄 in_progress | 2026-05-21 | — | 修正 ETA: ~5-7 day |
+
+### 10.2 Phase 1 — SSL Pretrain ⏳ pending Phase 0
+
+| Exp | 状态 | Job ID | Val Loss | Downstream MAE | 备注 |
+|---|---|---|---|---|---|
+| E1.1 V-JEPA baseline | — | — | — | — | 待 Phase 0 |
+| E1.4 + track + flow + xview | — | — | — | — | 待 Phase 0 |
+| E1.5 Full multi-objective | — | — | — | — | 待 Phase 0 |
+
+### 10.3 Phase 2 — Dynamics ⏳ pending Phase 1
+
+| Exp | 状态 | Job ID | Val Loss | MMD A↔B | 备注 |
+|---|---|---|---|---|---|
+| E2.1 Latent dyn baseline | — | — | — | — | 待 Phase 1 |
+| E2.2 + Embodiment cond | — | — | — | — | 待 Phase 1 |
+| E2.3 + Motion-residual | — | — | — | — | 待 Phase 1 |
+| E2.4 + Inverse dyn aux | — | — | — | — | 待 Phase 1 |
+
+### 10.4 Phase 3 — Policy + Final Ablation Table ⏳ pending Phase 2
+
+| Variant | Visual | Dynamics | Embodiment cond | Motion-residual | Inverse Dyn | Val MAE | 真机平滑度 | 真机成功率 |
+|---|---|---|---|---|---|---:|---:|---:|
+| **E3.0** baseline (π0.5 default) | — | — | — | — | — | TBD | TBD | TBD |
+| **E3.1** + Visual SSL | E1.5 frozen | — | — | — | — | ? | ? | ? |
+| **E3.2** + LoRA tune | E1.5 LoRA | — | — | — | — | ? | ? | ? |
+| **E3.3** + Dynamics | E1.5 LoRA | E2.3 | ✓ | ✓ | — | ? | ? | ? |
+| **E3.4** Full Stack | E1.5 LoRA | E2.3 | ✓ | ✓ | ✓ | ? | ? | ? |
+
+(待填)
+
+---
+
+## 11. 风险预警 + 关键陷阱
+
+| # | 风险 | 应对 |
+|---|---|---|
+| 1 | CoTracker3 在 heavy occlusion (crumpled cloth) 失败 | Pseudo-track 加 confidence filter; track loss 按 mask 加权 |
 | 2 | RAFT 在 fast motion 失败 | Quasi-static 阶段训 flow, dynamic 阶段降权重 |
-| 3 | Wrist D435 (69°) vs D405 (87°) FOV crop **无法对齐** (D435 视野更小) | 接受不一致, 用 view-conditioned token |
-| 4 | π0.5 PaliGemma backbone continual SSL pretraining 易 catastrophic forget | Layer-wise lr decay, peak 1e-5, keep web image data anchor |
+| 3 | **D435 FOV (69°) < D405 (87°)** | **把 D405 crop 到 D435 等效 FOV** (D435 视野更小, 反向不可行) |
+| 4 | π0.5 PaliGemma backbone continual SSL pretraining 易 catastrophic forget | Layer-wise lr decay, peak 5e-5, anchor loss on 1% LAION subset |
 | 5 | 叠衣 success criterion 真机评估难自动化 | 设计 IoU / fold count / stage completion 离线 metric |
 | 6 | IK 在 delta EE 推理时不连续 | Warm-start with current joints, 或训练同时输出 delta EE + delta joints |
 | 7 | EE-relative 丢失绝对工作空间位置信息 | 加 base→top_camera frame 的 anchor token (从 hand-eye calibration 得来) |
+| 8 | Multi-objective loss 不收敛 | Phase 1 先单 V-JEPA 5k step 预热, 再逐项加 |
+| 9 | Embodiment cond 在 visual 还是 dynamics? | **Phase 1 visual 不区分 view 来源**, Phase 2 dynamics 才区分 (visual 要 invariant, dynamics 要 partition) |
+| 10 | Phase 0 (CoTracker) 慢 | Temporal stride 3 + batch size 优化 + 8-GPU 并行, 实测 ~17h |
 
 ---
 
-## 7. 决策点 / 立即下一步
+## 12. 决策点
 
-### 决策点 1: 走 M1 还是等 task_a_new_smooth_800 完成?
-- **走 M1 (并行启动)**: 不等 smooth_800, 直接启动 M1.1-M1.3, smooth_800 完成后真机对比, 2 个 ckpt 都测
-- **等 smooth_800 真机测试**: 如果纯 vis 已足够好, M1 改优先级降低; 否则按 M1 全推
-
-### 决策点 2: Embodiment conditioning 实现?
-| 方式 | 工程量 | 推荐度 |
-|---|---|---|
-| Prompt token only | 极低 (改 prompt 字符串) | ⭐⭐⭐ **先做** |
-| Action head embedding | 中 (改 model arch) | ⭐⭐ 后做 |
-| 两者结合 | 高 | ⭐ 最终方案 |
-
-### 决策点 3: 是否引入 dagger?
+### 决策点 1: 是否引入 dagger?
 - L1 (SSL): ✅ 引入 (3457 ep 增加 vision diversity)
 - L2 (policy): ❌ 不引入 (抖动 +62%, 污染 action prior)
 - L3 (aux): ⚠️ 可选 (作为 inverse dynamics 目标)
 
----
+### 决策点 2: Embodiment conditioning 实现方式?
+- **先做**: Prompt token (`"[D405 wrist] ..."`) — 0 改 model arch
+- **后做**: Soft prompt (X-VLA style, 每 domain 32×1024) — 改 model
+- **最终**: 两者结合 + action head embedding
 
-## 8. 资源分配 (2026-05-21 更新: 7 节点 × 8 GPU = 56 GPU 总池)
-
-### 8.1 节点拓扑 + 网络
-| 节点群 | 节点数 | GPU/节点 | 接入方式 | 内网域 | 可用空间 | 备注 |
-|---|---:|---:|---|---|---|---|
-| **uc01** | 1 | 8 (A800) | SSH 直连 | **uc 内网** | /data 368G | 占用中 (别的任务) |
-| **uc02** | 1 | 8 (A800) | SSH 直连 | **uc 内网** | /data 3.0T | **空闲** ✅ |
-| **uc03** | 1 | 8 (A800) | SSH 直连 | **uc 内网** | /data 1.8T | 占用 (task_a_new_smooth_800) |
-| **Qizhi (gf3 集群)** | 4 | 8 | **`qzcli` 任务提交** | **gf3 内网** (与 gf03 同, 与 uc 隔离) | gf03 共享存储 (待查) | **空闲** ✅ |
-| 总池 | **7** | **56** | — | — | — | — |
-
-⚠️ **关键网络约束**: Qizhi 与 uc 不在同一内网 → uc 上的 dataset / ckpt 无法直接共享给 Qizhi。跨网传输需通过:
-1. 公网 SSH rsync (慢, ~3-10 MB/s 跨 region)
-2. 共享对象存储 (TOS / OSS / vePFS-East) 作为中转
-3. 镜像到 gf03 (gf3 内网) 然后 Qizhi 拉取
-
-### 8.2 可用 GPU (扣除占用)
-```
-可用 = 56 - 8 (uc01) - 8 (uc03) = 40 GPU
-```
-
-### 8.3 单任务最大 16 GPU 约束 → 3 并行实验切分
-| 实验 | 节点 | GPU | 类型 |
-|---|---|---:|---|
-| **X1** | Qizhi 2 节点 | 16 | 集群训练 (FSDP=16) |
-| **X2** | Qizhi 2 节点 | 16 | 集群训练 (FSDP=16) |
-| **X3** | uc02 1 节点 | 8 | 单节点 (FSDP=8) |
-| 合计 | 5 节点 | **40 GPU** | — |
-
-### 8.4 后续 M2 资源 (M1 结束后)
-- Qizhi 4 节点都可用 → 32 GPU 跑 V-JEPA + point-track + flow multi-obj SSL
-- uc02 8 GPU 跑数据预处理 (CoTracker3 / RAFT / SAM3 在 7349+1538=8887 条轨迹上)
-- 本地小 GPU 调试
+### 决策点 3: 是否回看 M1 短期方案?
+- 触发条件: Phase 1 (SSL) 完成首轮 ablation, 如果 E3.1 / E3.2 已经超过 baseline → M1 不需要做
+- 否则: 回看 EE-relative action + B oversample 修复抖动
 
 ---
 
-## 9. M1 具体实验配置 (3 并行实验, 2026-05-21 启动)
+## 13. 修订历史
 
-> **目标**: 在 1 个 50k step 周期 (~9-15h) 内得到 3 个对照实验, 直接验证 §4 (EE-relative action) + §7 (embodiment cond) + §3.2 (curriculum) 的核心假设。
-
-### 9.0 数据集准备状态
-| 数据 | 路径 | 状态 |
-|---|---|---|
-| `kai0_base` (3055 ep) | `kai0/data/Task_A/kai0_base/` | ✅ 本地 / uc01-03 |
-| `vis_base_clean_v2` (837 ep) | `/data/shared/tim/data/Task_A/vis_base_clean_v2/` | ✅ uc 服务器 |
-| `A_new_smooth_800` (811+26 ep) | `/data/shared/tim/data/Task_A/A_new_smooth_800/` | ✅ uc 服务器 |
-| `mixed_1_clean` ckpt | `/home/tim/local_ckpts/Task_A_init/mixed_1_clean/` | ✅ uc01/03 |
-| `pi05_base` ckpt | `gs://openpi-assets/checkpoints/pi05_base/` | ✅ 远端 |
-| **XVLA-Soft-Fold** (1542 hdf5) | `uc02:/data/tim/datasets/xvla_soft_fold/` | ✅ 443G/476G 下载完 (5 文件补齐中) |
-
-### 9.1 实验 X1: **delta-joint baseline** (单变量, 验证 pi05_base prior 对齐)
-
-**目标**: 测试 `use_delta_joint_actions=True` 单独的效果, 同 vis_clean × 1 + mixed_1 init 不变, 仅翻 1 行配置。
-
-**Hypothesis**: pi05_base 预训练 prior 是 delta 格式, 用 absolute joints 训练相当于"扭"模型; 切 delta 后真机抖动减弱。
-
-**Config** (新增到 `kai0/src/openpi/training/config.py`):
-```python
-TrainConfig(
-    name="pi05_flatten_fold_a_smooth_800_delta_joint",
-    model=pi0_config.Pi0Config(pi05=True),
-    data=LerobotAgilexDataConfig(
-        repo_id="/data/shared/tim/data/Task_A/A_new_smooth_800/base",
-        default_prompt="Flatten and fold the cloth.",
-        use_delta_joint_actions=True,    # ← 唯一关键改动
-    ),
-    weight_loader=weight_loaders.CheckpointWeightLoader(
-        "/home/tim/local_ckpts/Task_A_init/mixed_1_clean/params"
-    ),
-    lr_schedule=_optimizer.CosineDecaySchedule(
-        warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6
-    ),
-    ema_decay=0.9999,
-    num_train_steps=50_000,
-    keep_period=2_000, save_interval=2_000,
-    num_workers=64,                       # uc cluster 需显式 64
-    batch_size=128,
-    fsdp_devices=16,                      # ← 集群 FSDP
-    inline_eval_val_root="/data/shared/tim/data/Task_A/A_new_smooth_800/val",
-    inline_eval_n_frames=200,
-    inline_eval_every=2,
-),
-```
-
-**资源**: Qizhi 2 节点 (16 GPU FSDP), ETA ~9h
-**Norm stats**: **重算** (delta action 分布完全不同于 absolute)
-**对照**: 与 uc03 上跑的 `task_a_new_smooth_800_new_norm` (delta=False) 真机+val 直接对比
-
----
-
-### 9.2 实验 X2: **完整 M1 方案** (delta + embodiment cond + mix)
-
-**目标**: 同时引入 (a) delta-joint, (b) embodiment prompt 区分 D435i/D405, (c) kai0_base × 1 + vis_clean × 3 加权混合, (d) pi05_base 干净起点。
-
-**Hypothesis**: 这是 §7 完整 M1 路径, 应该达到三方面最佳: D405 视觉适配 + smooth action prior + 跨本体 representation diversity。
-
-**Step 1: 构建混合数据集** (需新脚本)
-```bash
-# Build mix dataset (kai0_base × 1 + vis_clean × 3 + embodiment prompt rewrite)
-python scripts/build_mix_kaibase_visclean_emb.py \
-    --kai0-base kai0/data/Task_A/kai0_base \
-    --vis-clean /data/shared/tim/data/Task_A/vis_base_clean_v2 \
-    --vis-mult 3 \
-    --out /data/shared/tim/data/Task_A/mix_kaibase_visclean_xemb
-# 结果: ~5566 ep (3055 + 837×3), embodiment_prompt 字段标记 D435i / D405
-```
-
-**Config**:
-```python
-TrainConfig(
-    name="pi05_flatten_fold_a_mix_kaibase_visclean_xemb_delta",
-    model=pi0_config.Pi0Config(pi05=True),
-    data=LerobotAgilexDataConfig(
-        repo_id="/data/shared/tim/data/Task_A/mix_kaibase_visclean_xemb/base",
-        # default_prompt 留空, 由 tasks.jsonl 提供 ([D435i]/[D405] 区分)
-        prompt_from_task=True,
-        use_delta_joint_actions=True,
-    ),
-    weight_loader=weight_loaders.CheckpointWeightLoader(
-        "gs://openpi-assets/checkpoints/pi05_base/params"  # ← 干净起点
-    ),
-    lr_schedule=_optimizer.CosineDecaySchedule(
-        warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6
-    ),
-    ema_decay=0.9999,
-    num_train_steps=50_000,
-    keep_period=2_000, save_interval=2_000,
-    num_workers=64,
-    batch_size=128,
-    fsdp_devices=16,
-    inline_eval_val_root="/data/shared/tim/data/Task_A/mix_kaibase_visclean_xemb/val",
-    inline_eval_n_frames=200,
-    inline_eval_every=2,
-),
-```
-
-**资源**: Qizhi 2 节点 (16 GPU FSDP), ETA ~12h (数据多 50%)
-**Phase 2 finetune** (X2 完成后接 X2b):
-```python
-# Same model, freeze further: vis_clean only × 3, B-only finetune
-TrainConfig(
-    name="pi05_flatten_fold_a_visclean_xemb_delta_b_finetune",
-    # ... same model + data only vis_clean ...
-    weight_loader=CheckpointWeightLoader("<X2 best ckpt>/params"),
-    lr_schedule=CosineDecay(warmup=200, peak_lr=1.5e-6, decay=10_000, decay_lr=1.5e-7),
-    num_train_steps=10_000,
-    default_prompt="[D405 wrist] Flatten and fold the cloth.",  # 强制 D405 分支
-)
-```
-
----
-
-### 9.3 实验 X3: **pure_200 resume with delta-joint** (短线 SOTA 重训)
-
-**目标**: 当前 SOTA `task_a_new_pure_200_new_norm` (MAE 0.0065) 是用 absolute joint, 用 delta 重训是否进一步降?
-
-**Hypothesis**: pure_200 已经 val 0.0065 漂亮, 但真机抖动未测。delta 应该让真机执行更平滑。
-
-**Config**:
-```python
-TrainConfig(
-    name="pi05_flatten_fold_a_new_pure_200_delta",
-    model=pi0_config.Pi0Config(pi05=True),
-    data=LerobotAgilexDataConfig(
-        repo_id="/data/shared/tim/data/Task_A/self_built/A_new_pure_200/base",
-        default_prompt="Flatten and fold the cloth.",
-        use_delta_joint_actions=True,       # ← 加这个
-    ),
-    weight_loader=weight_loaders.CheckpointWeightLoader(
-        "/home/tim/local_ckpts/Task_A_init/mixed_1_clean/params"
-    ),
-    lr_schedule=_optimizer.CosineDecaySchedule(
-        warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6
-    ),
-    ema_decay=0.9999,
-    num_train_steps=50_000,
-    keep_period=2_000, save_interval=2_000,
-    num_workers=64,                          # uc cluster 必须显式
-    batch_size=128,
-    fsdp_devices=8,
-    inline_eval_val_root="/data/shared/tim/data/Task_A/self_built/A_new_pure_200/val",
-    inline_eval_n_frames=200,
-    inline_eval_every=2,
-),
-```
-
-**资源**: uc02 单节点 (8 GPU FSDP), ETA ~22h
-**对照**: 与 js02 上完成的 `task_a_new_pure_200_new_norm` (MAE 0.0065) 直接对比
-
----
-
-### 9.4 X1/X2/X3 启动顺序 + 依赖 (考虑跨网同步)
-
-**关键约束**: Qizhi 不在 uc 内网 → X1/X2 启动前必须先同步数据到 gf03/Qizhi 路径。X3 在 uc02 本地不需同步可立即启动。
-
-```mermaid
-graph LR
-    T0[T+0: 启 X3 on uc02] --> T1[T+1: 启 sync to Qizhi]
-    T1 --> T2[T+1-2h: 启 X1+X2 on Qizhi]
-    T2 --> R1[T+10-12h: X1/X2 完成]
-    R1 --> X2B[X2b finetune on uc02]
-    X2B --> R2[真机测试 2]
-    T2 --> T3[T+24h: X3 完成]
-    T3 --> R3[真机测试 3]
-```
-
-| 阶段 | 时间 | 操作 | GPU 占用 |
-|---|---|---|---|
-| **T+0** | 现在 | X3 启 uc02 (8 GPU, 数据本地) | 8 |
-| **T+0** 同时 | 后台 sync | uc02 → Qizhi: A_new_smooth_800 (3GB) + mix dataset build (in-place) → 同步 (~150GB, 50min-4h) | 0 (CPU/IO) |
-| **T+0.5-2h** | sync 完成 | qzcli submit X1 (16 GPU) + X2 (16 GPU) | 8 + 32 = 40 |
-| **T+10h** | X1 完成 | qzcli 拉 ckpt 回 uc02, 真机测试 1 | 8 + 16 + 0 |
-| **T+12h** | X2 完成 | qzcli 拉 ckpt, 启 X2b finetune on uc02 (8 GPU) | 0 + 0 + 8 (X2b) |
-| **T+24h** | X3 完成 | 真机测试 3 | 0 |
-| **T+15h** | X2b 完成 | 真机测试 2 | 0 |
-
-**总挂时**: ~24-25h 拿到 3 个 (+ 1 finetune) 实验 ckpt + 真机数据
-
----
-
-### 9.5 同步 + 数据 准备 TODO (含 Qizhi 跨内网约束)
-
-| TODO | 描述 | 难度 |
-|---|---|---|
-| **Qizhi 跨网数据同步** ⚠️ | uc 与 Qizhi 不同内网, 需经 gf03 中转或 TOS: <br> 1. uc02 → gf03 (公网 rsync, ~50G mix dataset estimate, 30min-2h) <br> 2. 或 uc02 → TOS bucket → Qizhi 拉取 (HTTP, 类似速度) <br> 3. 验证 Qizhi 节点能 read 同步后的路径 | 中-高, 是 X1/X2 启动前必做 |
-| **Qizhi 共享存储路径调研** | 通过 qzcli 或 gf03 SSH 查 Qizhi 节点挂载的 shared FS 路径 (vePFS-East? Cluster NFS?) | 中, 0.5-1h |
-| **Qizhi pi05 env** | 确保 Qizhi 节点有 kai0 .venv (或 conda env 含 jax+flax+nnx+openpi). gf03 应该有, 估 Qizhi 可继承 | 中, 估有现成 |
-| **`qzcli` 操作** | 用本地或 gf03 上 qzcli 提交 2 个 16-GPU job (X1, X2) | 易, `qzcli submit ...` |
-| **mix dataset build script** | 写 `scripts/build_mix_kaibase_visclean_emb.py` (融合 + embodiment prompt 重写 tasks.jsonl) | 中, 2h |
-| **norm_stats 重算** | delta-joint 后 action 分布从 ±π → ±0.1 完全变, 必须重算 | 易, 现有脚本 |
-| **新 config 写入** | 3 个 TrainConfig 加到 `config.py` | 易, 复制粘贴 |
-| **XVLA-Soft-Fold 补齐** | 5 个文件缺失, 已重启 aria2c driver 补 | 易, 自动完成 |
-
-### 9.5b 推荐数据同步策略
-```
-Step 1: 在 uc02 build mix dataset (kai0_base × 1 + vis_clean × 3 + emb prompt)
-        → /data/tim/data/Task_A/mix_kaibase_visclean_xemb/
-        估计 ~50-80 GB (5566 ep, parquet + symlink mp4)
-
-Step 2: 复制原始 mp4 (symlink resolve) → 实际 ~150 GB
-        rsync -a /data/tim/data/Task_A/mix_kaibase_visclean_xemb/ \
-              gf03:/<qizhi_shared_path>/mix_kaibase_visclean_xemb/
-
-Step 3: Qizhi 任务提交 (qzcli) 指向 gf03 shared path
-
-Step 4: X3 在 uc02 跑 (用 uc02 本地 dataset, 不需跨网)
-```
-
-实际数据规模 (考虑 video):
-- kai0_base 3055 ep ≈ ~50-80 GB
-- vis_clean 837 ep × 3 (symlink, 实际复制需 ~25 GB × 3 = ~75 GB, 或 hard link 节省)
-- 总 ~150 GB 需要跨网传输 (uc → gf03)
-- 公网 rsync @ 10 MB/s → 4 小时
-- 公网 rsync @ 50 MB/s (TOS 公网) → ~50 分钟
-
----
-
-### 9.6 X1/X2/X3 ablation 矩阵 (用于结果对比)
-
-| 实验 | delta_joint | init | data | embodiment cond | 预期 val MAE@1 | 预期真机抖动 |
-|---|---|---|---|---|---|---|
-| smooth_800 (基线, uc03 跑) | False | mixed_1 | vis_clean | None | 0.007-0.010 | 中 |
-| **X1** | **True** | mixed_1 | vis_clean | None | 0.006-0.009 | 低 |
-| **X2** | True | pi05_base | mix kai0_base+vis_clean | [D435i]/[D405] | 0.008-0.011 | 最低 (混合多样性) |
-| **X2b** | True | X2 best | vis_clean only | [D405] only | 0.006-0.009 | 最低 (B-locked) |
-| **X3** | True | mixed_1 | pure_200 | None | **0.005-0.007** | 低-中 (200 ep 数据少) |
-| pure_200 (历史 SOTA) | False | mixed_1 step 22k | vis 200 ep | None | **0.0065** | 待测 |
-
----
-
-## 10. M2 SSL Pretraining 资源规划 (M1 完成后)
-
-> **触发条件**: M1 X1/X2/X3 真机测试 ≥ 1 个达到"抖动消失 + 复杂场景成功 ≥ 60%"
-
-### 10.1 数据池 (M2 跨 3 域 SSL)
-- A: kai0_base + kai0_dagger = **6512 ep** (D435i wrist)
-- B: vis_base_clean_v2 = **837 ep** (D405 wrist)
-- C: **XVLA-Soft-Fold = 1538 ep** (新加入, 多种相机配置)
-- Total: **8887 ep, ~520 GB**
-
-### 10.2 资源占用
-- Qizhi 4 节点 (32 GPU) 跑 multi-obj SSL: V-JEPA + CoTracker tracks + RAFT flow + xview, 2-3 周
-- uc02 8 GPU 跑 pseudo-label 预处理 (CoTracker3 / RAFT / SAM3 全数据)
-- 输出: `AtomWorld Vision Backbone v0.1` 作为后续 ATOM policy 的 vision init
-
-### 10.3 SSL data alignment 处理
-- kai0 (D435i) vs vis (D405) wrist: 接受 FOV 不一致, view-conditioned token 区分
-- XVLA-Soft-Fold camera: 检查 hdf5 元数据 + 标 embodiment token
-- Top view 统一 (3 域都是 D435 head 似乎? — 待 XVLA 元数据确认)
-
----
-
-## 11. 与已有项目文档的关系
-
-| 已有文档 | 本计划的关系 |
+| 日期 | 内容 |
 |---|---|
-| `docs/training/dataset_diagnostic_report.md` | 提供 vis_base 清理 + 抖动诊断的事实基础 (本计划继承) |
-| `docs/training/00_action_only_finetune_history.md` | 实验历史, 本计划 M1.5 真机对比时引用 |
-| `docs/deployment/training_servers_knowledge_base.md` | 服务器/GPU 资源参考 |
-| `docs/deployment/official_diff_and_risk_analysis.md` | 早期跨本体风险分析 (本计划是更系统的接续) |
-
----
-
-## 12. 一句话总结
-
-> **A 的 6512 ep 价值不在 supervised policy training, 而在 visual representation + dynamics prior**。
-> 立即行动: M1 用 EE-relative action + embodiment prompt + B oversample 修复真机抖动 (1-2 周 ROI 最高)。
-> 长线投入: M2-M4 走 V-JEPA + ATOM 路线, 把 6512 ep 完整价值释放为 CoRL/NeurIPS paper 的实验基础。
+| 2026-05-21 | **Consolidated**: 合并 `ssl_pretraining_experiment_plan.md` 到本文档 §8 (M2 SSL Pretraining 详细 Phase 0-4); 删除 §9 X1/X2/X3 详细配置 (用户决策 deprioritize M1); 加 §6 与 π0.5/X-VLA 默认对照 + 实证调研; 加 §4 假说矩阵 H1-H4; 加 §10 状态跟踪 (Phase 0 in_progress) |
+| 2026-05-21 (earlier) | 加 XVLA-Soft-Fold 多地副本 (§9.2: uc02 本地 + uc NFS + gf0 vePFS-cnsh + gf3 vePFS-cnbj) |
+| 2026-05-19 | 初版: 设备差异 + 4 层 ROI + EE-relative 可行性 + M1-M4 milestones + Qizhi 资源分配 |
