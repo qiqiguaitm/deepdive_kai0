@@ -54,14 +54,22 @@
 
 ## 3. 数据 + 资源
 
-### 3.1 训练数据池
+### 3.1 训练数据池 (2026-05-21 实测路径)
 
-| 来源 | 规模 | 路径 | 包含视角 |
-|---|---:|---|---|
-| **A** (kai0_base + dagger) | 6512 ep | `/data/shared/ubuntu/.../kai0/data/Task_A/kai0_base/` + `kai0_dagger/` | top + 双 D435 wrist |
-| **XVLA-Soft-Fold** | 1729 ep | `/data/shared/ubuntu/.../xvla/data/xvla_soft_fold/` (NFS); `/vePFS/tim/xvla/data/xvla_soft_fold/` (gf0) | TBD (soft fold dataset, 待检查) |
-| **B** (vis_base_clean_v2) | 800-895 ep | `/data/shared/ubuntu/.../Task_A/vis_base_clean_v2/` | top + 双 D405 wrist |
-| **合计** | ~9000 ep, ~430k frames | — | — |
+| 来源 | Episodes | 总帧数 | Avg/ep | 视频路径 | Size |
+|---|---:|---:|---:|---|---:|
+| **A: Kai0 base** | 3055 | 3.36M | 1101 | `/data/shared/ubuntu/workspace/dataset/Kai0_official/Task_A/base/videos/` | 46G |
+| **A: Kai0 dagger** | 3457 | 2.42M | 699 | `/data/shared/ubuntu/workspace/dataset/Kai0_official/Task_A/dagger/videos/` | 39G |
+| **B: vis_v2_merged** | 895 | 1.06M | 1188 | `/data/shared/ubuntu/workspace/dataset/Task_A/vis_v2_merged/videos/` | 6.3G |
+| **XVLA-Soft-Fold** | 1729 | ~? | — | `/data/shared/ubuntu/workspace/deepdive_kai0/xvla/data/xvla_soft_fold/` (NFS) + `/vePFS/tim/xvla/data/xvla_soft_fold/` (gf0) | 444G |
+| **合计** | **9136 ep** | **~7M frames** | — | 3 views (top_head, hand_left, hand_right) per ep | **~535G** |
+
+**视角统一命名** (LeRobot v2.1 convention, 也用于 SSL data loader):
+- `observation.images.top_head` — top 相机 (A 全是 D435, B 用 D435)
+- `observation.images.hand_left` — 左 wrist (A 用 D435, B 用 D405) ⚠️ embodiment gap
+- `observation.images.hand_right` — 右 wrist (同上)
+
+> 注: 之前文档草稿引用 `vis_base_clean_v2`, 但实测该路径只剩 metadata (2.8M). 真实 B 数据在 **`vis_v2_merged`** (895 ep, 6.3G)。
 
 ### 3.2 GPU 资源 (2026-05-21 实测可用)
 
@@ -83,19 +91,27 @@
 
 ## 4. 实验阶段 (4 个 Phase, 14 个实验)
 
-### Phase 0: 数据预处理 + 伪标签生成 (Week 1)
+### Phase 0: 数据预处理 + 伪标签生成 (Week 1-2)
 
-**目标**: 把 9000 ep 视频跑过 CoTracker3 / RAFT / SAM, 生成离线 pseudo-labels 给 Phase 1 SSL 用。
+**目标**: 把 9136 ep 视频 (7M frames × 3 view = 21M frame-views) 跑过 CoTracker3 / RAFT / SAM, 生成离线 pseudo-labels 给 Phase 1 SSL 用。
 
-> **资源分配 (并行)**: uc02 跑 CoTracker + flow (CPU/GPU 混合任务), Robot-North-H20 1 节点跑 SAM (重 GPU)
+> **资源分配 (并行)**: uc02 跑 CoTracker + flow (8 A800 80GB), Robot-North-H20 1 节点 (8 H20) 跑 SAM。
 
-| Exp | Tool | Input | Output | Resource | ETA |
+**计算预估** (基于 21M frame-views 总规模):
+
+| Exp | Tool | 输入 (有效) | 输出 | Resource | ETA (实测调整) |
 |---|---|---|---|---|---|
-| **E0.1** Pseudo-track | CoTracker3 | 9000 ep × 3 view | `tracks/{ep_id}/{view}.npz` (T, N=32 points, xyc) | uc02 8 GPU | 4-5 day |
-| **E0.2** Optical flow | RAFT-Large | consecutive frames | `flow/{ep_id}/{view}.npz` (T-1, H/4, W/4, 2) | uc02 并行 | 同上 |
-| **E0.3** Cloth mask | SAM2/SAM3 | 1 frame per second × 9000 ep | `mask/{ep_id}/{view}.npz` (T_sub, H, W, K) | Robot-North-H20 8 GPU | 1-2 day |
-| **E0.4** FOV align | OpenCV | D405 wrist RGB | `rgb_aligned/{ep_id}/wrist_*.npy` (D405 crop 到 D435 equiv FOV) | CPU | 几小时 |
-| **E0.5** EE-relative action | Python (PiperFK) | A + B + XVLA actions | `action_ee_relative/{ep_id}.npz` | CPU | 几小时 |
+| **E0.1** Pseudo-track | CoTracker3 (v3.0 windowed) | T=24 window, stride=12 → ~580k windows × 3 view | `tracks/{ep_id}/{view}.npz` shape (T=24, N=32, 3) | uc02 8 A800 | ~3-5 day |
+| **E0.2** Optical flow | RAFT-Large | adjacent frame pair, **temporal stride 3** (减 3×) → ~2.3M pairs × 3 view | `flow/{ep_id}/{view}.npz` (H/8, W/8, 2) per pair | uc02 4 GPU 并行 | ~2-3 day |
+| **E0.3** Cloth mask | SAM2 (Hiera-L) | 1 frame/sec (~30 frame/ep) × 9136 ep × 3 view = ~820k mask | `mask/{ep_id}/{view}.npz` (T_sub, H, W, K) | Robot-North-H20 8 H20 | ~1 day |
+| **E0.4** FOV align | OpenCV (offline) | D405 wrist (B 数据 895 ep × 双 wrist) | `rgb_d405_d435align/{ep_id}/wrist_*.npy` | CPU 多核 | 几小时 |
+| **E0.5** EE-relative action | Python (PiperFK + DH) | A + B + XVLA actions | `action_ee_relative/{ep_id}.npz` shape (T, 14) | CPU | 几小时 |
+
+**优化策略** (压缩 Phase 0 时间):
+1. **Temporal stride 3**: 7M → 2.3M effective frames, 不损失主信号
+2. **CoTracker windowed**: T=24 window stride=12, 不一次跑完整 ep
+3. **SAM 稀疏化**: 1 frame/sec 足够 (cloth segmentation 时变化慢)
+4. **Multi-process per GPU**: uc02 8 A800 80G 可跑 4 instance/GPU (每个 ~5G VRAM for CoTracker)
 
 **质量检查**: 跑完抽样 50 ep 人工 inspect tracks/flow/mask 是否合理; 不合格的 ep 记入 `skip_list.txt`。
 
@@ -289,16 +305,67 @@ Week 9   │   │  │  │  ┌──[Phase 4] 真机 + Paper
 
 > 每次推进一步, 更新这一节。
 
-### 8.1 Phase 0 — 数据预处理 ⏳
+### 8.1 Phase 0 — 数据预处理 🔄 in_progress
 
-| Sub-task | 状态 | 启动时间 | 完成时间 | 备注 |
+**启动**: 2026-05-21
+
+| Sub-task | 状态 | 启动 | 完成 | 备注 |
 |---|---|---|---|---|
-| E0.1 CoTracker3 pseudo-tracks | — | — | — | 待启动 |
-| E0.2 RAFT optical flow | — | — | — | 待启动 |
-| E0.3 SAM2/SAM3 cloth mask | — | — | — | 待启动 |
-| E0.4 FOV alignment script | — | — | — | 待启动 |
-| E0.5 EE-relative action conversion | — | — | — | 待启动 |
-| **Phase 0 整体** | ⏳ pending | — | — | — |
+| **环境安装** (uc02 kai0 venv) | ✅ done | 2026-05-21 06:05 | 2026-05-21 06:14 | cotracker3 (local git clone + uv pip -e), decord 0.6.0, einops 0.8.1, opencv 4.11, pyarrow 20.0. CoTracker3 ckpt 从 hf-mirror 下载 (96MB) |
+| **真实视频 timing 实测** | ✅ done | 2026-05-21 06:19 | 2 ep 123s = **60s/ep × 3 view** | 8 GPU 并行预估总 ~17h (远好于初版 5-day 估算) |
+| **E0.1 Kai0_base** (3055 ep) | 🔄 running | 2026-05-21 06:20 | — | uc02 8 GPU 并行, 每 GPU 382 ep, ETA ~6.4h. 输出 `/data/shared/.../ssl_phase0/tracks/kai0_base/` |
+| E0.1 Kai0_dagger (3457 ep) | 待启动 | — | — | 等 Kai0_base 完成或如有空闲 GPU 即启 |
+| E0.1 vis_v2_merged (895 ep) | 待启动 | — | — | 同上 |
+| E0.1 XVLA-Soft-Fold (1729 ep) | 待启动 | — | — | XVLA 用 hdf5 格式, 需要不同的 dataset adapter |
+| E0.2 RAFT optical flow | 待启动 | — | — | 待 E0.1 完成, 复用同一 uc02 GPU |
+| E0.3 SAM2 cloth mask | 待启动 | — | — | 待环境装好, Robot-North-H20 1 节点跑 |
+| E0.4 FOV alignment script | 待启动 | — | — | 仅 B 数据 (D405 wrist), CPU 任务 |
+| E0.5 EE-relative action conversion | 待启动 | — | — | 全数据, CPU + PiperFK |
+| **Phase 0 整体** | 🔄 in_progress | 2026-05-21 | — | 修正 ETA: ~5-7 day (CoTracker3 17h + flow 20h + SAM 12h + 其他) |
+
+#### Phase 0 输出位置 (统一约定)
+```
+/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/ssl_phase0/
+├── tracks/
+│   ├── kai0_base/ep_XXXXXX/{top_head,hand_left,hand_right}.npz
+│   ├── kai0_dagger/...
+│   ├── vis_v2_merged/...
+│   └── xvla_soft_fold/...
+├── flow/    (同结构)
+├── masks/   (同结构, 稀疏 1/sec)
+├── rgb_d405_d435align/ (仅 B 数据)
+├── action_ee_relative/{ep_XXXXXX}.npz
+└── logs/    (每 GPU shard 一个 log)
+```
+
+#### Phase 0 设计要点 (实测调整后)
+- **CoTracker3 模型**: scaled_offline.pth (96MB), 480×640 原始视频, 760ms/window on A800
+- **Windowing**: T=24 stride=12 → 149 window per 1800-frame ep
+- **Query points**: grid_size=6 → N=36 per window
+- **Sharding**: 8 GPU 各处理 1/8 数据, 断点续传 (.npz 已存在 + size > 100 byte 即 skip)
+- **RAFT**: temporal stride 3
+- **SAM2**: 1 frame/sec sampling
+- **存储**: ~1MB/ep × 9136 × 3 view ≈ 27GB 总
+
+#### Phase 0 输出位置 (统一约定)
+```
+/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/ssl_phase0/
+├── tracks/
+│   ├── kai0_base/ep_XXXXXX/{top_head,hand_left,hand_right}.npz
+│   ├── kai0_dagger/...
+│   ├── vis_v2_merged/...
+│   └── xvla_soft_fold/...
+├── flow/    (同结构)
+├── masks/   (同结构, 稀疏 1/sec)
+├── rgb_d405_d435align/ (仅 B 数据)
+└── action_ee_relative/{ep_XXXXXX}.npz
+```
+
+#### Phase 0 设计要点
+- **CoTracker3**: 用 windowed (T=24 stride=12), 不是 full-episode (后者 OOM 风险). N=32 query keypoints (auto-grid sampling).
+- **RAFT**: temporal stride 3 (从 7M frame pair 减到 2.3M)
+- **SAM2**: 1 frame/sec sampling (cloth 形态变化慢, 不需 dense)
+- **断点续传**: 每个 .npz 文件存在且 size > 100 byte 即 skip (脚本支持)
 
 ### 8.2 Phase 1 — SSL Pretrain ⏳
 
