@@ -109,7 +109,254 @@
 
 **重要观察**: val MAE 漂亮的 SOTA `mixed_pure2_1800_6000` 真机抖动严重 — **val MAE ≠ 真机平滑度**。
 
-### 3.3 已隐式执行的 L2 (但未显式标识)
+### 3.3 KAI0 ↔ vis 实测 Norm-stats 对比 (2026-05-21)
+
+> 直接从原始 parquet 重算 (kai0_base 102/3055 ep × 114k frames, vis_v2_merged 112/895 ep × 133k frames), 不通过任何 cached 或 xvla 模块入口。XVLA-Soft-Fold 是独立第三方数据集, 不参与本对比。
+
+#### 3.3.1 Δmean 单独表 (A=KAI0_base vs B=vis_v2_merged)
+
+| dim | label | Δmean (A−B, rad) | Δ角度 (°) |
+|---:|---|---:|---:|
+| 0 | L_肩 yaw | +0.017 | +1.0° |
+| 1 | L_肩 pit | +0.179 | **+10.2°** |
+| 2 | L_肘 | −0.100 | −5.7° |
+| 3 | L_腕 yaw | +0.064 | +3.7° |
+| 4 | L_腕 pit | +0.077 | +4.4° |
+| 5 | L_腕 rol | −0.127 | −7.3° |
+| 6 | L_grip | −0.001 | — |
+| 7 | R_肩 yaw | +0.121 | +6.9° |
+| 8 | R_肩 pit | +0.010 | +0.6° |
+| 9 | R_肘 | −0.177 | **−10.1°** |
+| **10** | **R_腕 yaw** | **−0.293** | **−16.8°** ⭐ |
+| 11 | R_腕 pit | +0.019 | +1.1° |
+| **12** | **R_腕 rol** | **+0.244** | **+14.0°** ⭐ |
+| 13 | R_grip | +0.013 | — |
+
+#### 3.3.2 完整对比 (含 std + z-score)
+
+| dim | label | A.mean | A.std | B.mean | B.std | Δmean | Δ角度 | B/A σ | |Δ|/A.σ |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0 | L_肩yaw | -0.062 | 0.20 | -0.079 | 0.24 | +0.017 | 1.0° | 1.20 | 0.09σ |
+| 1 | L_肩pit | +1.547 | 0.53 | +1.368 | 0.57 | +0.179 | 10.2° | 1.06 | 0.33σ |
+| 2 | L_肘 | -1.301 | 0.46 | -1.200 | 0.46 | -0.100 | 5.7° | 0.99 | 0.22σ |
+| 3 | L_腕yaw | -0.095 | 0.30 | -0.159 | 0.44 | +0.064 | 3.7° | 1.48 | 0.22σ |
+| 4 | L_腕pit | +0.796 | 0.24 | +0.719 | 0.29 | +0.077 | 4.4° | 1.21 | 0.32σ |
+| 5 | L_腕rol | +0.031 | 0.28 | +0.158 | 0.40 | -0.127 | 7.3° | 1.43 | 0.45σ |
+| 6 | L_grip | +0.028 | 0.034 | +0.029 | 0.030 | -0.001 | — | 0.88 | 0.03σ |
+| 7 | R_肩yaw | +0.115 | 0.17 | -0.006 | 0.22 | +0.121 | 6.9° | 1.30 | 0.71σ |
+| 8 | R_肩pit | +1.486 | 0.57 | +1.476 | 0.58 | +0.010 | 0.6° | 1.03 | 0.02σ |
+| 9 | R_肘 | -1.461 | 0.54 | -1.284 | 0.52 | -0.177 | 10.1° | 0.96 | 0.33σ |
+| **10** | **R_腕yaw** ⚠️ | +0.048 | 0.28 | +0.341 | 0.32 | **-0.293** | **16.8°** | 1.13 | **1.05σ** |
+| 11 | R_腕pit | +0.918 | 0.24 | +0.899 | 0.23 | +0.019 | 1.1° | 0.97 | 0.08σ |
+| **12** | **R_腕rol** ⚠️ | +0.003 | 0.25 | -0.241 | 0.27 | **+0.244** | **14.0°** | 1.09 | **0.99σ** |
+| 13 | R_grip | +0.035 | 0.033 | +0.021 | 0.029 | +0.013 | — | 0.88 | 0.41σ |
+
+#### 3.3.3 汇总分析
+
+```
+L1  norm:  1.44 rad
+L2  norm:  0.51 rad    ← 核心 metric
+L∞ max:   0.293 rad = 16.8° @ R_腕yaw (dim 10)
+
+分布重叠 (|Δ|/A.σ z-score):
+  Median: 0.32σ    Max: 1.05σ
+  Within ±1σ:   13/14
+  Within ±0.5σ: 11/14
+  Within ±0.3σ:  6/14
+
+Per-arm:
+  Left:  L2 = 0.26 rad, max 10.2° @ L_肩pit, max |Δ|/σ = 0.45σ
+  Right: L2 = 0.44 rad, max 16.8° @ R_腕yaw, max |Δ|/σ = 1.05σ
+  → 右臂偏移 1.67× 左臂
+
+运动幅度 B/A:  median 1.07, mean 1.11, range [0.88, 1.48]
+  → B 整体 motion range 略 > A
+```
+
+#### 3.3.4 关键发现 (4 条)
+
+1. **整体分布"高度重叠 but not identical"**: 13/14 维落在 A 的 ±1σ 内, PI per-dataset norm 大部分可吸收。但 L2 = 0.51 rad 在 50-step chunk 上累积影响显著。
+
+2. **右臂偏移 1.67× 大于左臂** — 双臂间距不同的直接证据 (§1.2 quantified)。
+
+3. **R 腕 yaw (-16.8°) + R 腕 roll (+14°) 是配对偏移** ⭐ (核心发现):
+   - 不是独立, paired correlated shift
+   - SE(3) 表示下合成 ~**21° 复合旋转**
+   - 物理意义: 右手 wrist 末端在 B 上比 A 整体旋转 21° → **D405 wrist 视野下 cloth 出现 21° 旋转 OOD**
+   - **这是 EE-based action 的精准价值场景** — EE 在 gripper local frame, 天然消除复合旋转
+
+4. **B 运动幅度比 A 大 10-30%** (B/A std ratio): 解释 §1.3 "vis SFT 后 prior 被拉宽" 的现象 — vis 操作员动作幅度更大, action prior 更宽。
+
+#### 3.3.5 对三种跨 embodiment 策略的精准启示
+
+| 策略 | 能处理 R 腕 21° 旋转? | 能处理 motion range 1.1× scale-up? | 综合 |
+|---|:-:|:-:|:-:|
+| **PI per-dataset norm** | ⚠️ 部分 (mean 对齐, 但 chunk 内仍有 wrist OOD) | ✅ std 缩放自动 | ⭐⭐ |
+| **Soft Prompt** (X-VLA, Track B) | ✅ 显式 condition, 学到 domain shift | ⚠️ 隐式 | ⭐⭐⭐ |
+| **EE-based** (Delta EE) | ✅ **天然消除** | ⚠️ 不直接 | ⭐⭐⭐ |
+| **Soft Prompt + EE 结合** | ✅✅ | ✅ | ⭐⭐⭐⭐ |
+
+→ EE-based 不再是"可有可无", R 腕 21° paired shift 是 joint 表示的硬伤, EE 是干净解。但仍建议**作为 Phase 3 ablation 而不是 wholesale switch** — PI norm + Soft Prompt 可能已覆盖大部分场景。
+
+---
+
+### 3.4 vis 内部 Operator 与时间漂移分析 (2026-05-21)
+
+> 深入挖掘 vis_v2_merged 内部结构, 揭示 §3.3 KAI0↔vis 偏移中 operator confound 与 cross-robot effect 的分量。
+
+#### 3.4.1 实际 Operator 结构
+
+`meta/episodes.jsonl` 含 `operator` + `_src_dir` 字段, 实际:
+
+| Group | Operator (alias) | Episodes | 占比 |
+|---|---|---:|---:|
+| **G1** (主操作员, ztm+lym 同一人) | ztm 723 + lym 149 | 872 | **97.4%** |
+| G2 (助手) | gsy | 23 | 2.6% |
+
+时间跨度: 2026-04-23 ~ 2026-05-09 (10 个采集日期)。
+
+#### 3.4.2 跨 Group 对比 (G1 vs G2)
+
+| 指标 | 值 |
+|---|---:|
+| L2 mean diff | 0.518 rad |
+| max |Δ|/σ | 0.64σ @ L_腕rol |
+| Within ±1σ | 14/14 |
+
+→ G2 (gsy) 与 G1 偏移**约等于** KAI0 ↔ vis 跨 robot 偏移 (0.47-0.51)。
+
+#### 3.4.3 G1 内时间漂移 (同一人, 不同日期)
+
+| 日期 | L2 vs 2026-04-24 baseline | max |Δ|/σ |
+|---|---:|---:|
+| 04-24 | 0 (baseline) | — |
+| 04-25 | **0.42** | 0.69σ |
+| **04-28** | **0.47** ⭐ | **0.88σ** (peak) |
+| 04-29 | 0.45 | 0.77σ |
+| 04-30 | 0.32 | 0.36σ |
+| 05-06 | 0.33 | 0.42σ |
+| 05-07 | 0.33 | 0.42σ |
+| 05-08 | 0.40 | 0.75σ |
+| 05-09 | 0.25 | 0.43σ |
+
+→ **同一 operator 跨 5 天 (4-24 vs 4-28) drift = 0.47 rad**, 与 cross-robot effect 同量级!
+
+#### 3.4.4 真正 Cross-robot Effect (剔除 gsy 干扰)
+
+```
+KAI0_base vs G1-only (剔 gsy):  L2 = 0.4650 rad, max 0.93σ @ R_腕yaw (14.9°)
+KAI0_base vs full vis (含 gsy):  L2 = 0.5105 rad, max 1.05σ @ R_腕yaw (16.8°)
+
+→ 剔除 gsy 后 cross-robot L2 仅降 8.9%, R_腕 yaw+roll paired shift 仍是 ~19°
+```
+
+#### 3.4.5 关键发现修正
+
+1. **gsy (2.6%) 对 norm_stats 影响极小** (current vs G1-only L2 = 0.08 rad, 0.16σ) → **不必 per-operator norm**
+2. **G1 内时间漂移 ≈ cross-robot drift** (0.47 vs 0.47) → 4-24 数据可能与 4-25+ 是不同 "phase" (设备 calibration 漂移)
+3. **R 腕 paired shift ~19° 真实存在** (剔除 operator confound 后仍在), 是真正的 cross-robot geometric effect
+
+#### 3.4.6 立即可做的实验
+
+- 用 G1 (剔 gsy) + 4-25+ 数据 (剔 warm-up phase) 重训 → 真机对比当前 smooth_800
+
+---
+
+### 3.5 混训策略 6 方案 + 实证一致性分析 (2026-05-21)
+
+> 实证回答: "两数据集 (KAI0 + vis G1) 能否混训?" 通过 per-dim 归一化后多指标对齐性测量。
+
+#### 3.5.1 6 种混训方案对比
+
+| 方案 | 描述 | 处理 R 腕 19° | 处理时间 drift | 处理 motion range diff | 工程量 |
+|---|---|:-:|:-:|:-:|:-:|
+| **A. Naive joint norm** | 合并算单一 norm_stats | ❌ | ❌ | ❌ | 0.5 day |
+| **B. Per-dataset norm + Single model** | 每数据集 own norm, 同一 model 不显式 condition | ⚠️ (90.7%) | ⚠️ (90.7%) | ✅ | 1 day |
+| **C. Soft Prompt + Per-DS norm** | per-DS norm + domain_id 显式 routing (X-VLA) | ✅ | ✅ | ✅ | 0 (代码已就绪) |
+| **D. Curriculum (A pretrain → B finetune)** | mixed_1 → smooth_800 现有路线 | ✅ (B finetune) | ✅ | ✅ | 1 day |
+| **E. SSL Decoupled** | A 进 visual SSL, B 进 policy (Track A) | 不参与 action | 不参与 | 不参与 | 9 week |
+| **F. EE-based action** | delta EE pose 表示, 天然 embodiment-invariant | ✅ **天然消除** | ⚠️ EE 也漂 | ⚠️ | 3 day |
+
+#### 3.5.2 实证: Per-dataset Norm 对齐效果 (MMD 测量)
+
+直接计算 A 和 B 自归一化后的分布距离:
+
+```
+不归一化:                    MMD(A_raw,  B_raw)  = 0.0597    (large divergence)
+Per-dataset norm 后:        MMD(A_norm, B_norm) = 0.00558   (降低 90.7%)
+self baseline:               MMD(A_norm, A_norm) = 0.0002
+Ratio MMD(A,B) / MMD(A,A): 28×  (仍有残差)
+```
+
+→ **Per-dataset norm 消除 90.7% 的分布偏差** (主要是 per-dim mean/std), 但仍有 28× self-baseline 残差。
+
+#### 3.5.3 残余 10% 偏差来源 — Per-dim Norm 解决不了的部分
+
+经 per-dim self-norm 后, 5 个维度的对齐分析:
+
+| 度量 | 对齐? | 残差 (估算) |
+|---|:-:|---|
+| Per-dim mean | ✅ 完美 | 0 (by construction) |
+| Per-dim std | ✅ 完美 | 0 (by construction) |
+| Per-dim Skewness | ⚠️ 部分 | L2 ≈ 1.5 (排除 outlier dim 后) |
+| Per-dim Kurtosis | ⚠️ 部分 | 大多数 dim 在 1-3 量级差 |
+| **Per-dim quantile shape** | ⚠️ 部分 | median quantile L2 0.51, max 3.7 (异常 dim 6/7) |
+| **Inter-dim correlation** (joint synergy) | ❌ 显著不同 | Frobenius 2.5; B 各维联动更强 (mean |off-diag| 0.21 vs A 0.12) |
+
+具体 finding:
+- **B 的关节联动更强**: 例如 L_肩pit × L_腕rol 相关系数 A=+0.09 vs B=+0.41 (相差 0.32)
+- **A 的某些 dim 几乎不动** (data quirk): L_grip 在 A 几乎全程 const (q01-q99 跨度仅 0.017), 而 B 是双模式 open/close (跨度 2.69)
+- **Skewness 差异**: 大多数 dim 高阶矩仍不同
+
+#### 3.5.4 修正方案 B 评级
+
+| | 之前评级 | **修正后** | 修正理由 |
+|---|:-:|:-:|---|
+| A. Naive joint norm | ❌ 已证失败 | ❌ 已证失败 | MMD 0.06, 不变 |
+| **B. Per-dataset norm + Single model** | ⭐⭐ 中性, 不推荐 | **⭐⭐⭐ 应该可行** | MMD 降至 0.006 (10× 小), 比 naive 显著好 |
+| C. Soft Prompt + Per-DS norm | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | 处理残余 10% 仍最优 |
+| D. Curriculum | ⭐⭐⭐ | ⭐⭐⭐ | — |
+| E. SSL Decoupled | ⭐⭐⭐⭐ (Track A) | ⭐⭐⭐⭐ | — |
+| F. EE-based | ⭐⭐⭐ | ⭐⭐⭐ | — |
+
+#### 3.5.5 关键 Insight (重要)
+
+> **`mixed_pure2_1800_6000` 失败的真因可能不是"混训不能", 而是用了 joint norm (A) 而非 per-dataset norm (B)**。
+>
+> 如果当时用方案 B 训练, 可能效果显著好于 joint norm 但仍逊于 Soft Prompt。
+
+#### 3.5.6 推荐策略 — Layered Combination
+
+```
+Layer 1 (Visual, Phase 1 Track A SSL):
+  E. SSL decoupled — A + B + XVLA all in, no action loss
+  → 学到 cross-embodiment invariant visual repr
+
+Layer 2 (Policy, Phase 3 / Track B):
+  C. Soft Prompt + Per-DS norm — 显式 routing
+  + D. Curriculum (二阶段 A→B finetune)
+  → 显式 routing + lock 到 B
+
+Layer 3 (Phase 3 ablation):
+  F. EE-based — joint vs EE 控制变量实验
+  → paper ablation 数据点
+```
+
+#### 3.5.7 验证假说的新 Ablation Set (Phase 3 加)
+
+| Exp | Action | Norm 策略 | 用途 |
+|---|---|---|---|
+| **E3.0** baseline | absolute joint | per-dataset (single ds smooth_800) | 当前 SOTA |
+| **E3.5** | absolute joint | **Naive joint norm** (A) | 故意复现失败假说 |
+| **E3.6** | absolute joint | **Per-dataset norm + Single model** (B) | **验证 §3.5.5 insight** |
+| **E3.7** | absolute joint | Per-DS norm + Soft Prompt (C) | Track B 路线 |
+| **E3.8** | delta EE | Per-DS norm + Soft Prompt | + F 维度 ablation |
+
+→ E3.5 vs E3.6 直接量化 "naive joint vs per-dataset norm" 的真机抖动差异。
+
+---
+
+### 3.6 已隐式执行的 L2 (但未显式标识)
 
 当前 SOTA 链 `pi05_base → mixed_1 → task_a_new_pure_200` 本质上是 **A-heavy pretrain → B-only finetune** 的 curriculum, 但缺失:
 - ❌ 没有显式 embodiment conditioning (model 不知道哪是 A 哪是 B)
@@ -636,10 +883,12 @@ KAI0 原始数据从 sim01 上传 TOS, 各训练服务器从 TOS 拉到本地 mi
 
 | Stage | 状态 | Job ID | Start | End | Step | Best Val | 备注 |
 |---|---|---|---|---|---|---|---|
-| **Stage 1 kai warmup** | 🔄 in_progress | t-20260521154828-76d44 | 2026-05-21 07:48 UTC | — | — / 50k | — | 16 H20 on Robot-North-H20, 路径全 verified, ETA ~12h |
+| **Stage 1 kai warmup** | 🔄 running (mu PASS) | t-20260521154828-76d44 | 2026-05-21 07:48 UTC | — | 2100+ / 50k | — | 16 H20 on Robot-North-H20. ✅ **Step 2000 ckpt mu 验证 PASS** (d0 mu absmax=1.15e-3): RepackTransform + AgilexInputs 两处 dataset_id passthrough 修复确认生效, soft_prompt_hub 真的在训练。Rate ~1.8 s/it, ETA step 50k ~10h |
 | Stage 2 vis soft_prompt only | 待 Stage 1 | — | — | — | — / 5k | — | LR 5e-4, freeze backbone |
 | Stage 3 joint finetune | 待 Stage 2 | — | — | — | — | — | Joint train all |
-| **Track B 整体** | 🔄 stage 1 | — | 2026-05-21 | — | — | — | 3 stages 总 ETA ~26h |
+| **Track B 整体** | 🔄 stage 1 running | — | 2026-05-21 | — | — | — | 3 stages 总 ETA ~22-26h (Stage 1 mu PASS 后流程已 unblock) |
+
+> **2026-05-21 重大 bug 修复**: 之前 Stage 2 grad_norm=0 + 旧 Stage 1 soft_prompt_hub 不训练的根因, 是 `RepackTransform` 和 `AgilexInputs` 两处都重建 data dict 时丢掉了 `dataset_id`, 导致 obs.dataset_id=None → embed_prefix soft prompt 分支被 dead-code-eliminate。修复 commits: `9d2184a` (RepackTransform) + `df23d5a` (AgilexInputs)。
 
 ---
 
@@ -683,6 +932,7 @@ KAI0 原始数据从 sim01 上传 TOS, 各训练服务器从 TOS 拉到本地 mi
 
 | 日期 | 内容 |
 |---|---|
+| 2026-05-21 (深夜) | **§3.5 vis operator + 时间漂移分析**: 澄清 ztm+lym 同一人 (G1=872 ep, G2=gsy=23 ep); G1 内时间漂移 0.47 ≈ cross-robot drift; gsy 对 norm 影响微弱 (0.08 rad). **§3.6 混训策略 6 方案 + 实证一致性**: per-dataset norm 实测 MMD 降低 90.7% (0.06→0.006), **修正方案 B 评级 ⭐⭐→⭐⭐⭐ (实际可行!)**; 识别残余 10% 来自 higher moments + joint correlation; 推荐 layered (E + C + D); §3.6.7 加 E3.5-E3.8 ablation 验证 naive joint vs per-DS norm |
 | 2026-05-21 (晚) | **Dual-track 化 + 放弃 FOV crop**: 加 §6.2.1 本地 soft_prompt_hub 代码 + ckpt 现状 (代码已实现但未训过); §6.2.2 X-VLA 3-stage 流程; §7 dual-track 架构图 (Track A SSL + Track B X-VLA 并行); §8.7 Track B 完整 X-VLA stage 1/2/3 计划 (Stage 1 t-20260521154828-76d44 已提交); §10.5 Track B 状态跟踪表; §10.4 加入 B3.0 + 改 E3.4 为 dual-track merge; 决策点 2 已决策为 soft prompt. **取消 E0.4 Wrist FOV crop** — 不可持续, 替换为 view-cond token + RandomResizedCrop (§8.2 + §11 #3) |
 | 2026-05-21 (早) | **Consolidated**: 合并 `ssl_pretraining_experiment_plan.md` 到本文档 §8; 删除 X1/X2/X3 详细配置 (deprioritize M1); 加 §6 与 π0.5/X-VLA 默认对照 + 实证调研; 加 §4 假说矩阵 H1-H4; 加 §10 状态跟踪 |
 | 2026-05-21 (earlier) | 加 XVLA-Soft-Fold 多地副本 (§9.2: uc02 本地 + uc NFS + gf0 vePFS-cnsh + gf3 vePFS-cnbj) |
