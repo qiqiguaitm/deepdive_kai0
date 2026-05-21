@@ -18,8 +18,8 @@
   - [5. EE-relative Action 可行性](#5-ee-relative-action-可行性)
   - [6. 与 π0.5 / X-VLA 默认对照](#6-与-π05--x-vla-默认对照)
 - [Part III — 执行计划](#part-iii--执行计划)
-  - [7. Milestone 总览 (M1-M4)](#7-milestone-总览-m1-m4)
-  - [8. M2 SSL Pretraining 详细 Phase 0-4](#8-m2-ssl-pretraining-详细-phase-0-4)
+  - [7. Milestone 总览 (M1-M4) — Dual-Track Parallel](#7-milestone-总览-m1-m4--dual-track-parallel)
+  - [8. M2 Dual-Track 详细计划 (Track A SSL Phase 0-4 + Track B X-VLA Stage 1-3)](#8-m2-ssl-pretraining-详细-phase-0-4)
   - [9. 资源 + 数据 + 网络](#9-资源--数据--网络)
 - [Part IV — 跟踪 + 风险](#part-iv--跟踪--风险)
   - [10. 状态跟踪 (持续更新)](#10-状态跟踪-持续更新)
@@ -215,35 +215,109 @@ for delta in predicted_chunk:
 
 ### 6.2 Embodiment Conditioning 选项
 
-| 方式 | 复杂度 | 推荐度 |
-|---|---|---|
-| Prompt token only (`"[D405 wrist] ..."`) | 极低 (改 prompt 字符串) | ⭐⭐⭐ 先做 |
-| Soft prompt (X-VLA style, 每个 domain 32×1024 vec) | 中 (改 model arch) | ⭐⭐ 后做 |
-| Action head embedding | 中 | ⭐⭐ 后做 |
-| 三者结合 | 高 | ⭐ 最终方案 |
+| 方式 | 实现复杂度 | 本地代码状态 | 推荐度 |
+|---|---|---|---|
+| **Hard prompt** (`"[D405 wrist] ..."`) — 改 prompt 字符串 | 极低 (0 改 model) | ✅ 任意 config 都可用 | ⭐⭐ 弱版本 (信号沿 LLM attention 自然传播, 不显式 gate) |
+| **Soft prompt** (X-VLA style, 每 domain 32×2048 learnable vec) | 0 (代码已实现) | ✅ **`pi0.py:136-181` 已有 `soft_prompt_hub` 实现** + `xvla_stage1/2/3` config 模板就绪 | ⭐⭐⭐ **正确路径** — 显式 inject 到 LLM input, 推理时可 hard-force domain |
+| **Action head embedding** | 中 (改 model arch) | ❌ 待加 | ⭐⭐ 与 soft prompt 互补 |
+| **Soft prompt + Action head emb 结合** | 中-高 | 部分 | ⭐ 终态最强 |
 
-> X-VLA Soft Prompt 已在 290K episodes 跨 7 个 platforms × 5 个 arm types 验证可行 (ICLR 2026)。每域仅 33K 参数 (32×1024), 整体 0.04% 非共享参数。
+#### 6.2.1 本地代码与 ckpt 现状 (2026-05-21 实测)
+
+```python
+# kai0/src/openpi/models/pi0.py:136-181 (已实现, 默认禁用)
+if config.soft_prompt_num_domains > 0 and config.soft_prompt_len > 0:
+    self.soft_prompt_hub = nnx.Embed(
+        num_embeddings=config.soft_prompt_num_domains,       # A=0, B=1, [XVLA=2]
+        features=config.soft_prompt_len * paligemma_width,   # 32 × 2048 = 65536 per domain
+    )
+# forward 时:
+soft = self.soft_prompt_hub(obs.dataset_id)
+soft = soft.reshape(B, soft_prompt_len, llm_width)            # (B, 32, 2048)
+# Prepend 到 LLM input → 与 X-VLA 论文 1:1 一致
+```
+
+| Ckpt | soft_prompt_hub weights? | 说明 |
+|---|---|---|
+| pi05_base, mixed_1, smooth_800, pure_200 | ❌ 无 | 全部 `soft_prompt_num_domains=0` 默认禁用 |
+| xvla_stage1/2/3 config 模板 (line 1059-1146) | ✅ 已配置 `num_domains=2, len=32` | **从未实际执行训练**, 直到 2026-05-21 t-20260521154828-76d44 |
+
+#### 6.2.2 X-VLA 3-stage 训练流程 (config.py 已就绪)
+
+```
+Stage 1: xvla_stage1_kai_warmup
+   Init: pi05_base (干净起点) + soft_prompt_hub initialized N(0, 0.02)
+   Data: kai0_base + kai0_dagger (全部 domain_id=0)
+   全模型 + soft_prompt 联合训练, 50k step
+   → 学到 domain[0] (kai) 的 soft_prompt 表示
+
+Stage 2: xvla_stage2_soft_prompt_only_vis
+   Init: Stage 1 final ckpt
+   Frozen backbone + LLM, ONLY train soft_prompt_hub
+   Data: vis_v2_merged (domain_id=1, vis)
+   5k step, lr 5e-4
+   → 仅对齐 domain[1] (vis) 的 soft_prompt slot, 不动 backbone
+
+Stage 3: xvla_stage3_joint_finetune
+   Init: Stage 2 ckpt
+   Unfreeze 全模型, joint finetune soft_prompt + backbone
+   Data: kai + vis 混训
+   → 终态最强模型
+```
+
+> X-VLA Soft Prompt 已在 290K episodes 跨 7 个 platforms × 5 个 arm types 验证可行 (ICLR 2026)。每域仅 65K 参数 (32×2048), 整体 0.04% 非共享参数。
 
 ---
 
 # Part III — 执行计划
 
-## 7. Milestone 总览 (M1-M4)
+## 7. Milestone 总览 (M1-M4) — Dual-Track Parallel
+
+### 📐 双轨并行架构 (2026-05-21 起)
+
+```
+                     ┌─────────────────────────────────────┐
+                     │   Track A: SSL 主线 (uc02 + H20)    │
+                     │   ├── Phase 0 Pseudo-labels         │
+                     │   ├── Phase 1 V-JEPA + track + flow │
+                     │   ├── Phase 2 Dynamics + Embodiment │
+                     │   └── Phase 3 Policy + Ablation     │
+                     ├─────────────────────────────────────┤
+                     │   Track B: X-VLA Soft Prompt        │
+                     │   (Robot-North-H20, 16 H20)         │
+                     │   ├── Stage 1 kai warmup (in_progress) │
+                     │   ├── Stage 2 vis soft_prompt only  │
+                     │   └── Stage 3 joint finetune        │
+                     └─────────────────┬───────────────────┘
+                                       ↓
+                          ┌──────── Final Merge ────────┐
+                          │ SSL Visual Backbone +       │
+                          │ X-VLA Soft Prompt Hub +     │
+                          │ Dynamics-conditioned policy │
+                          └─────────────────────────────┘
+```
+
+**两条 track 互不冲突**: Track A 主要用 uc02 (Phase 0) + Robot-North-H20 (Phase 1-3); Track B 用 Robot-North-H20 16 GPU。在 Robot-North-H20 39 GPU 可用前提下并行 OK (Track A 单 exp 16 GPU, Track B 同 16 GPU, 共 32, 余 7)。
 
 ### 🚀 M1 (1-2 周): 短期真机修复 — **已 deprioritize**
 
-> 用户决策 (2026-05-21): 先专注 L1 SSL 路线 (M2), 暂不展开 X1/X2/X3 系列。M1 计划保留但不立即执行, 待 M2 完成首轮 ablation 后回看。
+> 用户决策 (2026-05-21): 先专注 L1 SSL + X-VLA 路线 (M2-M3), 暂不展开 X1/X2/X3 系列。M1 计划保留但不立即执行, 待 M2/M3 完成首轮 ablation 后回看。
 
 简要内容: EE-relative action + embodiment prompt + B oversample 修复真机抖动 (详细方案见 git 历史)。
 
-### 🔬 M2 (~9 周): L1 SSL Pretraining + Dynamics + Policy ⭐ **主线**
+### 🔬 M2 (~9 周): Dual-track 训练 ⭐ **主线**
 
-完整 4 个 Phase 详见 §8。**当前进度**: Phase 0 in_progress (E0.1 Kai0_base CoTracker3 跑在 uc02)。
+**Track A — SSL Pretraining + Dynamics + Policy**: 完整 4 个 Phase 详见 §8.1-8.5。
+- **当前进度**: Phase 0 in_progress (E0.1 Kai0_base CoTracker3 跑在 uc02)
 
-### 🌍 M3 (M2 之后): 真机 + Paper 收尾
+**Track B — X-VLA Soft Prompt Curriculum (3-stage)**: 详见 §8.6。
+- **当前进度**: Stage 1 in_progress (t-20260521154828-76d44, Robot-North-H20 16 H20, 2026-05-21 07:48 启动)
 
-- 真机大规模测试 (60-100 ep per ablation)
-- Paper figures + writing
+### 🌍 M3 (M2 之后): Dual-track Merge + 真机 + Paper
+
+- **Merge 策略**: SSL visual backbone (E1.5) + X-VLA Soft Prompt (xvla_stage3) + Dynamics-conditioned action head
+- **真机大规模测试** (60-100 ep per ablation, 含 X-VLA stage 1/2/3 各自 baseline)
+- **Paper figures + writing** (中心 claim: cloth_residual MMD + ablation 表)
 - CoRL / NeurIPS submission
 
 ### 📝 M4 (long-tail): ATOM Policy 扩展
@@ -272,8 +346,11 @@ for delta in predicted_chunk:
 | **E0.1** Pseudo-track | CoTracker3 (scaled_offline.pth, v3.0 windowed) | T=24 window, stride=12 → ~580k windows × 3 view | `tracks/{ep_id}/{view}.npz` (W, T, N=36, 2) | uc02 8 A800 | ~17h (实测) |
 | **E0.2** Optical flow | RAFT-Large | adjacent pair, **temporal stride 3** → ~2.3M pairs × 3 view | `flow/{ep_id}/{view}.npz` (H/8, W/8, 2) | uc02 4 GPU 并行 | ~20h |
 | **E0.3** Cloth mask | SAM2 (Hiera-L) | 1 frame/sec × 9136 ep × 3 view ≈ 820k mask | `mask/{ep_id}/{view}.npz` | Robot-North-H20 8 H20 | ~12h |
-| **E0.4** FOV align | OpenCV | D405 wrist (B 数据 895 ep × 双 wrist) | `rgb_d405_d435align/{ep_id}/wrist_*.npy` (D405 crop 到 D435 等效 FOV) | CPU | 几小时 |
+| **E0.4** ~~FOV align~~ | ~~OpenCV~~ | **取消 (用户决策, 不可持续)** | — | — | — |
 | **E0.5** EE-relative action | Python + PiperFK | A + B + XVLA actions | `action_ee_relative/{ep_id}.npz` (T, 14) | CPU | 几小时 |
+
+> **E0.4 已取消 (2026-05-21 决策)**: D405 → D435 FOV pixel-level crop 不可持续 (训练-推理双向维护负担 + 跨相机不通用 + 丢失 D405 周边信息)。
+> **替代方案**: (1) **View-conditioned token** (data loader 标记 `view_id`, model 自学区分) — 由 Phase 1 E1.4/E1.5 中的 `xview_head` 自然实现; (2) **RandomResizedCrop augmentation** (scale 0.6-1.0) 让 model 自然 robust 到 FOV 差异。原理: representation-level invariance > input-level pixel hack。详见 §11 风险 #3。
 
 **优化策略**:
 1. **Temporal stride 3**: 7M → 2.3M effective frames
@@ -287,10 +364,10 @@ for delta in predicted_chunk:
 ├── tracks/<dataset>/ep_XXXXXX/{top_head,hand_left,hand_right}.npz
 ├── flow/<dataset>/...   (同结构)
 ├── masks/<dataset>/...  (同结构, 稀疏 1/sec)
-├── rgb_d405_d435align/  (仅 B 数据)
 ├── action_ee_relative/{ep_XXXXXX}.npz
 └── logs/                (每 GPU shard 一个 log)
 ```
+(原 `rgb_d405_d435align/` 已取消)
 
 **质量检查**: 抽样 50 ep 人工 inspect, 不合格的 ep 记 `skip_list.txt`。
 
@@ -386,6 +463,70 @@ weights:      固定 (w_vjepa=1.0, w_track=0.5, w_flow=0.3, w_xview=0.2)
 - Failure case analysis
 - Paper figures (architecture diagram, latent t-SNE, ablation curve)
 
+### 8.7 Track B — X-VLA Soft Prompt Curriculum (并行执行)
+
+> 与 Track A (SSL) 完全并行。Track B 是 GR00T N1.5 / X-VLA 风格的直接 policy + soft prompt 路线, 输出可作为 Track A Phase 3 的对照 baseline + 后期 merge 提供 soft_prompt_hub 权重。
+
+#### 8.7.1 配置就绪 (config.py 已有, 见 §6.2.1)
+
+| Stage | Config name | Init | Data | Freeze | Steps | LR |
+|---|---|---|---|---|---|---|
+| **1** | `xvla_stage1_kai_warmup` | pi05_base + N(0,0.02) soft_prompt | kai0_base + dagger (domain_id=0) | None (joint train) | 50k | 1.5e-5 → 1.5e-6 |
+| **2** | `xvla_stage2_soft_prompt_only_vis` | Stage 1 ckpt | vis_v2_merged (domain_id=1) | Backbone frozen, **only soft_prompt** | 5k | 5e-4 |
+| **3** | `xvla_stage3_joint_finetune` | Stage 2 ckpt | kai + vis 混训 | Unfreeze all | 待定 | 待定 |
+
+#### 8.7.2 资源 + ETA
+
+| Stage | GPU | ETA | 总 GPU-h |
+|---|---:|---:|---:|
+| 1 | 16 H20 (Robot-North-H20) | ~12h | ~200 |
+| 2 | 8-16 H20 | ~2h | ~30 |
+| 3 | 16 H20 | ~12h | ~200 |
+| **合计** | — | ~26h | ~430 GPU-h |
+
+#### 8.7.3 当前 Stage 1 实际任务 (2026-05-21)
+
+```yaml
+Job:     xvla-stage1-cnbj-kai-warmup-16gpu (t-20260521154828-76d44)
+Status:  Queueing → Running (2026-05-21 07:48 启动)
+Workers: 2 × ml.hpcpni3ln.45xlarge = 16 H20
+Storage: vepfs-cnbj /vePFS-North-E/vis_robot/
+Verify:  ✅ 路径全部 ok (data + ckpt + yaml + venv 实测)
+Config 关键:
+  - soft_prompt_num_domains=2 (A=0, B=1) — ⚠️ 未给 XVLA 留槽位
+  - soft_prompt_len=32
+  - use_delta_joint_actions=False (与 pi05_base + mixed_1 一致)
+  - inline_eval_every=99999 (实际禁用, 训完手动 eval)
+  - inline_eval_val_root: kai0/dagger (in-domain, 不用 vis)
+```
+
+#### 8.7.4 Track A + B 最终 Merge (M3 Week 9-)
+
+```python
+# 最强 final model 设想 (paper E3.5 / E4.0):
+TrainConfig(
+    name="final_ssl_xvla_dynamics",
+    model=pi0_config.Pi0Config(
+        pi05=True,
+        soft_prompt_num_domains=2,      # 或 3 (如果引入 XVLA)
+        soft_prompt_len=32,
+        # 加: motion_residual_dynamics=True (Phase 2 E2.3 学到的)
+    ),
+    weight_loader=CheckpointWeightLoader(
+        path_to_xvla_stage3_ckpt,        # X-VLA soft_prompt_hub weights
+        # + 替换 vision tower with SSL E1.5 backbone
+    ),
+    data=...vis_only finetune,
+    use_delta_joint_actions=...,         # 决策点 (待 X1 验证)
+)
+```
+
+#### 8.7.5 已知 caveats (Track B)
+
+1. **soft_prompt_num_domains=2 没给 XVLA 留槽** — 如果将来想引入 XVLA 进 X-VLA route, 必须扩 num_domains 重训; 当前 Track B 设计是 A + B 二分类, 不含 XVLA
+2. **absolute joint** — 与 §6.1 实证调研一致 (π0.5 默认 absolute + KAI0 数据 absolute + mixed_1 norm_stats 验证), 但与 "尝试 delta" 假设线不重叠 (delta 假设线只能在 Track A 内验证)
+3. **inline_eval 禁用** — 训完后需要手动 eval pipeline (一次性 forward + 算 MAE)
+
 ### 8.7 时间线 (Gantt)
 
 ```
@@ -445,7 +586,7 @@ KAI0 原始数据从 sim01 上传 TOS, 各训练服务器从 TOS 拉到本地 mi
 
 ## 10. 状态跟踪 (持续更新)
 
-### 10.1 Phase 0 — 数据预处理 🔄 in_progress (启动 2026-05-21)
+### 10.1 Track A Phase 0 — 数据预处理 🔄 in_progress (启动 2026-05-21)
 
 | Sub-task | 状态 | 启动 | 完成 | 备注 |
 |---|---|---|---|---|
@@ -457,9 +598,9 @@ KAI0 原始数据从 sim01 上传 TOS, 各训练服务器从 TOS 拉到本地 mi
 | E0.1 XVLA-Soft-Fold (1729 ep) | 待启动 | — | — | hdf5 格式, 需不同 dataset adapter |
 | E0.2 RAFT optical flow | 待启动 | — | — | 待 E0.1 完成, 复用 uc02 GPU |
 | E0.3 SAM2 cloth mask | 待启动 | — | — | Robot-North-H20 1 节点跑 |
-| E0.4 FOV alignment | 待启动 | — | — | CPU 任务 |
+| ~~E0.4 FOV alignment~~ | ❌ **取消** | — | — | 不可持续 (见 §8.2 + §11 #3), 由 view-cond token + RandomResizedCrop 替代 |
 | E0.5 EE-relative action | 待启动 | — | — | CPU + PiperFK, 脚本 `/tmp/e0_5_ee_pose.py` 已就位 |
-| **Phase 0 整体** | 🔄 in_progress | 2026-05-21 | — | 修正 ETA: ~5-7 day |
+| **Phase 0 整体** | 🔄 in_progress | 2026-05-21 | — | 修正 ETA: ~5-7 day (E0.4 取消后减少 ~5h) |
 
 ### 10.2 Phase 1 — SSL Pretrain ⏳ pending Phase 0
 
@@ -480,15 +621,25 @@ KAI0 原始数据从 sim01 上传 TOS, 各训练服务器从 TOS 拉到本地 mi
 
 ### 10.4 Phase 3 — Policy + Final Ablation Table ⏳ pending Phase 2
 
-| Variant | Visual | Dynamics | Embodiment cond | Motion-residual | Inverse Dyn | Val MAE | 真机平滑度 | 真机成功率 |
+| Variant | Visual | Dynamics | Soft Prompt | Motion-residual | Inverse Dyn | Val MAE | 真机平滑度 | 真机成功率 |
 |---|---|---|---|---|---|---:|---:|---:|
 | **E3.0** baseline (π0.5 default) | — | — | — | — | — | TBD | TBD | TBD |
 | **E3.1** + Visual SSL | E1.5 frozen | — | — | — | — | ? | ? | ? |
 | **E3.2** + LoRA tune | E1.5 LoRA | — | — | — | — | ? | ? | ? |
-| **E3.3** + Dynamics | E1.5 LoRA | E2.3 | ✓ | ✓ | — | ? | ? | ? |
-| **E3.4** Full Stack | E1.5 LoRA | E2.3 | ✓ | ✓ | ✓ | ? | ? | ? |
+| **E3.3** + Dynamics | E1.5 LoRA | E2.3 | — | ✓ | — | ? | ? | ? |
+| **B3.0** Track B (xvla stage 3 alone) | π0.5 default | — | ✓ (xvla) | — | — | ? | ? | ? |
+| **E3.4** Full Stack (Track A + B merge) | E1.5 LoRA | E2.3 | ✓ (xvla) | ✓ | ✓ | ? | ? | ? |
 
 (待填)
+
+### 10.5 Track B — X-VLA Soft Prompt Curriculum ⏳ in_progress (启动 2026-05-21)
+
+| Stage | 状态 | Job ID | Start | End | Step | Best Val | 备注 |
+|---|---|---|---|---|---|---|---|
+| **Stage 1 kai warmup** | 🔄 in_progress | t-20260521154828-76d44 | 2026-05-21 07:48 UTC | — | — / 50k | — | 16 H20 on Robot-North-H20, 路径全 verified, ETA ~12h |
+| Stage 2 vis soft_prompt only | 待 Stage 1 | — | — | — | — / 5k | — | LR 5e-4, freeze backbone |
+| Stage 3 joint finetune | 待 Stage 2 | — | — | — | — | — | Joint train all |
+| **Track B 整体** | 🔄 stage 1 | — | 2026-05-21 | — | — | — | 3 stages 总 ETA ~26h |
 
 ---
 
@@ -498,7 +649,7 @@ KAI0 原始数据从 sim01 上传 TOS, 各训练服务器从 TOS 拉到本地 mi
 |---|---|---|
 | 1 | CoTracker3 在 heavy occlusion (crumpled cloth) 失败 | Pseudo-track 加 confidence filter; track loss 按 mask 加权 |
 | 2 | RAFT 在 fast motion 失败 | Quasi-static 阶段训 flow, dynamic 阶段降权重 |
-| 3 | **D435 FOV (69°) < D405 (87°)** | **把 D405 crop 到 D435 等效 FOV** (D435 视野更小, 反向不可行) |
+| 3 | **D435 FOV (69°) < D405 (87°)** Wrist sensor gap | ❌ ~~输入端 D405 crop 到 D435 FOV~~ (不可持续, 训练-推理双向维护, 跨相机不通用, 丢失 D405 周边信息). ✅ **改 representation-level invariance**: (a) view-conditioned token (data loader 标 `view_id`, E1.4/E1.5 xview head 自学); (b) RandomResizedCrop augmentation (scale 0.6-1.0) 让 model 自然 robust |
 | 4 | π0.5 PaliGemma backbone continual SSL pretraining 易 catastrophic forget | Layer-wise lr decay, peak 5e-5, anchor loss on 1% LAION subset |
 | 5 | 叠衣 success criterion 真机评估难自动化 | 设计 IoU / fold count / stage completion 离线 metric |
 | 6 | IK 在 delta EE 推理时不连续 | Warm-start with current joints, 或训练同时输出 delta EE + delta joints |
@@ -516,10 +667,11 @@ KAI0 原始数据从 sim01 上传 TOS, 各训练服务器从 TOS 拉到本地 mi
 - L2 (policy): ❌ 不引入 (抖动 +62%, 污染 action prior)
 - L3 (aux): ⚠️ 可选 (作为 inverse dynamics 目标)
 
-### 决策点 2: Embodiment conditioning 实现方式?
-- **先做**: Prompt token (`"[D405 wrist] ..."`) — 0 改 model arch
-- **后做**: Soft prompt (X-VLA style, 每 domain 32×1024) — 改 model
-- **最终**: 两者结合 + action head embedding
+### 决策点 2: Embodiment conditioning 实现方式? ✅ **已决策 (2026-05-21)**
+- ~~Hard prompt only~~ (信号沿 LLM attention 隐式传播, 不显式 gate)
+- ✅ **Soft prompt (X-VLA style)** — 代码已实现 (`pi0.py:soft_prompt_hub`), config 已就绪 (`xvla_stage1/2/3`), 已启动 (Track B Stage 1 in_progress)
+- ⏭️ Track A Phase 2 (dynamics) 同时用 soft embedding 作为 conditioning input
+- 终态 (E3.4): SSL backbone + xvla soft_prompt_hub + dynamics motion-residual
 
 ### 决策点 3: 是否回看 M1 短期方案?
 - 触发条件: Phase 1 (SSL) 完成首轮 ablation, 如果 E3.1 / E3.2 已经超过 baseline → M1 不需要做
@@ -531,6 +683,7 @@ KAI0 原始数据从 sim01 上传 TOS, 各训练服务器从 TOS 拉到本地 mi
 
 | 日期 | 内容 |
 |---|---|
-| 2026-05-21 | **Consolidated**: 合并 `ssl_pretraining_experiment_plan.md` 到本文档 §8 (M2 SSL Pretraining 详细 Phase 0-4); 删除 §9 X1/X2/X3 详细配置 (用户决策 deprioritize M1); 加 §6 与 π0.5/X-VLA 默认对照 + 实证调研; 加 §4 假说矩阵 H1-H4; 加 §10 状态跟踪 (Phase 0 in_progress) |
+| 2026-05-21 (晚) | **Dual-track 化 + 放弃 FOV crop**: 加 §6.2.1 本地 soft_prompt_hub 代码 + ckpt 现状 (代码已实现但未训过); §6.2.2 X-VLA 3-stage 流程; §7 dual-track 架构图 (Track A SSL + Track B X-VLA 并行); §8.7 Track B 完整 X-VLA stage 1/2/3 计划 (Stage 1 t-20260521154828-76d44 已提交); §10.5 Track B 状态跟踪表; §10.4 加入 B3.0 + 改 E3.4 为 dual-track merge; 决策点 2 已决策为 soft prompt. **取消 E0.4 Wrist FOV crop** — 不可持续, 替换为 view-cond token + RandomResizedCrop (§8.2 + §11 #3) |
+| 2026-05-21 (早) | **Consolidated**: 合并 `ssl_pretraining_experiment_plan.md` 到本文档 §8; 删除 X1/X2/X3 详细配置 (deprioritize M1); 加 §6 与 π0.5/X-VLA 默认对照 + 实证调研; 加 §4 假说矩阵 H1-H4; 加 §10 状态跟踪 |
 | 2026-05-21 (earlier) | 加 XVLA-Soft-Fold 多地副本 (§9.2: uc02 本地 + uc NFS + gf0 vePFS-cnsh + gf3 vePFS-cnbj) |
 | 2026-05-19 | 初版: 设备差异 + 4 层 ROI + EE-relative 可行性 + M1-M4 milestones + Qizhi 资源分配 |
