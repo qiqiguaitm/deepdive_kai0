@@ -907,29 +907,33 @@ Week 9   │   │  │  │  ┌──[Phase 4] 真机 + Paper
 
 ## 9. 资源 + 数据 + 网络
 
-### 9.1 GPU 资源 (2026-05-22 实测可用)
+### 9.1 GPU 资源 (2026-05-22 PM 更新)
 
-| 资源 | GPU | 状态 | M2 分配 |
+| 资源 | GPU | 状态 | 当前任务 |
 |---|---:|---|---|
-| **Robot-North-H20** (cn-beijing) | 32-40 H20 free / 56 total | active | SSL/X-VLA 主战场 (单 exp 16 GPU, 可 2-3 并发) |
-| **robot-task** (cn-shanghai) ⭐ | **20 A100-80G free / 28 total** | active | Phase 1 SSL 副战场 / 备用 (单 exp 8 GPU 起) |
-| **uc02** | 8 A800 | busy (Phase 0 E0.1 CoTracker3) | 数据预处理 |
-| **uc01** | 8 A800 | free (exp1 已完成) | E0.5 + offline eval 等小作业 |
-| **gf3** | 1 H20 | active (smoke/dev) | 单卡 smoke / debug |
+| **Robot-North-H20** (cn-beijing) | 47 H20 free / 56 total | active | Stage 2 v2 (6fr6c) running 16 H20 |
+| **robot-task** (cn-shanghai) | 12 A100-80G free / 28 total | active | C-Stage 1 v5 (msstb) running 16 A100 |
+| **uc02** | 8 A800 | **idle** ✅ E0.1 CoTracker base+dagger 完成 (6512 ep tracks) | 待: E0.2 RAFT or 其他 |
+| **uc01** | 8 A800 | **idle** ✅ Track C smoke + exp1 eval 完成 | 待: E3.5/E3.6 norm ablation or 其他 |
+| **gf3** | 1 H20 | active (Stage 1 eval done) | smoke/dev |
 | **gf0** | 控制平面 | active | volc + uc 任务统一管理 |
-| uc03 | 8 A800 | busy (task_a_new_100) | 不动 |
+| uc03 | 8 A800 | busy (task_a_new_100, ~24k/50k, nw=32) | 不动 |
 
-**当前可启动的并发上限** (2026-05-22):
-- Beijing: 2 × 16 GPU job 或 1 × 32 GPU job (32 H20 free)
-- Shanghai: 2 × 8 GPU job 或 1 × 16 GPU job (20 A100 free)
-- uc01: 1 × 8 GPU job (8 A800 idle)
+**当前可启动的并发上限** (2026-05-22 PM):
+- Beijing: **可再启 1 × 16 GPU job** 或 1 × 32 GPU job (31 H20 free)
+- Shanghai: **可再启 1 × 8 GPU job** 或 1 × 16 GPU job (12 A100 free)
+- **uc01 + uc02: 2 × 8 A800 idle** ← 双倍 idle, 可同时跑 2 个 8-GPU job
 
-**三轨资源分配建议** (2026-05-22):
-| Track | 当前阶段 | 资源 | ETA |
-|---|---|---|---|
-| Track A (SSL) | Phase 0 | uc02 8 A800 → Phase 1 用 Beijing 48 H20 (3 并发 each 16) | Phase 0 ~6h, Phase 1 ~35h |
-| Track B (X-VLA Soft Prompt) | Stage 1 → 2 | Beijing 16 H20 | Stage 2 ~1h, Stage 3 ~12h |
-| Track C (Action Head Cond) ⭐ 新 | 编码 → Phase 1.5 → Stage 1 | Shanghai 16 A100 (并发于 Track B 不抢 Beijing) | 编码 ~1d, Stage 1 ~12-15h |
+**三轨资源分配实况** (2026-05-22 PM):
+| Track | 当前阶段 | Job ID | 资源 | 状态 |
+|---|---|---|---|---|
+| Track A (SSL Phase 0) | E0.1 ✅ done base+dagger / E0.2 RAFT 待启 | — | uc02 8 A800 idle | E0.1 finished, E0.2 待启 |
+| Track B (Soft Prompt) | Stage 2 running (v2 重试) | t-20260522135514-6fr6c | Beijing 16 H20 | Stage 1 done, Stage 2 第二次提交 (修 JAX_PROCESS_COUNT bug) |
+| Track C (Action Head Cond 方案 A) | C-Stage 1 running (v5 重试) | t-20260522135557-msstb | Shanghai 16 A100 | 容器内 uv install + JAX env vars 修复后第五次提交 |
+
+**已知踩坑** (2026-05-22):
+- JAX 多机环境变量正确名称是 `JAX_NUM_PROCESSES` + `JAX_PROCESS_ID`, **不是** `JAX_PROCESS_COUNT` + `JAX_PROCESS_INDEX` (Stage 2/C-Stage 1 v1-v4 全因此 failed)
+- cnsh volc 容器看不到新建的 vePFS 文件 (GPFS metadata cache stale, gf3 cnbj 同样)。Workaround: 使用容器内 `curl uv install` + symlink `/home/tim/.local/share/uv → /root/.local/share/uv` pattern (老工作 yaml 模式)
 
 > 控制平面: 所有 volc + uc 任务通过 **gf0** 统一管理 (见 [training_servers_knowledge_base.md §5.6.c-d](./training_servers_knowledge_base.md))。
 
@@ -967,7 +971,7 @@ KAI0 原始数据从 sim01 上传 TOS, 各训练服务器从 TOS 拉到本地 mi
 | **环境安装** (uc02 kai0 venv) | ✅ done | 2026-05-21 06:05 | 2026-05-21 06:14 | cotracker3 (local git clone + uv pip -e), decord 0.6.0, einops 0.8.1, opencv 4.11, pyarrow 20.0. CoTracker3 ckpt 从 hf-mirror 下载 (96MB) |
 | **真实视频 timing 实测** | ✅ done | 2026-05-21 06:19 | 2 ep 123s = **60s/ep × 3 view** | 8 GPU 并行预估总 ~17h |
 | **E0.1 Kai0_base** (3055 ep) | ✅ done | 2026-05-21 06:20 | 2026-05-21 12:22 | uc02 8 GPU 并行, 实际 6h02. 输出 3055 ep / **2.0G** tracks |
-| **E0.1 Kai0_dagger** (3457 ep) | 🔄 running | 2026-05-21 12:23 | — | uc02 8 GPU, 每 GPU 433 ep, ETA ~4.6h (avg 699 frames/ep, 比 base 短) |
+| **E0.1 Kai0_dagger** (3457 ep) | ✅ done | 2026-05-21 12:23 | 2026-05-22 ~04 UTC | uc02 8 GPU, 共 6512 ep tracks 完成 (kai0_base + dagger), uc02 现 idle |
 | E0.1 vis_v2_merged (895 ep) | 待启动 | — | — | 同上 |
 | E0.1 XVLA-Soft-Fold (1729 ep) | 待启动 | — | — | hdf5 格式, 需不同 dataset adapter |
 | E0.2 RAFT optical flow | 待启动 | — | — | 待 E0.1 完成, 复用 uc02 GPU |
@@ -1014,10 +1018,10 @@ KAI0 原始数据从 sim01 上传 TOS, 各训练服务器从 TOS 拉到本地 mi
 
 | Stage | 状态 | Job ID | Start | End | Step | Best Val | 备注 |
 |---|---|---|---|---|---|---|---|
-| **Stage 1 kai warmup** | 🔄 running (mu PASS) | t-20260521154828-76d44 | 2026-05-21 07:48 UTC | — | 2100+ / 50k | — | 16 H20 on Robot-North-H20. ✅ **Step 2000 ckpt mu 验证 PASS** (d0 mu absmax=1.15e-3): RepackTransform + AgilexInputs 两处 dataset_id passthrough 修复确认生效, soft_prompt_hub 真的在训练。Rate ~1.8 s/it, ETA step 50k ~10h |
-| Stage 2 vis soft_prompt only | 待 Stage 1 | — | — | — | — / 5k | — | LR 5e-4, freeze backbone |
-| Stage 3 joint finetune | 待 Stage 2 | — | — | — | — | — | Joint train all |
-| **Track B 整体** | 🔄 stage 1 running | — | 2026-05-21 | — | — | — | 3 stages 总 ETA ~22-26h (Stage 1 mu PASS 后流程已 unblock) |
+| **Stage 1 kai warmup** | ✅ **完成 + offline eval done** | t-20260521154828-76d44 | 2026-05-21 07:48 UTC | 2026-05-22 03:39 UTC | 49999 / 50k | kai_base **0.0083** / kai_dagger **0.0136** | Offline eval gf3 1 H20 dataset_id=0 + 50 ep × 20 q/ep. 详见 `docs/training/xvla_conditioning_methods_results.md` §2.2.1 |
+| Stage 2 vis soft_prompt only | 🔄 **v2 running** (v1 failed JAX env) | t-20260522135514-6fr6c | 2026-05-22 13:55 UTC | — | — / 5k | — | Beijing 16 H20, LR 5e-4, freeze backbone except soft_prompt_hub. v1 (vc7q8) 因 `JAX_PROCESS_COUNT` 应为 `JAX_NUM_PROCESSES` failed. ETA ~1-2h |
+| Stage 3 joint finetune | 待 Stage 2 | — | — | — | — / 50k | — | Joint train all on kai+vis 混训, 50k step ETA ~10-12h |
+| **Track B 整体** | 🔄 stage 2 running | — | 2026-05-21 | — | — | — | 3 stages 总 ETA ~12-14h 剩 (Stage 1 done, Stage 2/3 待) |
 
 > **2026-05-21 重大 bug 修复**: 之前 Stage 2 grad_norm=0 + 旧 Stage 1 soft_prompt_hub 不训练的根因, 是 `RepackTransform` 和 `AgilexInputs` 两处都重建 data dict 时丢掉了 `dataset_id`, 导致 obs.dataset_id=None → embed_prefix soft prompt 分支被 dead-code-eliminate。修复 commits: `9d2184a` (RepackTransform) + `df23d5a` (AgilexInputs)。
 
@@ -1031,12 +1035,12 @@ KAI0 原始数据从 sim01 上传 TOS, 各训练服务器从 TOS 拉到本地 mi
 
 | Stage | 状态 | Job ID | Start | End | Step | Best Val | 备注 |
 |---|---|---|---|---|---|---|---|
-| Phase 1.5 代码实现 | ⏳ pending | — | — | — | — | — | `pi0_config.py: action_head_cond_num_domains` + `pi0.py: action_head_cond_hub: nnx.Embed(num_domains, D)` + action expert input concat 1 domain token. 见 §6.3.2 |
-| Smoke test (kai+vis mixed) | ⏳ pending | — | — | — | — | — | uc01 1-2 GPU, 1k step 验证 `mu(action_head_cond_hub)` non-zero (与 Soft Prompt PASS 同 pattern) |
-| Stage 1 kai warmup | ⏳ pending | — | — | — | — / 50k | — | Shanghai 16 A100 (推荐, 与 Track B Beijing 不抢资源) |
-| Stage 2 vis cond only | 待 Stage 1 | — | — | — | — / 5k | — | freeze backbone, only `action_head_cond_hub` trainable |
-| Stage 3 joint finetune | 待 Stage 2 | — | — | — | — / 50k | — | Unfreeze all, kai+vis 混训 |
-| **Track C 整体 (C3.0 终态)** | 待启动 | — | — | — | — | — | 编码 ~半天 (方案 A 极简) + 3 stages 总 ETA ~22-26h. 终 ckpt → **vis 真机评估** |
+| Phase 1.5 代码实现 | ✅ **完成** | commits 4050336 + 81d2ec8 | 2026-05-22 | 2026-05-22 | — | — | pi0_config.py 加 action_head_cond_num_domains + freeze_mode "only_action_head_cond"; pi0.py 加 action_head_cond_hub + embed_suffix concat domain token; weight_loaders.py whitelist; 3 configs (xvla_actcond_stage1/2/3); stage3_kai_vis_joint.yaml. 旧 ckpt 完全兼容 |
+| Smoke test (kai+vis mixed) | ✅ **PASS** | uc01 actcond_smoke | 2026-05-22 04:21 | 2026-05-22 04:34 | 50 / 100 | — | uc01 8 A800 batch 16. **mu d0 absmax=7.35e-5 L2=5.57e-4** (grad flow OK), d1=0 (kai-only). PASS pattern 与 Soft Prompt 一致 |
+| C-Stage 1 kai warmup | 🔄 **v5 running** (v1-v4 failed) | t-20260522135557-msstb | 2026-05-22 13:55 UTC | — | — / 50k | — | Shanghai 16 A100. v1 (cl9ls) 因 ModuleNotFoundError etils — .venv python symlink 指向 /home/tim 容器看不到; v2-v4 因 GPFS metadata cache stale + JAX env var typo; v5 用容器内 uv install pattern + JAX_NUM_PROCESSES |
+| C-Stage 2 vis cond only | 待 C-Stage 1 | — | — | — | — / 5k | — | freeze backbone, only `action_head_cond_hub` trainable |
+| C-Stage 3 joint finetune | 待 C-Stage 2 | — | — | — | — / 50k | — | Unfreeze all, kai+vis 混训 |
+| **Track C 整体 (C3.0 终态)** | 🔄 C-Stage 1 running | — | 2026-05-22 | — | — | — | 编码完成 ✅. C-Stage 1 12-15h + Stage 2 1-2h + Stage 3 10-12h ≈ ~24h. 终 ckpt → **vis 真机评估** |
 
 > Track C (方案 A) 与 Track B 形成 1:1 对照:
 > - Soft Prompt: VLM input 端, 32 tokens, 信号经 24 层 paligemma attention
