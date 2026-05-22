@@ -586,14 +586,31 @@ if self.action_head_cond_hub is not None:
     # adjust attention mask + position embeddings accordingly
 ```
 
-#### 6.3.3 训练曲线 (方案 A only)
+#### 6.3.3 训练流程 (修订: 单阶段 balanced, 2026-05-22 PM)
 
-| Stage | 状态 | 备注 |
+> **架构修订**: 弃用 3-stage curriculum, 改单阶段 joint training。理由见 §6.3.6。
+
+| 步骤 | 状态 | 备注 |
 |---|---|---|
-| Phase 1.5 编码 + smoke test | ⏳ pending | uc01 1-2 GPU, 验证 mu(action_head_cond_hub) non-zero |
-| Stage 1 kai warmup | ⏳ pending | Shanghai 16 A100 (推荐, 避开 Beijing) |
-| Stage 2 vis cond only | ⏳ pending | Freeze backbone, only `action_head_cond_hub` trainable |
-| Stage 3 joint finetune | ⏳ pending | Unfreeze all, kai+vis 混训 |
+| Phase 1.5 编码 + smoke test | ✅ 完成 | uc01 8 A800, step 50 mu d0=7.35e-5 PASS |
+| **Single-stage balanced** | 🔄 running (flgmf) | Shanghai 16 A100, kai_base + kai_dagger + **vis × 7** (balanced sampling) joint 50k step from pi05_base |
+
+#### 6.3.6 为什么放弃 3-stage curriculum? (2026-05-22 PM 决策)
+
+经讨论方案 A 的实际信号路径:
+
+| 维度 | Soft Prompt (Track B) | Action Cond (Track C 方案 A) |
+|---|---|---|
+| 信号传播路径 | 24 层 PaliGemma + 4-8 层 action expert | **仅 4-8 层 action expert** |
+| 影响 image/text representation? | ✅ 是 (domain 信息改变 VLM attention) | ❌ 否 (paligemma 完全不知 domain) |
+| 信号对齐难度 | 高 | **低** |
+| Stage 2 freeze-backbone 必要性 | 高 (保护 24 层 VLM) | **中-低** (action expert 4-8 层, 短路径) |
+
+**关键洞察**: Soft Prompt 影响 VLM attention pattern (24 层影响 image 怎么编码), 需要 stage 2 隔离训练保护; **Track C 方案 A 只影响 action expert 怎么把 latent 转 action**, 不改 image 编码, stage 2 价值边际低。
+
+**数据不平衡 (kai 6512 ep vs vis 895 ep, 7.27×) 用 ConcatDataset over-sampling 处理** (vis × 7 在 datasets_yaml 重复路径, 49/51 split)。这比 stage 2 frozen-backbone 更直接、更轻量。
+
+**最终方案**: 单阶段 joint kai+vis 50k step, balanced sampling (vis ×7), 12h 完成。Track B 同时保留 Stage 1 不推进, paper 对照 E3.7 (Soft Prompt kai-only) vs E3.8 (Action Cond joint balanced)。
 
 #### 6.3.4 真机评估目标
 
@@ -612,6 +629,161 @@ if self.action_head_cond_hub is not None:
 - ~~D. Cross-Attention from domain emb to action layers~~ — 最 expressive 但计算 +15%
 
 (完整设计与对比见 git history commit `4306b4c` ↔ 之前的 §6.3 版本)
+
+---
+
+### 6.4 RTC / TAC — Action Chunking 实时性方案对比 + 集成计划 (2026-05-22)
+
+> 问题: chunk 边界不连续 + 推理延迟下抖动累积. 三类方案 (inference / training / 模块化), 我们考虑叠加在 Track A 或 Track C 终态上。
+
+#### 6.4.1 三篇 RTC 论文核心对比
+
+| 论文 | 时间 | 路线 | 改 base 模型? | 推理 latency | 真机验证 |
+|---|---|---|:-:|:-:|:-:|
+| **Inference RTC** (Black, [2506.07339](https://arxiv.org/abs/2506.07339)) | 2025-06 | 推理时 inpainting + pseudo-inverse vjp guidance | ❌ | **+28%** (97 vs 76 ms) | ✅ 6 task × 28h × 480 ep (π0.5) |
+| **TAC** (Black 团队, [2512.05964](https://arxiv.org/abs/2512.05964)) ⭐ | 2025-12 | **训练时**把 prefix actions 作 ground-truth context | ❌ (改 loss + adaLN per-token) | **0** (与 baseline 持平) | ✅ π0.6 box building / espresso |
+| **A2C2** (Sendai, [2509.23224](https://arxiv.org/abs/2509.23224)) | 2025-09 | 加 lightweight correction head, 每步基于最新 obs 输出 Δa | ❌ (base frozen, +新 module) | +4.7ms (~6%) | ❌ 仅 sim (Kinetix, LIBERO) |
+
+#### 6.4.2 维度详细对比
+
+| 维度 | Inference RTC | **TAC** ⭐ | A2C2 |
+|---|---|---|---|
+| 推理 latency | +28% | **0** | +5% |
+| 重训需求 | ❌ 不需 | ✅ 需 (8k step finetune) | ⚠️ 只重训 small head |
+| Backward 兼容 ckpt | ✅ | ❌ | ✅ |
+| 每步用最新 obs | ❌ | ❌ | ✅ ⭐ |
+| 对动态环境反应 | 低 | 低 | 高 |
+| 代码改动 | 中 (vjp + scan) | **小 (<2% codebase)** | 中 (新 module) |
+| 真机验证 | ✅ 充分 | ✅ 部分 | ❌ 无 |
+| Smoothness 来源 | guided diffusion 朝 prev_chunk | 模型内化, 自然平滑 | 每步 residual 修正 |
+| 与 Soft Prompt / 三轨叠加 | ✅ orthogonal | ✅ orthogonal | ✅ orthogonal |
+
+**关键 insight**: 三者**正交可叠加**, 各自解决不同子问题:
+- Inference RTC = pseudo-inverse 强行约束 (老 ckpt 补救)
+- **TAC = 模型自己学会 chunk overlap (训练时一次, 推理零开销)**
+- A2C2 = 添加实时反应模块 (cloth dynamic state 时强相关)
+
+#### 6.4.3 本地实现状态 (2026-05-22 实测)
+
+| 项 | 文件 | 状态 |
+|---|---|---|
+| **Inference RTC** | `kai0/src/openpi/models/pi0_rtc.py` (360 行) | ✅ **完整实现** (论文 1 的 1:1 复刻: `get_prefix_weights` 4 schedules — ones/zeros/linear/exp, `jax.vjp` guidance, `guidance_weight` clipping = min(c·inv_r2, max_guidance_weight)) |
+| **TAC training** | — | ❌ **未实现** (compute_loss 仍标准 flow matching, 见 pi0_rtc.py:206-232) |
+| **A2C2 correction head** | — | ❌ 未实现 |
+
+#### 6.4.4 TAC 集成方案 — Algorithm 1 移植 (论文已给完整代码)
+
+**核心改动 (~6 行 + adaLN per-token)**:
+
+```python
+# kai0/src/openpi/models/pi0_rtc.py — compute_loss 改:
+
+def compute_loss(rng, obs, actions, *, max_delay=10):
+    b, ah, ad = actions.shape
+    noise_rng, time_rng, delay_rng = jax.random.split(rng, 3)
+    time  = jax.random.uniform(time_rng, (b,))
+    noise = jax.random.normal(noise_rng, (b, ah, ad))
+
+    # TAC 新增 4 行:
+    delay        = jax.random.randint(delay_rng, (b,), 0, max_delay)
+    prefix_mask  = jnp.arange(ah)[None, :] < delay[:, None]
+    time         = jnp.where(prefix_mask, 1.0, time[:, None])   # per-token time
+    postfix_mask = jnp.logical_not(prefix_mask)[:, :, None]
+
+    x_t = time[:, :, None] * actions + (1 - time[:, :, None]) * noise
+    v_t = model(obs, x_t, time)
+    loss = (v_t - (noise - actions)) ** 2
+    return jnp.sum(loss * postfix_mask) / (jnp.sum(postfix_mask) + 1e-8)
+```
+
+**Architecture 改动 (Pi0Config)**:
+- 加 `tac_enabled: bool = False` + `tac_max_delay: int = 10`
+- **adaLN-zero conditioning 改成 per-token** (scale / shift / gate 在 sequence 维允许差异)
+- **不增加可学习参数** (per-token 只是 broadcast 改 indexing)
+
+#### 6.4.5 训练 hyper-params (论文披露完整)
+
+| Setting | π0.6 论文值 | 我们 Cloth Task 候选 |
+|---|---|---|
+| Fine-tune steps | 8000 | 同 (~12h on 16 H20) |
+| Batch size | 512 | 128-256 (我们 GPU 较少, 调小) |
+| Delay sampling | uniform `[0, 10]` | uniform `[0, 6]` (我们 30Hz 控制 vs 50Hz, max latency 200ms 对应 d=6) |
+| Inference denoising steps | 5 | 同 |
+| Init | π0.6 base | pi05_base 或 mixed_1 |
+| 调度 (sim) | 从 epoch 24 finetune 8 epoch | 从 baseline 22k step finetune 8k step |
+
+#### 6.4.6 复现难易度评估
+
+| 维度 | 评分 | 说明 |
+|---|:-:|---|
+| 算法清晰度 | ⭐⭐⭐⭐⭐ | Algorithm 1 完整 JAX 代码 (论文附录) |
+| 代码开源 (full repo) | ❌ | 仅论文 Algorithm 1, 无 GitHub |
+| 模型 ckpt 可用 (π0.6) | ❌ | 闭源 |
+| 数据 ckpt 可用 | ⚠️ | Kinetix 公开, real task 闭源 |
+| 超参完整 | ⭐⭐⭐⭐⭐ | 训练 step / batch / delay 全披露 |
+| 架构改动复杂度 | ⭐⭐⭐⭐⭐ | adaLN per-token, 0 新参数 |
+| 对 π0.5 可移植性 | ⭐⭐⭐⭐⭐ | adaLN 同架构 |
+
+**总体可复现性**: **不依赖 π0.6 ckpt, 可在 π0.5 + 我们自有 cloth 数据上复现**, 5 day 工程量。
+
+#### 6.4.7 TAC 与 Track A/B/C 的叠加关系
+
+```
+                      ┌─────────────────────────────────────────┐
+                      │   Track A:  SSL Visual Pretrain          │
+                      │   Track B:  X-VLA Soft Prompt (LLM)      │
+                      │   Track C:  Action Head Conditioning     │
+                      │   (+) TAC training (compute_loss 改动)   │ ← Phase 3 加
+                      └────────────────┬────────────────────────┘
+                                       │ 推理时
+                                       ↓
+                      ┌─────────────────────────────────────────┐
+                      │   (Optional) Inference RTC 仍可启用       │
+                      │   (Optional) A2C2 correction head        │
+                      └─────────────────────────────────────────┘
+```
+
+→ TAC **不与任何现有 Track 冲突**, 只是 Phase 3 训练时多一个 flag (`tac_enabled=True`)。
+
+#### 6.4.8 集成时间线 (插入 Phase 3)
+
+| 阶段 | 任务 | 时间 |
+|---|---|---|
+| **Phase 3 准备** | (1) 写 `pi0_rtc.py::compute_loss_tac` (6 行新增) <br> (2) `Pi0Config.tac_enabled` flag <br> (3) adaLN per-token broadcast patch (~30 行) | **2 day** |
+| **Smoke test** | uc02 8 GPU × 5k step, smooth_800 数据, 看 loss curve | **0.5 day** |
+| **Phase 3 ablation 集成** | 加入 E3.x 新变种 (见 §10.4) | 同 Phase 3 主线 |
+| **真机评估** | 30 ep cloth fold, vs E3.0 baseline + E3.4 stack | **1 day** |
+| **总计** | — | **~4-5 day**, 不抢主线 GPU |
+
+#### 6.4.9 Phase 3 Ablation 新增 (待加入 §10.4)
+
+```yaml
+现 §10.4 ablation 加 RTC 维度:
+  E3.0   baseline                          (no RTC)
+  E3.4   Full Stack (SSL + Soft Prompt)    (no RTC)
+  E3.RTC1  + Inference RTC (运行时 enable_rtc=True, 老 ckpt 即可)  ← 已 implemented, 0 训练
+  E3.RTC2  + TAC training (compute_loss_tac, 8k step finetune)   ← 新加 ⭐
+  E3.RTC3  + TAC + Inference RTC (训练 TAC 后推理仍启 RTC, 二次叠加)
+  E3.RTC4  + TAC + A2C2 correction head    ← 终极 (若 cloth dynamic 需求强)
+```
+
+预期排序 (真机 smoothness): E3.RTC4 > E3.RTC3 > E3.RTC2 > E3.RTC1 > E3.0
+预期排序 (latency): E3.0 = E3.RTC2 < E3.RTC4 ≪ E3.RTC1 = E3.RTC3
+
+#### 6.4.10 决策 (2026-05-22)
+
+- ✅ **采纳 TAC** 作为 Phase 3 ablation 新增维度 (零参数, 几乎零成本, 论文实证 7-13% improvement)
+- ⏸️ **A2C2 暂搁置** — 等 TAC 跑完看是否还需要 dynamic obs response (cloth 主要 static deformation, 反应性需求中等)
+- 🔄 **保留 Inference RTC** (`pi0_rtc.py` 已实现) — 不破坏现有 inference 路径, 老 ckpt 部署还能用
+
+#### 6.4.11 参考文献
+
+- [Real-Time Execution of Action Chunking Flow Policies (Black 2506.07339)](https://arxiv.org/abs/2506.07339)
+- [Training-Time Action Conditioning for Efficient Real-Time Chunking (2512.05964)](https://arxiv.org/abs/2512.05964) — HF page: [huggingface.co/papers/2512.05964](https://huggingface.co/papers/2512.05964)
+- [Leave No Observation Behind: Real-time Correction for VLA Action Chunks (Sendai 2509.23224)](https://arxiv.org/abs/2509.23224)
+- [Daily ArXiv VLA TAC 中文分析](https://infinity4b.github.io/daily-arxiv-vla/papers/2512.05964/)
+- [pi.website RTC 官方介绍](https://www.pi.website/research/real_time_chunking)
+- 本地实现: `kai0/src/openpi/models/pi0_rtc.py` (Inference RTC ✓, TAC ✗)
 
 ---
 
@@ -1019,28 +1191,34 @@ KAI0 原始数据从 sim01 上传 TOS, 各训练服务器从 TOS 拉到本地 mi
 | Stage | 状态 | Job ID | Start | End | Step | Best Val | 备注 |
 |---|---|---|---|---|---|---|---|
 | **Stage 1 kai warmup** | ✅ **完成 + offline eval done** | t-20260521154828-76d44 | 2026-05-21 07:48 UTC | 2026-05-22 03:39 UTC | 49999 / 50k | kai_base **0.0083** / kai_dagger **0.0136** | Offline eval gf3 1 H20 dataset_id=0 + 50 ep × 20 q/ep. 详见 `docs/training/xvla_conditioning_methods_results.md` §2.2.1 |
-| Stage 2 vis soft_prompt only | 🔄 **v2 running** (v1 failed JAX env) | t-20260522135514-6fr6c | 2026-05-22 13:55 UTC | — | — / 5k | — | Beijing 16 H20, LR 5e-4, freeze backbone except soft_prompt_hub. v1 (vc7q8) 因 `JAX_PROCESS_COUNT` 应为 `JAX_NUM_PROCESSES` failed. ETA ~1-2h |
-| Stage 3 joint finetune | 待 Stage 2 | — | — | — | — / 50k | — | Joint train all on kai+vis 混训, 50k step ETA ~10-12h |
-| **Track B 整体** | 🔄 stage 2 running | — | 2026-05-21 | — | — | — | 3 stages 总 ETA ~12-14h 剩 (Stage 1 done, Stage 2/3 待) |
+| ~~Stage 2 vis soft_prompt only~~ | ❌ **2026-05-22 终止** | 6fr6c stopped | — | — | — | — | **用户决策**: Stage 2/3 推进资源回报低, 终止 Track B 链。Stage 1 ckpt 49999 作为 paper E3.7 (Soft Prompt kai warmup) baseline 保留 |
+| ~~Stage 3 joint finetune~~ | ❌ 不再执行 | — | — | — | — | — | 同上终止 |
+| **Track B 整体** | ✅ **Stage 1 完成 + 后续终止** | — | 2026-05-21 | 2026-05-22 | — | — | Track B 仅保留 Stage 1 结果, 不再推进 Stage 2/3 |
 
 > **2026-05-21 重大 bug 修复**: 之前 Stage 2 grad_norm=0 + 旧 Stage 1 soft_prompt_hub 不训练的根因, 是 `RepackTransform` 和 `AgilexInputs` 两处都重建 data dict 时丢掉了 `dataset_id`, 导致 obs.dataset_id=None → embed_prefix soft prompt 分支被 dead-code-eliminate。修复 commits: `9d2184a` (RepackTransform) + `df23d5a` (AgilexInputs)。
 
-### 10.6 Track C — Action Head Conditioning Embedding (方案 A: Concat Token) ⏳ 待启动 (2026-05-22 选定)
+### 10.6 Track C — Action Head Cond Token (方案 A) **修订: 单阶段 balanced** (2026-05-22 PM)
 
-> **方案选定**: 4 候选方案 (A/B/C/D) 中选 **A (Concat domain token at action expert input)**。B/C/D 暂搁置, 详见 §6.3.1 + §6.3.5。
+> **方案选定**: 4 候选 (A/B/C/D) 中选 **A (Concat domain token at action expert input)**, B/C/D 搁置。
 >
-> **训练数据**: kai (KAI0 base+dagger) + vis (vis_v2_merged) 跨本体混合, 与 Track B 同等条件。
+> **架构修订 (2026-05-22 PM)**: 经讨论 (§6.3.6 信号路径分析), **放弃 3-stage curriculum, 改单阶段 joint training**。理由:
+> - Track C 方案 A 信号注入在 action expert input (仅 4-8 层), 信号路径远比 Soft Prompt (24 层 PaliGemma) 短, Stage 2 freeze-backbone 边际价值低
+> - 训练时间减半 (~12h vs ~24h)
+> - 实证验证 "stage 必要性" 也是 paper 加分项 (单 stage 行就 paper 说明 Track C 比 Track B 简单)
 >
-> **真机评估**: vis (B 真机) — 验证 cross-embodiment training 在 B 真机的迁移效果。
+> **采样平衡**: kai 6512 ep vs vis 895 ep (7.27× 不平衡) → **datasets_yaml vis × 7** (ConcatDataset 重复路径) → 49/51 sample ratio。详见 stage3_kai_vis_joint_balanced.yaml。
+>
+> **训练数据**: kai+vis joint 7407 ep (vis × 7 后 12777 ep index space)。
+>
+> **真机评估**: vis (B 真机)。
 
-| Stage | 状态 | Job ID | Start | End | Step | Best Val | 备注 |
+| 步骤 | 状态 | Job ID | Start | End | Step | Best Val | 备注 |
 |---|---|---|---|---|---|---|---|
-| Phase 1.5 代码实现 | ✅ **完成** | commits 4050336 + 81d2ec8 | 2026-05-22 | 2026-05-22 | — | — | pi0_config.py 加 action_head_cond_num_domains + freeze_mode "only_action_head_cond"; pi0.py 加 action_head_cond_hub + embed_suffix concat domain token; weight_loaders.py whitelist; 3 configs (xvla_actcond_stage1/2/3); stage3_kai_vis_joint.yaml. 旧 ckpt 完全兼容 |
-| Smoke test (kai+vis mixed) | ✅ **PASS** | uc01 actcond_smoke | 2026-05-22 04:21 | 2026-05-22 04:34 | 50 / 100 | — | uc01 8 A800 batch 16. **mu d0 absmax=7.35e-5 L2=5.57e-4** (grad flow OK), d1=0 (kai-only). PASS pattern 与 Soft Prompt 一致 |
-| C-Stage 1 kai warmup | 🔄 **v5 running** (v1-v4 failed) | t-20260522135557-msstb | 2026-05-22 13:55 UTC | — | — / 50k | — | Shanghai 16 A100. v1 (cl9ls) 因 ModuleNotFoundError etils — .venv python symlink 指向 /home/tim 容器看不到; v2-v4 因 GPFS metadata cache stale + JAX env var typo; v5 用容器内 uv install pattern + JAX_NUM_PROCESSES |
-| C-Stage 2 vis cond only | 待 C-Stage 1 | — | — | — | — / 5k | — | freeze backbone, only `action_head_cond_hub` trainable |
-| C-Stage 3 joint finetune | 待 C-Stage 2 | — | — | — | — / 50k | — | Unfreeze all, kai+vis 混训 |
-| **Track C 整体 (C3.0 终态)** | 🔄 C-Stage 1 running | — | 2026-05-22 | — | — | — | 编码完成 ✅. C-Stage 1 12-15h + Stage 2 1-2h + Stage 3 10-12h ≈ ~24h. 终 ckpt → **vis 真机评估** |
+| Phase 1.5 代码实现 | ✅ **完成** | commits 4050336 + 81d2ec8 + 5f18e3f | 2026-05-22 | 2026-05-22 | — | — | pi0_config / pi0.py / weight_loaders / configs / datasets_yaml 全套实现 + balanced sampling. 旧 ckpt 完全兼容 |
+| Smoke test (kai+vis mixed) | ✅ **PASS** | uc01 actcond_smoke | 2026-05-22 04:21 | 2026-05-22 04:34 | 50 / 100 | — | uc01 8 A800 batch 16. **mu d0 absmax=7.35e-5 L2=5.57e-4** (grad flow OK) |
+| ~~3-stage curriculum (S1/S2/S3)~~ | ❌ **2026-05-22 PM 弃用** | — | — | — | — | — | 用户决策: action expert 端信号路径短, 不需 curriculum. 改单阶段 |
+| **Single-stage balanced** | 🔄 running | t-20260522160619-flgmf | 2026-05-22 16:06 UTC | — | — / 50k | — | Shanghai 16 A100. kai_base + kai_dagger + vis × 7 joint (datasets_yaml). pi05_base init. ETA ~12h |
+| **Track C 整体 (C3.0 终态)** | 🔄 single-stage running | — | 2026-05-22 | — | — | — | 训练 ~12h. 终 ckpt → vis 真机评估 |
 
 > Track C (方案 A) 与 Track B 形成 1:1 对照:
 > - Soft Prompt: VLM input 端, 32 tokens, 信号经 24 层 paligemma attention
@@ -1099,6 +1277,8 @@ KAI0 原始数据从 sim01 上传 TOS, 各训练服务器从 TOS 拉到本地 mi
 
 | 日期 | 内容 |
 |---|---|
+| 2026-05-22 (深夜) | **§6.4 RTC / TAC 实时性方案对比与集成计划**: 整理 3 篇 RTC 论文 (Inference RTC 2506.07339, **TAC 2512.05964 ⭐**, A2C2 2509.23224) 维度对比; 确认本地 `pi0_rtc.py` 已 1:1 复刻 Inference RTC, 缺 TAC training path; 移植方案: Algorithm 1 复刻 (~6 行 compute_loss 改 + adaLN per-token broadcast), Pi0Config 加 `tac_enabled` flag, 0 新参数; 复现难易度 ⭐⭐⭐⭐⭐ (算法/超参全披露, 不依赖闭源 π0.6 ckpt); 加 §6.4.9 Phase 3 ablation 新增 E3.RTC1-RTC4 行 (Inference RTC / TAC / TAC+RTC / TAC+A2C2); A2C2 暂搁置 (等 TAC 结果) |
+| 2026-05-22 (PM 二次决策) | **Track C 改单阶段 balanced + Track B 终止 Stage 2/3 + E3.6 提交**: 经 §6.3.6 信号路径分析, Action Cond 方案 A 在 action expert input 端的信号路径远比 Soft Prompt 短 (4-8 层 vs 24 层), Stage 2 freeze-backbone 边际价值低 → 弃用 3-stage curriculum, 改单阶段 joint training (kai+vis 50k step, balanced sampling vis × 7). 训练时间 24h → 12h. Track B Stage 2 (6fr6c) + 3-stage curriculum 整体终止, 仅保留 Stage 1 ckpt 49999 作 paper E3.7 baseline. 新提交: E3.6 per-DS norm + no cond (Beijing 16 H20, n98pl) + Track C single-stage balanced (Shanghai 16 A100, flgmf) |
 | 2026-05-22 (晚) | **Track C 方案 A 选定 + B/C/D 搁置**: 4 候选 Action Head Cond 方案 (A Concat / B FiLM / C adaLN / D Cross-Attn) 详细对比后, 选 **方案 A** (Concat domain token at action expert input)。理由: 工程最简 + 与 Soft Prompt 形成 1:1 sparse-prefix 对照 (不同模块、相同设计模式), paper E3.7 vs E3.8 直接量化 "VLM 端 vs Action expert 端" 注入点选择。B/C/D 暂搁置作技术参考。E3.9 双端组合也搁置, 待单端结果出来再决定。Track C 训练用 kai+vis 跨本体混合, 真机评估用 vis B 真机。§6.3 / §6.2 / §3.5.7 / §10.4 / §10.6 / 决策点 2 同步更新 |
 | 2026-05-22 (中) | **Tri-track + Action Head Cond 启用 + EE-relative deprioritize**: §6.3 新增 Track C Action Head Conditioning Embedding (含 4 候选方案) 与 Track B Soft Prompt 互补; §10.6 Track C 状态跟踪表; §3.5.7 Phase 3 ablation 新增 E3.8 / E3.9; §10.4 ablation 表新增 C3.0/E3.7/E3.8/E3.9 列; §10.1 E0.5 + Phase 3 E3.8 delta EE 全部取消; §5 整节标 deprioritized 保留作参考; §7 三轨架构图. SAM2 (E0.3) 状态 ✅ done. 资源更新: robot-task 20 A100 free 已可用 |
 | 2026-05-21 (深夜) | **§3.5 vis operator + 时间漂移分析**: 澄清 ztm+lym 同一人 (G1=872 ep, G2=gsy=23 ep); G1 内时间漂移 0.47 ≈ cross-robot drift; gsy 对 norm 影响微弱 (0.08 rad). **§3.6 混训策略 6 方案 + 实证一致性**: per-dataset norm 实测 MMD 降低 90.7% (0.06→0.006), **修正方案 B 评级 ⭐⭐→⭐⭐⭐ (实际可行!)**; 识别残余 10% 来自 higher moments + joint correlation; 推荐 layered (E + C + D); §3.6.7 加 E3.5-E3.8 ablation 验证 naive joint vs per-DS norm |
