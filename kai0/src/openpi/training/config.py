@@ -1160,6 +1160,38 @@ _CONFIGS = [
     ),
 
     # ===================================================================================
+    # E3.6 — per-dataset norm + NO conditioning (2026-05-22).
+    # Replicates "mixed_pure2_1800 failure hypothesis fix" §3.5.5: per-DS norm alone
+    # might rescue cross-embodiment training without needing soft/action-cond.
+    # paper ablation E3.6 (vs E3.5 naive joint norm, vs E3.7 +Soft, vs E3.8 +Action Cond).
+    # ===================================================================================
+    TrainConfig(
+        name="xvla_e3_6_per_ds_norm_no_cond",
+        model=pi0_config.Pi0Config(pi05=True),  # no soft prompt, no action cond
+        data=LerobotAgilexDataConfig(
+            # repo_id used only for norm_stats discovery; actual data flows via datasets_yaml.
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_base",
+            datasets_yaml="/vePFS/tim/workspace/deepdive_kai0/xvla/data/e3_6_no_cond_kai_vis_joint.yaml",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS/tim/workspace/openpi_cache/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=16,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
+
+    # ===================================================================================
     # Track C: Action Head Conditioning Token (方案 A) — 2026-05-22 选定
     # Concat 1 learnable domain token to action expert input. paligemma unaware of domain.
     # 1:1 sparse-prefix 对照 Track B Soft Prompt (32 tokens in VLM input).

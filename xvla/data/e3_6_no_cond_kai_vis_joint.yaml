@@ -1,0 +1,7 @@
+# E3.6: per-dataset norm + no conditioning. kai+vis joint, all domain_id=0
+# (no domain distinction — naive single model, but per-source norm via dataloader).
+# Replicates "mixed_pure2_1800 with per-dataset norm fix" hypothesis (§3.5.5).
+roots:
+  - {root: /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_base, domain_id: 0}
+  - {root: /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_dagger, domain_id: 0}
+  - {root: /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged, domain_id: 0}
