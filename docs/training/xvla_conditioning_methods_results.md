@@ -62,25 +62,25 @@
 
 | Config | Job ID | Init | 数据 | Step | num_workers | rate | Best Val MAE@1 (per-source) | 真机平滑度 | 真机成功率 | 备注 |
 |---|---|---|---|---:|---:|---:|---|---:|---:|---|
-| **Stage 1**: `xvla_stage1_kai_warmup` | t-20260521154828-76d44 (Beijing 16 H20) | pi05_base + soft_prompt_hub init N(0, 0.02) | kai0_base+dagger (domain_id=0) | **49999 / 50k ✅ done** | 32 | 1.4 s/it | kai0_base: **0.0083** / kai0_dagger: **0.0136** | TBD | TBD | ✅ Step 2000 ckpt mu PASS (d0 absmax=1.15e-3). Offline eval 完成 2026-05-22 11:51 (gf3 1 H20 sequential), dataset_id=0 |
+| **Stage 1**: `xvla_stage1_kai_warmup` | t-20260521154828-76d44 (Beijing 16 H20) | pi05_base + soft_prompt_hub init N(0, 0.02) | kai0_base+dagger (domain_id=0) | **49999 / 50k ✅ done** | 32 | 1.4 s/it | kai0_base: **0.0083** / kai0_dagger: **0.0136** | TBD | TBD | ✅ Step 2000 ckpt mu PASS (d0 absmax=1.15e-3). Offline eval 完成 2026-05-22 11:51 (gf3 1 H20 sequential), dataset_id=0. **⚠️ 2026-05-22 PM: Track B 终止后续推进, 仅保留 Stage 1 作 paper E3.7 baseline** |
+| ~~Stage 2/3~~ | ❌ **2026-05-22 PM 终止** | — | — | — | — | — | — | — | 用户决策不再推进 Stage 2/3, Stage 1 ckpt 49999 用于 paper E3.7 single-end baseline |
 | **Stage 2**: `xvla_stage2_soft_prompt_only_vis` | t-20260522113931-vc7q8 (Beijing 16 H20, auto-submitted) | Stage 1 ckpt 49999 | vis_v2_merged (domain_id=1) | running ~0 / 5k | 32 | TBD | TBD | TBD | TBD | Freeze backbone, only `soft_prompt_hub` trainable. LR 5e-4, batch 128, 16 H20, ETA ~1-2h. Auto-submit triggered 2026-05-22 11:39 |
 | **Stage 3**: `xvla_stage3_full_finetune_vis` | (Pending Stage 2) | Stage 2 ckpt | kai + vis 混训 | — / 50k | 32 | TBD | TBD | TBD | TBD | Unfreeze all, joint finetune. ETA ~12h |
 | **B3.0**: Track B 最终 ckpt (=Stage 3 49999) | (Pending) | — | — | — | — | — | TBD | TBD | TBD | Track B 最终模型用于 paper ablation E3.7 |
 
-### 2.3 Action Head Conditioning Embedding (Track C — 方案 A 选定)
+### 2.3 Action Head Conditioning Embedding (Track C — 单阶段 balanced 修订 2026-05-22 PM)
 
-> **方案 A 选定 (2026-05-22)**: 4 候选 (A Concat / B FiLM / C adaLN / D Cross-Attn) 中选 **A (Concat domain token at action expert input)**。B/C/D 暂搁置。
-> **真机评估目标**: vis (B 真机). 训练数据: kai + vis 跨本体混合。
-> 设计原理详见 `cross_embodiment_data_reuse_plan.md` §6.3.1。
+> **方案 A 选定 + 单阶段修订**: 4 候选 (A Concat / B FiLM / C adaLN / D Cross-Attn) 选 A。**2026-05-22 PM**: 经 §6.3.6 信号路径分析, action expert 端注入信号短 (4-8 层), 不需 3-stage curriculum, 改单阶段 joint。Track B 同期决定保留 Stage 1 不推进。
+> **真机评估目标**: vis (B 真机). 训练数据: kai + vis 跨本体混合 (vis × 7 balanced).
+> 设计原理详见 `cross_embodiment_data_reuse_plan.md` §6.3.1 + §6.3.6。
 
-| Config | Job ID | Init | 数据 | Step | num_workers | rate | Best Val MAE@1 (per-source) | 真机平滑度 | 真机成功率 (B 真机) | 备注 |
+| 步骤 | Job ID | Init | 数据 | Step | num_workers | rate | Best Val MAE@1 (per-source) | 真机平滑度 | 真机成功率 (B 真机) | 备注 |
 |---|---|---|---|---:|---:|---:|---|---:|---:|---|
-| Phase 1.5 代码 | — | — | — | — | — | — | — | — | — | 待实现: `pi0_config.py: action_head_cond_num_domains` + `pi0.py: action_head_cond_hub: nnx.Embed(num_domains, action_expert_width)` + action expert input concat 1 domain token. ~半天 编码 |
-| **Smoke test** | (Pending code) | pi05_base | kai+vis mix (1-2 ep × 1k step) | — / 1k | 16 | — | — | — | — | uc01 1-2 GPU, 验证 `mu(action_head_cond_hub)` non-zero (与 Soft Prompt PASS 同 pattern) |
-| **C-Stage 1**: kai warmup | (Pending) | pi05_base + action_head_cond_hub init N(0, 0.02) | kai0_base+dagger (domain_id=0) | — / 50k | 32 | — | — | — | — | Shanghai 16 A100 (推荐, 与 Track B Beijing 不抢资源), ETA ~12-15h |
-| **C-Stage 2**: vis cond only | (Pending) | C-Stage 1 ckpt | vis_v2_merged (domain_id=1) | — / 5k | 32 | — | — | — | — | Freeze backbone, only `action_head_cond_hub` trainable, LR 5e-4 |
-| **C-Stage 3**: joint finetune | (Pending) | C-Stage 2 ckpt | kai + vis 混训 | — / 50k | 32 | — | — | TBD | TBD | Unfreeze all. 终 ckpt → vis 真机评估 |
-| **C3.0**: Track C 最终 | (Pending) | — | — | — | — | — | TBD | TBD | TBD | paper ablation E3.8 baseline, 与 Track B B3.0 (Soft Prompt) 1:1 对照 |
+| Phase 1.5 代码 | commits 4050336+81d2ec8+5f18e3f | — | — | — | — | — | — | — | — | ✅ pi0_config + pi0.py + weight_loaders + configs + balanced datasets_yaml 全部完成 |
+| **Smoke test** | uc01 actcond_smoke | pi05_base | kai_base (1-2 ep × 100 step) | 50 / 100 | 4 | — | — | — | — | ✅ uc01 8 A800 batch 16. mu d0 absmax=7.35e-5 PASS |
+| ~~3-stage C-S1/S2/S3~~ | — | — | — | — | — | — | — | — | — | **2026-05-22 PM 弃用**, 改单阶段 |
+| **Single-stage balanced** | t-20260522160619-flgmf | pi05_base + action_head_cond_hub init N(0, 0.02) | kai_base + kai_dagger + vis × 7 (balanced via datasets_yaml replication, 49/51 sample ratio) | — / 50k | 32 | — | — | — | — | 🔄 Shanghai 16 A100. ETA ~12h. 终 ckpt → vis 真机评估 |
+| **C3.0**: Track C 最终 | (Pending) | — | — | — | — | — | TBD | TBD | TBD | paper ablation E3.8 baseline, 与 Track B B3.0 (Stage 1 Soft Prompt) 对照 |
 
 ### 2.4 双端组合 (Soft Prompt + Action Head Cond) — **2026-05-22 暂搁置**
 
