@@ -33,9 +33,25 @@
 
 ### 2.1 Hard Prompt (Track A baseline)
 
-| Config | Job ID / 路径 | Init | 数据 | Step | num_workers | rate | Best Val MAE@1 | 真机平滑度 | 真机成功率 | 备注 |
-|---|---|---|---|---:|---:|---:|---:|---:|---:|---|
-| `xvla_exp1_hard_prompt_merged_uc` | uc01 local (49999 ckpt) | pi05_base | kai0_base+dagger + vis_v2_merged = **7407 ep** | 49999 / 50k | 64 (initial) / 16 (resume) | 1.8 s/it (initial) / 5 s/it (resume from 42k) | TBD (需 offline eval) | TBD | TBD | 训练完成 2026-05-22 05:57 (Beijing), 22h elapsed total + 6h gap resume. ckpt 42GB at `/data/shared/ubuntu/local_ckpts/xvla_exp1_hard_prompt_merged_uc/xvla_exp1_hard_prompt_merged_uc/49999/` |
+| Config | Job ID / 路径 | Init | 数据 | Step | num_workers | rate | Best Val MAE@1 (per-source) | 真机平滑度 | 真机成功率 | 备注 |
+|---|---|---|---|---:|---:|---:|---|---:|---:|---|
+| `xvla_exp1_hard_prompt_merged_uc` | uc01 local (49999 ckpt) | pi05_base | kai0_base+dagger + vis_v2_merged = **7407 ep** | 49999 / 50k | 64 (initial) / 16 (resume) | 1.8 s/it (initial) / 5 s/it (resume from 42k) | kai0_base: **0.0077** / kai0_dagger: **0.0130** / vis_v2_merged: **0.0082** | TBD | TBD | 训练完成 2026-05-22 05:57 (Beijing). Offline eval 完成 2026-05-22 11:35 (Beijing) on uc01 GPU 0/1/2 并发, 50 ep × 20 query/ep. ckpt 42GB at `/data/shared/ubuntu/local_ckpts/xvla_exp1_hard_prompt_merged_uc/xvla_exp1_hard_prompt_merged_uc/49999/` |
+
+#### 2.1.1 Hard Prompt 三数据集 per-horizon Val MAE (49999 ckpt, 2026-05-22)
+
+| 数据集 | n_ep | MAE@1 | MAE@10 | MAE@25 | MAE@50 |
+|---|---:|---:|---:|---:|---:|
+| kai0_base (官方) | 50 | **0.0077** ⭐ 最低 | 0.0141 | 0.0216 | 0.0292 |
+| kai0_dagger (官方) | 50 | **0.0130** ❌ 最差 (+69% vs base) | 0.0267 | 0.0435 | 0.0597 |
+| vis_v2_merged (自建) | 50 | **0.0082** | 0.0188 | 0.0329 | 0.0517 |
+
+> **观察**: dagger 在所有 horizon 都明显差 — 验证 cross_embodiment_data_reuse_plan.md 决策点 1 "dagger 不引入 policy" 是合理的。vis 仅微差于 base (+6.5% @1), hard prompt 对自建数据 transfer OK。
+>
+> **参考对照** (00_training_history.md):
+> - 老 SOTA `mixed_pure2_1800_6000` (vis val): MAE@1=0.0085 — exp1 vis 0.0082 微胜 ✓
+> - NEW SOTA `task_a_new_pure_200_new_norm` (200 ep -new): MAE@1=0.0065 — exp1 vis 0.0082 差 +21% (kai 数据"拖累" prior)
+
+> ⚠️ **Val 偏误差注**: val 是 "last 50 ep of each source" — 与训练集近似分布, 实际 generalization 评估会更难。OOD 真机评估是唯一可靠 ground truth。
 
 ### 2.2 Soft Prompt (Track B — X-VLA style)
 
