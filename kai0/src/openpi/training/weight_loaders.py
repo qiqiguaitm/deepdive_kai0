@@ -52,10 +52,12 @@ class CheckpointWeightLoader(WeightLoader):
         loaded_params = _model.restore_params(download.maybe_download(self.params_path), restore_type=np.ndarray)
         # Whitelist for keys present in the *model* but absent in the *ckpt*: keep the
         # model's init for these (instead of erroring). Currently:
-        #   .*lora.*            — LoRA adapter ranks
-        #   .*soft_prompt_hub.* — X-VLA soft prompt hub (new keys when warming up
-        #                         from a pi05 base ckpt that predates the hub)
-        return _merge_params(loaded_params, params, missing_regex=".*(lora|soft_prompt_hub).*")
+        #   .*lora.*                  — LoRA adapter ranks
+        #   .*soft_prompt_hub.*       — X-VLA soft prompt hub (Track B, new keys when
+        #                                warming up from a pi05 base ckpt that predates it)
+        #   .*action_head_cond_hub.*  — Track C Action Head Cond Token (方案 A), same
+        #                                pattern as soft_prompt_hub
+        return _merge_params(loaded_params, params, missing_regex=".*(lora|soft_prompt_hub|action_head_cond_hub).*")
 
 
 @dataclasses.dataclass(frozen=True)
