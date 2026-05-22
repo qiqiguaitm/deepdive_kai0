@@ -1260,6 +1260,37 @@ _CONFIGS = [
         inline_eval_dataset_id=1,
     ),
 
+    # 同上但 use_delta_joint_actions=True (Action Cond × delta 变体, 2026-05-22 PM 决策).
+    # 与 xvla_actcond_single_stage_joint (absolute) 对比 delta 表示是否帮 Action Cond 路线。
+    TrainConfig(
+        name="xvla_actcond_single_stage_joint_delta",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_head_cond_num_domains=2,
+        ),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_base",
+            datasets_yaml="/vePFS/tim/workspace/deepdive_kai0/xvla/data/stage3_kai_vis_joint_balanced.yaml",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=True,  # ← 关键变化: delta joints (gripper 仍 absolute via mask)
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS/tim/workspace/openpi_cache/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=16,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+        inline_eval_dataset_id=1,
+    ),
+
     # ⚠️ 以下 3-stage configs (xvla_actcond_stage1/2/3) 保留作技术参考, 2026-05-22
     # 用户决策走 single-stage joint, 不再使用 3-stage curriculum 路线。
 
