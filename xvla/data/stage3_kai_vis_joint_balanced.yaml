@@ -1,0 +1,14 @@
+# Track C single-stage balanced: vis × 7 to roughly match kai ep count.
+# kai_base 3055 + kai_dagger 3457 = 6512 ep; vis × 7 = 6265 ep → 49/51 split.
+# 通过 ConcatDataset 重复添加同路径实现 over-sampling (PyTorch ConcatDataset
+# 不去重, 重复 ep 会被采样器视为多份索引)
+roots:
+  - {root: /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_base, domain_id: 0}
+  - {root: /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_dagger, domain_id: 0}
+  - {root: /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged, domain_id: 1}
+  - {root: /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged, domain_id: 1}
+  - {root: /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged, domain_id: 1}
+  - {root: /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged, domain_id: 1}
+  - {root: /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged, domain_id: 1}
+  - {root: /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged, domain_id: 1}
+  - {root: /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged, domain_id: 1}

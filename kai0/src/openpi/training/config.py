@@ -1198,6 +1198,42 @@ _CONFIGS = [
     # See docs/deployment/cross_embodiment_data_reuse_plan.md §6.3 for design rationale.
     # ===================================================================================
 
+    # Track C single-stage (2026-05-22 决策修订): 直接 kai+vis joint 50k from pi05_base.
+    # 用户决策放弃 3-stage curriculum (经讨论 action expert 端注入 Stage 2 边际价值低,
+    # 训练时间减半且实证性价比更高). domain_id=0 (kai) / 1 (vis) 通过 datasets_yaml 区分.
+    TrainConfig(
+        name="xvla_actcond_single_stage_joint",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_head_cond_num_domains=2,
+        ),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_base",
+            # Balanced sampling: vis × 7 to match kai 6512 ep, 49/51 split (避免 kai dominate)
+            datasets_yaml="/vePFS/tim/workspace/deepdive_kai0/xvla/data/stage3_kai_vis_joint_balanced.yaml",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS/tim/workspace/openpi_cache/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=16,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+        inline_eval_dataset_id=1,
+    ),
+
+    # ⚠️ 以下 3-stage configs (xvla_actcond_stage1/2/3) 保留作技术参考, 2026-05-22
+    # 用户决策走 single-stage joint, 不再使用 3-stage curriculum 路线。
+
     # C-Stage 1 — kai warmup with action_head_cond_hub (50k step on kai0_base+dagger).
     # Init: pi05_base. action_head_cond_hub[0] (kai) gets trained, slot[1] (vis) random.
     TrainConfig(
