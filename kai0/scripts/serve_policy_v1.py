@@ -83,12 +83,19 @@ _base_policy = None  # type: ignore[assignment]
 
 
 def _resize_image_to_224(img_uint8: np.ndarray) -> np.ndarray:
-    """Normalize image to HxWx3 uint8 224×224.
+    """Resize HxWx3 uint8 image to 224×224 using aspect-preserving pad.
+
+    Matches kai0 training image transform (transforms.py:255 + image_tools.py
+    resize_with_pad): keep aspect ratio, pad to 224 with zeros. The legacy
+    PIL.BILINEAR-direct-resize STRETCHED 640×480→224×224, distorting aspect
+    and moving the input out of training distribution; this version produces
+    224×168 + 28px black pad top/bottom for 640×480, matching what the vision
+    encoder saw during training. Equivalent to openpi/shared/image_tools.py
+    `resize_with_pad` (the torch helper has a uint8 F.interpolate bug, so we
+    do it in PIL — same math, no GPU round-trip).
 
     Accepts both HWC (H,W,3) and CHW (3,H,W) input. kai0 ROS2 client sends
-    CHW per policy_inference_node.py:1963 (imgs.transpose(2,0,1) into obs);
-    openpi JAX path absorbs it via input_transforms but V1Policy needs to
-    normalize layout here.
+    CHW per policy_inference_node.py:1963 (imgs.transpose(2,0,1) into obs).
     """
     from PIL import Image as _PIL_Image
 
@@ -97,13 +104,27 @@ def _resize_image_to_224(img_uint8: np.ndarray) -> np.ndarray:
     if arr.ndim == 3 and arr.shape[0] == 3 and arr.shape[1] > 3 and arr.shape[2] > 3:
         arr = np.ascontiguousarray(arr.transpose(1, 2, 0))  # CHW → HWC
 
-    # If already 224×224×3 after normalization, return as-is
+    # If already 224×224×3, return as-is
     if arr.ndim == 3 and arr.shape[:2] == (224, 224) and arr.shape[2] == 3:
         return arr
 
-    pil = _PIL_Image.fromarray(arr)
-    pil = pil.resize((224, 224), _PIL_Image.BILINEAR)
-    return np.asarray(pil, dtype=np.uint8)
+    H, W = arr.shape[:2]
+    # Match jax.image.resize+pad math (image_tools.py:25-43): use max ratio.
+    ratio = max(W / 224.0, H / 224.0)
+    rh = int(H / ratio)
+    rw = int(W / ratio)
+    pil = _PIL_Image.fromarray(arr).resize((rw, rh), _PIL_Image.BILINEAR)
+    resized = np.asarray(pil, dtype=np.uint8)
+    # Symmetric pad to 224 (pad0=floor, pad1=floor+remainder), zeros.
+    pad_h0, rem_h = divmod(224 - rh, 2)
+    pad_h1 = pad_h0 + rem_h
+    pad_w0, rem_w = divmod(224 - rw, 2)
+    pad_w1 = pad_w0 + rem_w
+    return np.pad(
+        resized,
+        ((pad_h0, pad_h1), (pad_w0, pad_w1), (0, 0)),
+        constant_values=0,
+    )
 
 
 def _normalize_image_uint8_to_bf16(img_uint8: np.ndarray) -> torch.Tensor:
@@ -136,13 +157,28 @@ class SentencepieceStateEncoder:
         v1_infer,  # Pi05InferenceTuned
         tokenizer_model_path: str,
         embedding_weight: torch.Tensor,
-        state_norm_mean: np.ndarray,
-        state_norm_std: np.ndarray,
+        state_norm: dict[str, np.ndarray | None],
+        model_state_dim: int = 32,
     ):
+        """Build a kai0 prefix encoder.
+
+        state_norm must come from load_norm_stats()['state']: a dict with keys
+        {mean, std, q01, q99}, **must be model_state_dim-long** (training norm
+        stats are computed on padded state). q01/q99 may be None for legacy
+        z-score-only files. When q01/q99 are present (kai0 pi05 default),
+        state norm uses quantile to match training (use_quantile_norm=True for
+        PI05/PI05_RTC); otherwise falls back to z-score.
+
+        model_state_dim is the action_dim of the underlying model (pi05 = 32).
+        Raw state is zero-padded to this BEFORE normalize+digitize, matching
+        agilex_policy.py:76 + training/config.py:152-164 (TokenizePrompt sees
+        padded state with discrete_state_input=True for pi05).
+        """
         import sentencepiece
 
         self.v1 = v1_infer
         self.tokenizer = sentencepiece.SentencePieceProcessor(model_file=tokenizer_model_path)
+        self._model_state_dim = model_state_dim
 
         # PaliGemma embedding table (from V1 pkl 'embedding_weight').
         # V1 doesn't keep it in self.weights (only baked language_embeds), so we
@@ -159,12 +195,35 @@ class SentencepieceStateEncoder:
             embedding_weight = embedding_weight.to(torch.bfloat16)
         self._embed_w = embedding_weight  # (vocab, 2048) bf16 cuda
 
-        # State norm (used to bring raw joint state into [-1, 1] before discretization)
-        self._s_mean = torch.from_numpy(state_norm_mean.astype(np.float32)).cuda()
-        self._s_std = torch.from_numpy(state_norm_std.astype(np.float32)).cuda()
-        # Guard zero std
-        self._s_std = torch.where(self._s_std < 1e-6, torch.ones_like(self._s_std), self._s_std)
-        self._state_dim = len(state_norm_mean)
+        # ── State norm setup ──
+        # Auto-detect quantile vs z-score by presence of q01/q99 keys.
+        # kai0 pi05 trains with quantile → both q01/q99 are populated.
+        # Use FULL model_state_dim (32 for pi05) — training normalizes the
+        # padded state, so dims 14-31 use real (zero-ish) q01/q99 entries.
+        q01 = state_norm.get("q01")
+        q99 = state_norm.get("q99")
+        self._use_quantile = (q01 is not None) and (q99 is not None)
+        if self._use_quantile:
+            if len(q01) < model_state_dim:
+                # Pad norm stats (rare; norm_stats usually already model_action_dim)
+                q01 = np.pad(q01, (0, model_state_dim - len(q01)), constant_values=0.0)
+                q99 = np.pad(q99, (0, model_state_dim - len(q99)), constant_values=0.0)
+            self._s_q01 = torch.from_numpy(q01[:model_state_dim].astype(np.float32)).cuda()
+            self._s_q99 = torch.from_numpy(q99[:model_state_dim].astype(np.float32)).cuda()
+            # Guard zero span (1e-6 follows openpi transforms.py normalize_quantile)
+            span = self._s_q99 - self._s_q01
+            self._s_q99 = torch.where(span.abs() < 1e-6, self._s_q01 + 1.0, self._s_q99)
+            logger.info(f"  State norm: QUANTILE (q01/q99) — matches kai0 pi05 training; pad state→{model_state_dim}")
+        else:
+            mean = state_norm["mean"]
+            std = state_norm["std"]
+            if len(mean) < model_state_dim:
+                mean = np.pad(mean, (0, model_state_dim - len(mean)), constant_values=0.0)
+                std = np.pad(std, (0, model_state_dim - len(std)), constant_values=1.0)
+            self._s_mean = torch.from_numpy(mean[:model_state_dim].astype(np.float32)).cuda()
+            self._s_std = torch.from_numpy(std[:model_state_dim].astype(np.float32)).cuda()
+            self._s_std = torch.where(self._s_std < 1e-6, torch.ones_like(self._s_std), self._s_std)
+            logger.info(f"  State norm: Z-SCORE (mean/std) — fallback (no q01/q99 in norm_stats); pad state→{model_state_dim}")
         self.max_prompt_len = v1_infer.max_prompt_len
 
     def encode(self, task_prompt: str, state_raw: np.ndarray) -> tuple[torch.Tensor, int]:
@@ -177,19 +236,31 @@ class SentencepieceStateEncoder:
         Returns:
             (embeds, prompt_len) — embeds shape (prompt_len, 2048) bf16 cuda
         """
-        # 1. Normalize state → [-1, 1] approx using norm_stats
-        s = torch.from_numpy(np.asarray(state_raw, dtype=np.float32)).cuda()
-        if s.numel() != self._state_dim:
-            # truncate/pad to declared state_dim
-            if s.numel() < self._state_dim:
-                pad = torch.zeros(self._state_dim - s.numel(), device="cuda")
-                s = torch.cat([s, pad])
-            else:
-                s = s[: self._state_dim]
-        s_norm = (s - self._s_mean) / self._s_std  # ~ [-1, 1]
+        # 1. Pad raw state to model_state_dim BEFORE normalize+digitize.
+        # Training (agilex_policy.py:76) pads to model.action_dim (32 for pi05)
+        # BEFORE Normalize → TokenizePrompt sees a 32-dim state and produces
+        # 32 state tokens. Truncating to raw 14 here was a bug: prompt was
+        # shorter than training, model received OOD prefix.
+        s_np = np.asarray(state_raw, dtype=np.float32).reshape(-1)
+        if s_np.shape[0] < self._model_state_dim:
+            s_np = np.concatenate([
+                s_np,
+                np.zeros(self._model_state_dim - s_np.shape[0], dtype=np.float32),
+            ])
+        else:
+            s_np = s_np[: self._model_state_dim]
+        # agilex_policy.py:104-106 — clamp out-of-range joint values to 0 (safety)
+        s_np = np.where(s_np > np.pi, 0.0, s_np)
+        s_np = np.where(s_np < -np.pi, 0.0, s_np)
+        s = torch.from_numpy(s_np).cuda()
+        if self._use_quantile:
+            # (s - q01) / (q99 - q01) * 2 - 1   (matches openpi transforms.py:210)
+            s_norm = (s - self._s_q01) / (self._s_q99 - self._s_q01 + 1e-6) * 2.0 - 1.0
+        else:
+            s_norm = (s - self._s_mean) / self._s_std
         s_norm_np = s_norm.detach().cpu().numpy()
 
-        # 2. Discretize to 256 bins (kai0 convention)
+        # 2. Discretize to 256 bins (kai0 convention). 32 state tokens for pi05.
         discretized = np.digitize(s_norm_np, bins=self._BIN_EDGES) - 1
         discretized = np.clip(discretized, 0, 255)
         state_str = " ".join(map(str, discretized.astype(int).tolist()))
@@ -267,21 +338,37 @@ class V1Policy:
     def __init__(
         self,
         v1_infer,  # Pi05InferenceTuned
-        action_norm_mean: np.ndarray,
-        action_norm_std: np.ndarray,
+        action_norm: dict[str, np.ndarray | None],
         action_dim: int,
         state_encoder: "SentencepieceStateEncoder | None" = None,
         default_prompt: str = "Flatten and fold the cloth",
         image_keys: tuple[str, ...] = ("base_0_rgb", "left_wrist_0_rgb", "right_wrist_0_rgb"),
         metadata: dict[str, Any] | None = None,
     ):
+        """action_norm comes from load_norm_stats()['actions'], a dict with
+        {mean, std, q01, q99}. q01/q99 trigger quantile denorm (matches
+        transforms.py:240-246), else fall back to z-score (a*std+mean)."""
         self._v1 = v1_infer
         self._action_dim = action_dim
-        # Save denorm stats as torch fp32 cuda for fast apply
-        self._a_mean = torch.from_numpy(action_norm_mean[:action_dim].astype(np.float32)).cuda()
-        self._a_std = torch.from_numpy(action_norm_std[:action_dim].astype(np.float32)).cuda()
-        # Guard against zero std
-        self._a_std = torch.where(self._a_std < 1e-6, torch.ones_like(self._a_std), self._a_std)
+        # ── Action denorm setup ──
+        # Auto-detect quantile vs z-score by presence of q01/q99 keys, matching
+        # how the model was trained (kai0 pi05 → quantile).
+        q01 = action_norm.get("q01")
+        q99 = action_norm.get("q99")
+        self._use_quantile = (q01 is not None) and (q99 is not None)
+        if self._use_quantile:
+            self._a_q01 = torch.from_numpy(q01[:action_dim].astype(np.float32)).cuda()
+            self._a_q99 = torch.from_numpy(q99[:action_dim].astype(np.float32)).cuda()
+            span = self._a_q99 - self._a_q01
+            self._a_q99 = torch.where(span.abs() < 1e-6, self._a_q01 + 1.0, self._a_q99)
+            logger.info(f"  Action denorm: QUANTILE (q01/q99) — matches kai0 pi05 training")
+        else:
+            mean = action_norm["mean"]
+            std = action_norm["std"]
+            self._a_mean = torch.from_numpy(mean[:action_dim].astype(np.float32)).cuda()
+            self._a_std = torch.from_numpy(std[:action_dim].astype(np.float32)).cuda()
+            self._a_std = torch.where(self._a_std < 1e-6, torch.ones_like(self._a_std), self._a_std)
+            logger.info(f"  Action denorm: Z-SCORE (mean/std) — fallback (no q01/q99)")
         self._image_keys = image_keys
         self._metadata = metadata or {"backend": "v1_triton", "version": 2}
         self._chunk_size = v1_infer.chunk_size
@@ -373,10 +460,15 @@ class V1Policy:
         torch.cuda.synchronize()
         infer_ms = (time.monotonic() - t_infer) * 1000
 
-        # 5. Take first action_dim, denormalize, to numpy
+        # 5. Take first action_dim, denormalize, to numpy.
+        # Quantile path (kai0 pi05 default): (a+1)/2 * (q99-q01) + q01  matches
+        # openpi transforms.py:246; z-score fallback: a*std + mean.
         t_post = time.monotonic()
         a = action_chunk[:, : self._action_dim].to(torch.float32)  # (chunk_size, action_dim)
-        a = a * self._a_std[None, :] + self._a_mean[None, :]
+        if self._use_quantile:
+            a = (a + 1.0) / 2.0 * (self._a_q99[None, :] - self._a_q01[None, :] + 1e-6) + self._a_q01[None, :]
+        else:
+            a = a * self._a_std[None, :] + self._a_mean[None, :]
         actions_np = a.detach().cpu().numpy()  # (chunk_size, action_dim) float32
         postproc_ms = (time.monotonic() - t_post) * 1000
 
@@ -434,19 +526,26 @@ def load_v1_inference(pkl_path: str, num_views: int, chunk_size: int):
     return infer, embedding_weight
 
 
-def load_norm_stats(norm_stats_path: str) -> dict[str, tuple[np.ndarray, np.ndarray]]:
-    """Load state + action mean/std from openpi-format norm_stats.json.
+def load_norm_stats(norm_stats_path: str) -> dict[str, dict[str, np.ndarray]]:
+    """Load state + action norm stats from openpi-format norm_stats.json.
+
+    Loads BOTH z-score (mean/std) AND quantile (q01/q99) when present so caller
+    can pick the schema matching training. kai0 pi05 training uses quantile
+    (per src/openpi/training/config.py:352 — use_quantile_norm True for PI05/
+    PI05_RTC), so pi05 ckpts need quantile path; pi0 ckpts need z-score.
 
     Format (per kai0/assets/<asset>/<repo>/norm_stats.json):
-      {"norm_stats": {"state": {"mean": [...], "std": [...]},
-                      "actions": {"mean": [...], "std": [...]}}}
+      {"norm_stats": {"state":   {"mean": [...], "std": [...], "q01": [...], "q99": [...]},
+                      "actions": {"mean": [...], "std": [...], "q01": [...], "q99": [...]}}}
 
-    Returns: {"state": (mean, std), "actions": (mean, std)}
+    Returns: {"state":   {"mean": np, "std": np, "q01": np|None, "q99": np|None},
+              "actions": {...}}
+    Downstream auto-detects quantile via presence of q01/q99.
     """
     with open(norm_stats_path) as f:
         data = json.load(f)
     norm = data["norm_stats"]
-    out: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    out: dict[str, dict[str, np.ndarray]] = {}
     for key in ("state", "actions"):
         if key not in norm:
             if key == "actions":
@@ -455,10 +554,12 @@ def load_norm_stats(norm_stats_path: str) -> dict[str, tuple[np.ndarray, np.ndar
         entry = norm[key]
         if "mean" not in entry or "std" not in entry:
             raise ValueError(f"norm_stats['{key}'] needs mean+std (have: {list(entry.keys())})")
-        out[key] = (
-            np.asarray(entry["mean"], dtype=np.float32),
-            np.asarray(entry["std"], dtype=np.float32),
-        )
+        out[key] = {
+            "mean": np.asarray(entry["mean"], dtype=np.float32),
+            "std": np.asarray(entry["std"], dtype=np.float32),
+            "q01": np.asarray(entry["q01"], dtype=np.float32) if "q01" in entry else None,
+            "q99": np.asarray(entry["q99"], dtype=np.float32) if "q99" in entry else None,
+        }
     return out
 
 
@@ -504,8 +605,14 @@ def main() -> None:
     parser.add_argument("--state-dim", type=int, default=14,
                         help="state dim used for sentencepiece discretization (Phase 2)")
     parser.add_argument("--image-keys", nargs="+",
-                        default=["base_0_rgb", "left_wrist_0_rgb", "right_wrist_0_rgb"],
-                        help="Camera keys in obs['images'] dict, in stack order")
+                        default=["top_head", "hand_left", "hand_right"],
+                        help="Camera keys in obs['images'] dict, in stack order. "
+                             "Default matches kai0 ROS2 client (policy_inference_node._get_observation). "
+                             "Order positions IS the V1 model channel order — must match training "
+                             "(agilex_policy: top_head→view0, hand_left→view1, hand_right→view2). "
+                             "Wrong order = left/right wrist cameras swapped, model gets mirrored world. "
+                             "Use ['base_0_rgb','left_wrist_0_rgb','right_wrist_0_rgb'] only for openpi "
+                             "official agilex client format.")
     parser.add_argument("--warmup-iters", type=int, default=3)
     args = parser.parse_args()
 
@@ -523,10 +630,11 @@ def main() -> None:
     # 1. Load V1 inference + extract embedding_weight (for Phase 2)
     v1_infer, embedding_weight = load_v1_inference(args.pkl, args.num_views, args.chunk_size)
 
-    # 2. Load state + action norm stats
+    # 2. Load state + action norm stats (mean/std + q01/q99 if present)
     norm = load_norm_stats(args.norm_stats)
-    a_mean, a_std = norm["actions"]
-    logger.info(f"Action norm: dim={len(a_mean)} (taking first {args.action_dim})")
+    a_stats = norm["actions"]
+    a_dim_n = len(a_stats["mean"])
+    logger.info(f"Action norm: dim={a_dim_n} (taking first {args.action_dim})")
 
     # 3. Build sentencepiece state encoder (Phase 2) if tokenizer provided
     state_encoder = None
@@ -542,18 +650,17 @@ def main() -> None:
                 "(or use expand_v1_pkl_for_phase2.py if pkl already has embedding_weight "
                 "but small language_embeds)."
             )
-        s_mean, s_std = norm["state"]
-        if len(s_mean) < args.state_dim:
-            raise ValueError(
-                f"norm_stats['state'] has {len(s_mean)} dims but --state-dim={args.state_dim}"
-            )
+        s_stats = norm["state"]
+        # Pass FULL norm stats (typically already model_action_dim=32 long).
+        # Encoder pads raw state to model_state_dim internally before normalize+
+        # digitize. Don't slice to args.state_dim — that's only the RAW input dim.
         logger.info(f"Loading sentencepiece tokenizer: {args.tokenizer}")
         state_encoder = SentencepieceStateEncoder(
             v1_infer,
             tokenizer_model_path=args.tokenizer,
             embedding_weight=embedding_weight,
-            state_norm_mean=s_mean[: args.state_dim],
-            state_norm_std=s_std[: args.state_dim],
+            state_norm=s_stats,
+            model_state_dim=a_dim_n,  # = action_dim from norm_stats (32 for pi05)
         )
         logger.info(
             f"  Phase 2 state encoding enabled: state_dim={args.state_dim}, "
@@ -570,8 +677,7 @@ def main() -> None:
     phase = 2 if state_encoder is not None else 1
     policy = V1Policy(
         v1_infer,
-        action_norm_mean=a_mean,
-        action_norm_std=a_std,
+        action_norm=a_stats,
         action_dim=args.action_dim,
         state_encoder=state_encoder,
         default_prompt=args.default_prompt,

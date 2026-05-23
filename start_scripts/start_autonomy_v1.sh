@@ -28,6 +28,7 @@ EXECUTE_FLAG=""
 RERUN_FLAG="--no-rerun"
 ENABLE_PROFILE=true
 PORT=8002
+RTC_FLAGS=()   # enable_rtc:=false 时把 RTC 关掉 (A/B 测试用)
 EXTRA_AUTONOMY=()
 
 while [[ $# -gt 0 ]]; do
@@ -36,6 +37,7 @@ while [[ $# -gt 0 ]]; do
     --rerun)         RERUN_FLAG=""; shift ;;
     --no-rerun)      RERUN_FLAG="--no-rerun"; shift ;;
     --no-profile)    ENABLE_PROFILE=false; shift ;;
+    --no-rtc)        RTC_FLAGS+=("enable_rtc:=false"); shift ;;
     --port)          PORT="$2"; shift 2 ;;
     -h|--help)
       grep '^#' "$0" | head -22
@@ -115,12 +117,22 @@ PROFILE_ENV=""
 [ "$ENABLE_PROFILE" = "true" ] && PROFILE_ENV="KAI0_LATENCY_PROFILE=1"
 
 # start_autonomy.sh --ws-port 把 preflight check + autonomy_launch port 一起切到 V1 (:8002)
+#
+# V1 RTC overrides (M2-C, validated 2026-05-22, docs/deployment/rtc_implementation.md §7):
+#   inference_rate=10.0  latency_k=3  min_smooth_steps=3  rtc_execute_horizon=6
+# 通过 autonomy_launch.py 的 launch args 显式覆盖 (launch 默认仍是 JAX 3Hz/k=8/exec_h=16),
+# 不影响 start_autonomy.sh / start_autonomy_from_ckpt.sh / mode=ros2 路径.
 env $PROFILE_ENV nohup "$REPO/start_scripts/start_autonomy.sh" \
     --mode websocket \
     --ws-port "$PORT" \
     --execution-mode joint \
     $EXECUTE_FLAG \
     $RERUN_FLAG \
+    "inference_rate:=10.0" \
+    "latency_k:=3" \
+    "min_smooth_steps:=3" \
+    "rtc_execute_horizon:=6" \
+    "${RTC_FLAGS[@]}" \
     "${EXTRA_AUTONOMY[@]}" \
     > "$AUTO_LOG" 2>&1 &
 PID_AUTO=$!

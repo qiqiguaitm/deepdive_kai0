@@ -6,15 +6,18 @@
 # policy_inference_node 用 --mode=websocket -p port:=8002 连接.
 #
 # Usage:
-#   ./scripts/start_serve_v1.sh                     # 默认 task_a_mix ckpt
+#   ./scripts/start_serve_v1.sh                     # 默认 task_a_new_pure_200 ckpt
 #   ./scripts/start_serve_v1.sh --phase 1           # 跳过 state encoding (固定 prompt)
 #   ./scripts/start_serve_v1.sh --port 8003 --pkl <path>
+#
+# 默认 ckpt 2026-05-22 切到 task_a_new_pure_200 (RTC sweep 验证用; 旧 mix_b6000_p1200
+# 仍可通过 --pkl / --norm-stats 显式指定).
 ###############################################################################
 set -eo pipefail
 
 REPO=/data1/tim/workspace/deepdive_kai0
-PKL_DEFAULT=$REPO/optimize/results/task_a_mix_b6000_p1200_v1_p200.pkl
-NORM_DEFAULT=/data1/DATA_IMP/checkpoints/task_a_mix_b6000_p1200_mixed_1_step49999/assets/mix_b6000_p1200/norm_stats.json
+PKL_DEFAULT=$REPO/optimize/results/task_a_new_pure_200_v1_p200.pkl
+NORM_DEFAULT=/data1/DATA_IMP/checkpoints/task_a_new_pure_200_step49999/assets/a_new_pure_200/norm_stats.json
 TOK_DEFAULT=$REPO/openpi_cache/big_vision/paligemma_tokenizer.model
 PORT_DEFAULT=8002
 PROMPT_DEFAULT="Flatten and fold the cloth"

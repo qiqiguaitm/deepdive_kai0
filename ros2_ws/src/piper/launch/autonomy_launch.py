@@ -150,10 +150,23 @@ def generate_launch_description():
         description='Enable RTC guidance for chunk-boundary continuity')
     rtc_execute_horizon_arg = DeclareLaunchArgument('rtc_execute_horizon',
         default_value='16',
-        description='Steps of new chunk to guide toward prev_chunk (16 ≈ 2×latency_k)')
+        description='Steps of new chunk to guide toward prev_chunk (JAX legacy 16 ≈ 2×latency_k=8; V1 uses 6 via start_autonomy_v1.sh)')
     rtc_max_guidance_weight_arg = DeclareLaunchArgument('rtc_max_guidance_weight',
         default_value='0.5',
         description='Upper bound on RTC guidance weight (see pi0_rtc.py)')
+    # ── Replan / smoothing knobs (exposed so V1 path can override without
+    #    touching node defaults). Defaults match the policy_inference_node.py
+    #    declare_parameter() values (JAX legacy sizing); start_autonomy_v1.sh
+    #    passes V1-tuned overrides (10.0 / 3 / 3) per docs/deployment §7.
+    inference_rate_arg = DeclareLaunchArgument('inference_rate',
+        default_value='3.0',
+        description='Hz of inference loop (JAX legacy 3.0, V1 path overrides to 10.0)')
+    latency_k_arg = DeclareLaunchArgument('latency_k',
+        default_value='8',
+        description='Head-trim steps of new chunk (JAX legacy 8, V1 path overrides to 3)')
+    min_smooth_steps_arg = DeclareLaunchArgument('min_smooth_steps',
+        default_value='8',
+        description='Min blend window for chunk overlap smoothing (JAX legacy 8, V1 overrides to 3)')
 
     # ── Piper 左臂 (mode=1 控制从臂, auto_enable 上电) ──
     # mode=1: subscribe to /master/joint_left and drive the slave arm hardware
@@ -224,6 +237,9 @@ def generate_launch_description():
             'enable_rtc': LaunchConfiguration('enable_rtc'),
             'rtc_execute_horizon': LaunchConfiguration('rtc_execute_horizon'),
             'rtc_max_guidance_weight': LaunchConfiguration('rtc_max_guidance_weight'),
+            'inference_rate': LaunchConfiguration('inference_rate'),
+            'latency_k': LaunchConfiguration('latency_k'),
+            'min_smooth_steps': LaunchConfiguration('min_smooth_steps'),
         }],
     )
 
@@ -308,6 +324,7 @@ def generate_launch_description():
         fg_enable_arg, bg_enable_arg,
         enable_rtc_arg, rtc_execute_horizon_arg,
         rtc_max_guidance_weight_arg,
+        inference_rate_arg, latency_k_arg, min_smooth_steps_arg,
         cleanup,
         piper_left_delayed, piper_right_delayed,
         multi_cam_delayed,

@@ -11,21 +11,23 @@
 # Usage:
 #   ./rtc_apply.sh             # print current values
 #   ./rtc_apply.sh off         # pure smoothing, no RTC guidance
-#   ./rtc_apply.sh on          # default: RTC + moderate smoothing
+#   ./rtc_apply.sh on          # V1 default (10Hz, latency_k=3, exec_h=6)
+#   ./rtc_apply.sh v1_default  # same as on (explicit name)
+#   ./rtc_apply.sh jax_legacy  # old pre-V1 default (3Hz, k=8, exec_h=16)
 #   ./rtc_apply.sh rtc_tight   # high replan + short guidance window
 #   ./rtc_apply.sh rtc_long    # RTC over full horizon (A/B control)
 #   ./rtc_apply.sh rtc_paper   # paper Table 4 conservative (exec_h=25, max_guid=0.5)
 #   ./rtc_apply.sh rtc_paper_strong  # paper Table 4 numeric (max_guid=5.0, ⚠ 10x warning)
-#   ./rtc_apply.sh rtc5        # legacy alias for on
+#   ./rtc_apply.sh rtc5        # legacy alias for jax_legacy
 #   ./rtc_apply.sh rtc3        # legacy alias for rtc_tight
 #   ./rtc_apply.sh show        # same as no-arg
 #
 # Tunables (see policy_inference_node.py):
 #   enable_rtc               bool  on/off RTC guidance (Pi0RTCConfig swap done at load)
-#   rtc_execute_horizon      steps guidance window width [d, exec_h); 16 ≈ 2×latency_k
+#   rtc_execute_horizon      steps guidance window width [d, exec_h); V1 default 6 ≈ 2×latency_k=3
 #   rtc_max_guidance_weight  float upper bound on guidance weight (paper default 0.5)
-#   inference_rate           Hz    how often to query policy
-#   latency_k                steps drop first k of new chunk (stale-prefix trim)
+#   inference_rate           Hz    how often to query policy (V1 default 10Hz, JAX legacy 3Hz)
+#   latency_k                steps drop first k of new chunk (stale-prefix trim; V1 default 3)
 #   min_smooth_steps         steps floor on blend window for temporal smoothing
 #   decay_alpha              0..1  legacy StreamActionBuffer param (unused in linear blend)
 
@@ -53,17 +55,27 @@ case "$mode" in
         # Pure temporal smoothing, RTC disabled. For A/B vs RTC-on.
         apply false 16 0.5  3.0 8 8 0.25
         ;;
-    on|default)
-        # Default: RTC with 16-step guidance window + moderate smoothing.
-        apply true  16 0.5  3.0 8 8 0.25
+    on|default|jax_legacy)
+        # JAX-era default (unchanged for backward compat). Sized for 3 Hz replan
+        # + 333ms cycle. Use for JAX serve (:8000) or start_autonomy_from_ckpt.sh.
+        apply true  16 0.5  3.0  8 8 0.25
+        ;;
+    v1_default)
+        # V1 default (2026-05-22 sweep M2-C, see docs/deployment/rtc_implementation.md §7).
+        # 10Hz replan, latency_k=3, exec_h=6 — derived from V1 forward 34ms + RTT 77ms.
+        # Validated on task_a_new_pure_200_step49999: image_age -30% vs jax_legacy,
+        # no GPU saturation (P50 stays 70ms), chunk MAE unchanged.
+        # Use this for V1 serve (:8002) — start_autonomy_v1.sh now passes these via
+        # launch args automatically, so this preset is for manual hot-tuning only.
+        apply true  6  0.5  10.0 3 3 0.25
+        ;;
+    rtc5)
+        # Legacy alias: original mid-frequency preset (predates V1).
+        apply true  16 0.5  6.0  4 4 0.35
         ;;
     rtc_tight|rtc3)
         # Aggressive replan, short guidance window (for fast-changing scenes).
         apply true  12 0.8  10.0 3 3 0.45
-        ;;
-    rtc5)
-        # Legacy alias: same as `on` but with replan every ~5 steps.
-        apply true  16 0.5  6.0 4 4 0.35
         ;;
     rtc_long)
         # A/B control: guide over full action horizon (50 steps).
