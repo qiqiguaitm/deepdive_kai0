@@ -191,6 +191,11 @@ def generate_launch_description():
     fast_obs_pipeline_arg = DeclareLaunchArgument('fast_obs_pipeline',
         default_value='false',
         description='V1 path: bypass JPEG mapping + CvBridge + BGR↔RGB. JAX path keeps false.')
+    # A.2 异步流水线 (§7.9, 2026-05-23): obs prefetch worker 把 obs_construct 藏到
+    # forward 背后, cycle 62→44ms (22.6Hz, 真机验证 ✓). JAX legacy 默认 false.
+    pipelined_obs_arg = DeclareLaunchArgument('pipelined_obs',
+        default_value='false',
+        description='V1 path: ObsPrefetchWorker pre-fetches obs in background, hiding obs_construct behind forward (A.2 §7.9). JAX path keeps false.')
 
     # ── Piper 左臂 (mode=1 控制从臂, auto_enable 上电) ──
     # mode=1: subscribe to /master/joint_left and drive the slave arm hardware
@@ -270,6 +275,8 @@ def generate_launch_description():
             'min_smooth_steps': LaunchConfiguration('min_smooth_steps'),
             # P2 Step 1+2 fast obs pipeline (bool-typed to preserve 'true'/'false')
             'fast_obs_pipeline': ParameterValue(LaunchConfiguration('fast_obs_pipeline'), value_type=bool),
+            # A.2 异步 obs prefetch worker (bool-typed)
+            'pipelined_obs': ParameterValue(LaunchConfiguration('pipelined_obs'), value_type=bool),
         }],
     )
 
@@ -356,7 +363,7 @@ def generate_launch_description():
         rtc_max_guidance_weight_arg,
         inference_rate_arg, latency_k_arg, min_smooth_steps_arg,
         cam_fps_arg, enable_head_depth_arg, enable_left_depth_arg, enable_right_depth_arg,
-        fast_obs_pipeline_arg,
+        fast_obs_pipeline_arg, pipelined_obs_arg,
         cleanup,
         piper_left_delayed, piper_right_delayed,
         multi_cam_delayed,

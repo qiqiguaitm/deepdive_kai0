@@ -83,6 +83,7 @@ if (os.access(_VENV_PYTHON, os.X_OK)
 
 import time
 import threading
+import queue
 from collections import deque
 
 # 确保 openpi src 可被 import
@@ -265,6 +266,97 @@ class StreamActionBuffer:
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# ObsPrefetchWorker — A.2 流水线 (§7.9), 2026-05-23
+# ────────────────────────────────────────────────────────────────────────────
+# 在背景线程持续 pop _get_observation(), 把准备好的 obs 放进 maxsize=1 queue.
+# 主推理线程从 queue.get() 拿 obs (几乎 0 等), 同时 worker 在 forward (~35ms) 期间
+# 准备下一帧 obs (~15ms). 等于把 obs_construct 藏到 forward 背后, cycle 62 → ~44ms.
+#
+# Queue 策略: maxsize=1 + "drop old, put new" — 永远保持 queue 含最新可用 obs.
+# 主线程取走后 worker 立刻开始下一轮; main 慢 worker 快 → worker 卡在 put 阻塞;
+# main 快 worker 慢 → main fallback 走同步路径 (queue.Empty 异常).
+class ObsPrefetchWorker:
+    """Background thread that pre-fetches obs while main inference cycle runs.
+
+    Usage:
+        worker = ObsPrefetchWorker(owner=node)
+        worker.start()  # daemon thread
+        ...
+        try:
+            obs = worker.get_obs(timeout=0.1)  # main 推理 loop 取
+        except queue.Empty:
+            obs = node._get_observation()  # fallback sync
+        ...
+        worker.stop()  # on destroy
+    """
+
+    def __init__(self, owner, logger=None, queue_size: int = 1):
+        self._owner = owner  # PolicyInferenceNode instance — calls _get_observation()
+        self._logger = logger if logger is not None else owner.get_logger()
+        self._queue: queue.Queue = queue.Queue(maxsize=queue_size)
+        self._running = False
+        self._thread = None
+        self._n_fetched = 0
+        self._n_dropped = 0  # 主线程慢, queue full 时丢的旧 obs 数
+
+    def start(self):
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(
+            target=self._loop, daemon=True, name='ObsPrefetchWorker')
+        self._thread.start()
+        self._logger.info('ObsPrefetchWorker started (A.2 §7.9 pipeline)')
+
+    def stop(self):
+        self._running = False
+        # daemon thread, no join — just let it die with process
+
+    def get_obs(self, timeout: float = 0.1):
+        """Get the freshest pre-fetched obs. Raises queue.Empty on timeout."""
+        return self._queue.get(timeout=timeout)
+
+    def _loop(self):
+        # 等 policy 加载完毕 (sensor data ready). 跟 _inference_loop 同款.
+        while self._running and self._owner.policy is None:
+            time.sleep(0.05)
+
+        while self._running:
+            try:
+                obs = self._owner._get_observation()
+                if obs is None:
+                    # sensor 数据不全 (sync_frame 失败), 短暂 yield 后重试
+                    time.sleep(0.005)
+                    continue
+
+                # Drop-old, put-new: queue 永远含最新 obs.
+                # 若 main 还没取走上一个, 就 drop 上一个换新.
+                try:
+                    self._queue.put_nowait(obs)
+                except queue.Full:
+                    try:
+                        _ = self._queue.get_nowait()
+                        self._n_dropped += 1
+                    except queue.Empty:
+                        pass
+                    try:
+                        self._queue.put_nowait(obs)
+                    except queue.Full:
+                        # race condition (main 同时也在取), 放弃这帧, 下轮重 fetch
+                        pass
+                self._n_fetched += 1
+
+            except Exception as e:
+                # 不能让 exception 杀掉 worker → main 永远拿不到 obs
+                self._logger.warn(f'ObsPrefetchWorker fetch error: {e}')
+                time.sleep(0.05)
+
+        self._logger.info(
+            f'ObsPrefetchWorker stopped (fetched={self._n_fetched}, '
+            f'dropped_old={self._n_dropped})')
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # PolicyInferenceNode
 # ────────────────────────────────────────────────────────────────────────────
 class PolicyInferenceNode(Node):
@@ -297,6 +389,10 @@ class PolicyInferenceNode(Node):
         # 训练数据 loader 不做 JPEG (MP4 codec 是 AV1/h264, _jpeg_mapping 本来就没匹配
         # 训练 artifact), 跳过后模型输入实际更接近 "训练时 mp4-decode 输出".
         self.declare_parameter('fast_obs_pipeline', False)
+        # A.2 异步流水线 (2026-05-23, §7.9): background ObsPrefetchWorker 跟主推理
+        # forward 并行准备下一帧 obs, cycle 62→44ms (22.6Hz, 真机验证 ✓). JAX legacy
+        # 默认 False. V1 路径 start_autonomy_v1.sh 传 'true' 启用.
+        self.declare_parameter('pipelined_obs', False)
         # ── RTC (Real-Time Chunking) parameters ──
         # enable_rtc=True + Pi0Config → auto-upgraded to Pi0RTCConfig at load time
         # (same weights, model class swap only; see _load_jax_policy). Guidance is
@@ -353,6 +449,9 @@ class PolicyInferenceNode(Node):
             self.get_logger().info(
                 'fast_obs_pipeline=True → bypass JPEG mapping + CvBridge + BGR↔RGB '
                 '(rgb8 直传, np.frombuffer view msg.data; P2 §7.8)')
+        # A.2 异步流水线 worker (§7.9): 仅在 pipelined_obs=True 时启动
+        self._pipelined_obs = _to_bool(self.get_parameter('pipelined_obs').value)
+        self._obs_prefetch = None  # 在 _infer_thread.start 之前 setup
 
         # ── Replay state ──
         self._replay_mode = str(self.get_parameter('replay_mode').value)
@@ -522,6 +621,13 @@ class PolicyInferenceNode(Node):
         # ── Keyboard listener thread ──
         self._kb_thread = threading.Thread(target=self._keyboard_listener, daemon=True)
         self._kb_thread.start()
+
+        # ── A.2 异步 obs 流水线 worker (§7.9, 启动顺序: 先 worker, 再 inference 线程) ──
+        if self._pipelined_obs:
+            self._obs_prefetch = ObsPrefetchWorker(owner=self)
+            self._obs_prefetch.start()
+            self.get_logger().info(
+                'pipelined_obs=True → obs_construct 与 forward 并行 (cycle 预期 -14ms)')
 
         # ── Inference thread ──
         self._infer_thread = threading.Thread(target=self._inference_loop, daemon=True)
@@ -1997,7 +2103,18 @@ class PolicyInferenceNode(Node):
                 continue
             try:
                 t_obs_start = time.monotonic()
-                obs = self._get_observation()
+                # A.2 异步流水线 (§7.9): worker 在后台预备 obs, main 直接取.
+                # worker 在上一 cycle 的 forward 期间已经准备好 obs (~15ms 任务),
+                # 这里 get() 几乎 0 等. main 完成的总 cycle 不再含 obs_construct 时间.
+                # Fallback: queue 空 (worker 启动初期 / sensor data 不全) → 同步取.
+                if self._pipelined_obs and self._obs_prefetch is not None:
+                    try:
+                        obs = self._obs_prefetch.get_obs(timeout=0.1)
+                    except queue.Empty:
+                        # worker 还没准备好 (启动初期 / sensor 不齐), 同步走一次
+                        obs = self._get_observation()
+                else:
+                    obs = self._get_observation()
                 if obs is None:
                     time.sleep(0.01)
                     continue

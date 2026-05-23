@@ -135,6 +135,7 @@ env $PROFILE_ENV nohup "$REPO/start_scripts/start_autonomy.sh" \
     "cam_fps:=30" \
     "enable_head_depth:=false" \
     "fast_obs_pipeline:=true" \
+    "pipelined_obs:=true" \
     "${RTC_FLAGS[@]}" \
     "${EXTRA_AUTONOMY[@]}" \
     > "$AUTO_LOG" 2>&1 &
