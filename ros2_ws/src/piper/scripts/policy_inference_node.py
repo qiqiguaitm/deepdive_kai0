@@ -426,6 +426,14 @@ class PolicyInferenceNode(Node):
         # -41% vs 'linear', plus post-task attractor freeze (cmd converges to const
         # after task → 0 drift in idle scenes). Set to 'linear' to fall back to legacy.
         self.declare_parameter('rtc_smooth_method', 'min_jerk')
+        # Layer 1.1E — publish-time EMA smoothing on cmd timeline (orthogonal to
+        # 1.1B which smooths chunk boundaries). Default 0.5 (mild LP). Validated
+        # 2026-05-25 on vis_v2_full real-machine (ep29 vs ep28 1B-only baseline):
+        # state-side jiggle -65%, jerk95_state -29%, last-30s freeze tighter
+        # (jerk_state -51%); subjective "明显更稳". α∈(0,1]: cmd[t] := α*cmd +
+        # (1-α)*last_published. Phase lag ≈ (1-α)/α timestep (α=0.5 → 12.5ms,
+        # negligible). α=1.0 = off (legacy behavior).
+        self.declare_parameter('publish_smooth_alpha', 0.5)
         # NOTE: mask_prefix_delay is declared upstream in pi0_rtc.py:244 but
         # not exposed here — forwarding a Python bool through jit triggers
         # TracerBoolConversionError at pi0_rtc.py:323. Left as function default
@@ -501,6 +509,10 @@ class PolicyInferenceNode(Node):
         self.stream_buffer = StreamActionBuffer(
             decay_alpha=self.decay_alpha, state_dim=14, smooth_method=_smooth_method)
         self.get_logger().info(f'StreamActionBuffer smooth_method = {_smooth_method}')
+        # Layer 1.1E EMA on publish timeline (orthogonal to 1.1B chunk-edge smooth)
+        self._publish_smooth_alpha = float(self.get_parameter('publish_smooth_alpha').value)
+        if self._publish_smooth_alpha < 1.0:
+            self.get_logger().info(f'EMA post-process active: alpha={self._publish_smooth_alpha}')
 
         # B1 client-side latency profile (opt-in via KAI0_LATENCY_PROFILE=1).
         # Writes one CSV row per inference cycle to /tmp/kai0_latency_<pid>.csv with
@@ -2454,6 +2466,13 @@ class PolicyInferenceNode(Node):
                     f'(limit={np.degrees(self._MAX_JOINT_JUMP_RAD):.0f}°), flushing buffer')
                 self._flush_stale_buffer()
                 return
+        # Layer 1.1E — EMA post-process on publish timeline. Orthogonal to 1.1B
+        # (chunk-edge smoothing). When α<1, cmd[t] = α*cmd[t] + (1-α)*last_published,
+        # attenuating high-freq cmd noise that exceeds Piper PD LP bandwidth.
+        if self._publish_smooth_alpha < 1.0 and self._last_published_action is not None:
+            alpha = self._publish_smooth_alpha
+            prev = self._last_published_action[:14]
+            act[:14] = alpha * act[:14] + (1.0 - alpha) * prev
         self._last_published_action = act.copy()
 
         left = act[:7].copy()
