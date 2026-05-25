@@ -2469,10 +2469,17 @@ class PolicyInferenceNode(Node):
         # Layer 1.1E — EMA post-process on publish timeline. Orthogonal to 1.1B
         # (chunk-edge smoothing). When α<1, cmd[t] = α*cmd[t] + (1-α)*last_published,
         # attenuating high-freq cmd noise that exceeds Piper PD LP bandwidth.
+        # IMPORTANT — gripper joints (j6, j13) are SKIPPED: gripper is effectively
+        # binary (0=close, 0.07=open) and EMA-smoothing it traps cmd in mid-range
+        # → physical "half-grasp release-then-regrab" failure (validated ep33).
         if self._publish_smooth_alpha < 1.0 and self._last_published_action is not None:
             alpha = self._publish_smooth_alpha
             prev = self._last_published_action[:14]
+            raw_act = act[:14].copy()
             act[:14] = alpha * act[:14] + (1.0 - alpha) * prev
+            # restore gripper to raw model output (no smoothing)
+            act[6] = raw_act[6]
+            act[13] = raw_act[13]
         self._last_published_action = act.copy()
 
         left = act[:7].copy()

@@ -131,10 +131,18 @@ PROFILE_ENV=""
 
 # start_autonomy.sh --ws-port 把 preflight check + autonomy_launch port 一起切到 V1 (:8002)
 #
-# V1 RTC overrides (2026-05-23 升级到 20Hz, M2-C 比例缩放, 见 §7.8 v0.21):
-#   inference_rate=20.0  latency_k=2  min_smooth_steps=3  rtc_execute_horizon=4
-#   (历史 10Hz M2-C: inference_rate=10  latency_k=3  exec_h=6, 性能数据 cycle 62ms)
-# 20Hz 启用前提: P2 fast_obs_pipeline + A.2 pipelined_obs + C.4 SHM transport, cycle 44ms P95.
+# V1 RTC overrides (2026-05-25 task-friendly retune from idle-only k=2/exec=4):
+#   inference_rate=20  latency_k=6  min_smooth_steps=8  rtc_execute_horizon=12
+#   publish_rate=180 (Piper hardware max ~200Hz, 10% safety margin; EMA at 180Hz
+#     gives ~5.6ms phase lag vs 12.5ms at 80Hz, finer cmd timeline for Piper PD)
+# Rationale (2026-05-25 vis_v2_full real-machine task A/B/C):
+#   - k=2/exec=4 (旧 V1 idle-optimized): task EE reversal 1.27/s (走3退1 现象明显)
+#   - k=6/exec=12 (本配置): task EE reversal 0.24/s (-81%) ← 显著减少 chunk
+#     replace 触发的 cmd 方向掉头, model task chunk inconsistency 被 blend
+#     window (k=6 × 33ms = 200ms) 充分覆盖
+# Trade-off: task 启动响应 67ms→200ms (慢 130ms, < Piper PD lag 100ms 量级,
+# 不可感知); idle drift 略增 (12.7mm→~15mm/100s, 仍 < 30mm 可接受阈值).
+# 历史 10Hz M2-C: inference_rate=10 latency_k=3 exec_h=6; v1-idle k=2 exec_h=4.
 # 通过 autonomy_launch.py 的 launch args 显式覆盖 (launch 默认仍是 JAX 3Hz/k=8/exec_h=16),
 # 不影响 start_autonomy.sh / start_autonomy_from_ckpt.sh / mode=ros2 路径.
 env $PROFILE_ENV nohup "$REPO/start_scripts/start_autonomy.sh" \
@@ -144,9 +152,10 @@ env $PROFILE_ENV nohup "$REPO/start_scripts/start_autonomy.sh" \
     $EXECUTE_FLAG \
     $RERUN_FLAG \
     "inference_rate:=20.0" \
-    "latency_k:=2" \
-    "min_smooth_steps:=3" \
-    "rtc_execute_horizon:=4" \
+    "latency_k:=6" \
+    "min_smooth_steps:=8" \
+    "rtc_execute_horizon:=12" \
+    "publish_rate:=180" \
     "cam_fps:=30" \
     "enable_head_depth:=false" \
     "fast_obs_pipeline:=true" \
