@@ -1,7 +1,7 @@
 # pi0.5 Inference Optimization Benchmarks
 
 > 配套文档:
-> - [realtime_vla_optimization_analysis.md](../docs/deployment/realtime_vla_optimization_analysis.md) — 主分析文档
+> - [inference/realtime_vla/strategy.md](../docs/deployment/inference/realtime_vla/strategy.md) — 主分析文档
 > - [pi05_inference_backend_benchmark_plan.md](../docs/deployment/pi05_inference_backend_benchmark_plan.md) — 测试 plan
 
 本目录用于 deepdive_kai0 推理优化路线 (主分析文档 §3.4.2) 的实测脚本与结果。当前包含 **5 backend** 推理速度对比。
@@ -189,6 +189,6 @@ kai0/.venv/bin/python optimize/benchmark_pi05_inference.py --num-steps 20  # 高
 ## 下一步
 
 完成 benchmark 后:
-1. 把 `results/*.md` 反馈到 [`realtime_vla_optimization_analysis.md`](../docs/deployment/realtime_vla_optimization_analysis.md) §3.4.2
+1. 把 `results/*.md` 反馈到 [`inference/realtime_vla/strategy.md`](../docs/deployment/inference/realtime_vla/strategy.md) §3.4.2
 2. 决定阶段 3.4.2 走策略 A 还是策略 B
 3. 后续可加 NVTX profile (用 `nsys profile`) 看 kernel 数量分布, 进一步验证 fusion 效果

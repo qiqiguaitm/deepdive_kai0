@@ -706,7 +706,7 @@ source ros2_ws/install/setup.bash
 ## 14. 文档命名约定
 
 > 本节是 `docs/` 目录下 markdown 文件的命名规范。新增文档前对照本节。
-> ckpt 实体目录的命名规范 (run_label / config / run_id / step) 在 `docs/deployment/checkpoints_layout.md` §4。
+> ckpt 实体目录的命名规范 (run_label / config / run_id / step) 在 `docs/deployment/training_ops/checkpoints_layout.md` §4。
 
 ### 14.1 通用原则
 
@@ -768,10 +768,10 @@ source ros2_ws/install/setup.bash
 
 - `docs/training/dynamic_dataset_workflow.md` — 动态数据集方案
 - `docs/training/task_p_unfreeze_8k_20k_analysis.md` — Task_P 过拟合分析
-- `docs/deployment/task_a_master_plan.md` — Task_A 训练路线
+- `docs/deployment/strategy/task_a_master_plan.md` — Task_A 训练路线
 - `docs/training/training_cli_notes.md` — 命令注记
-- `docs/deployment/sim01_deployment.md` — sim01 部署细节
-- `docs/deployment/checkpoints_layout.md` — Checkpoint 落盘规范 + ckpt 命名约定
+- `docs/deployment/inference/sim01_deployment.md` — sim01 部署细节
+- `docs/deployment/training_ops/checkpoints_layout.md` — Checkpoint 落盘规范 + ckpt 命名约定
 - kai0 官方论文 Model Arithmetic / Stage Advantage / Train-Deploy Alignment 三模块
 
 ---

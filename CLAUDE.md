@@ -191,5 +191,5 @@ Camera keys: `top_head`, `hand_left`, `hand_right`. Observation state is 14-dim 
 
 Split by environment:
 
-- `docs/deployment/` — sim01 setup and inference: `sim01_deployment.md`, `teleoperation_guide.md`, `inference_visualization.md`/`_mesh.md`, `task_a_master_plan.md`, `official_diff_and_risk_analysis.md`, `analysis_kai0_xvla.md`, `data_manager_plan.md`, `build_web_venv.md`, `ipc_inference_deployment_review.md`, `rerun_mesh_transparency_lesson.md`, `ros2_image_inference_validation_review.md`, `usb_camera_layout.md`
-- `docs/training/` — gf0/gf1/gf2 training plans and reproduction: `training_cli_notes.md` (start here), `task_e_master_plan.md`, `training_reproduction_log.md`, `reproduction_plan.md`, `gf{0,1,2}_*_plan.md`, `multinode_distributed_training_plan.md`, `awbc_{pi07style_experiment,v2_training_plan}.md`, `kai0_{mixed_1_results,task_a_opensource_analysis}.md`, `parallel_execution_plan.md`, `training_plans.md`, `wandb_monitoring.md`
+- `docs/deployment/` — 部署相关, 按场景 6 大目录组织 (strategy / training_ops / inference / data_collection / visualization / incidents). 总入口 [`docs/deployment/README.md`](docs/deployment/README.md) 含 Agent 探索路径表与跨场景任务流程。
+- `docs/training/` — 训练实验历史与未来计划, 三层结构 (`future_plans/plans/` + `history/experiments/`). 总入口 [`docs/training/README.md`](docs/training/README.md)。

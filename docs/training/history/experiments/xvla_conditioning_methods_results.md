@@ -1,6 +1,6 @@
 # X-VLA Conditioning Methods — 三种方式混合数据集训练对照实验
 
-> **作用**: 系统跟踪三种 embodiment conditioning 方式在 **kai (官方) + vis (自建)** 混合数据集上的训练效果与对比, 作为 cross_embodiment_data_reuse_plan.md Track B/C 主线实验的结果汇总。
+> **作用**: 系统跟踪三种 embodiment conditioning 方式在 **kai (官方) + vis (自建)** 混合数据集上的训练效果与对比, 作为 `cross_embodiment_strategy.md` Track C/X 主线实验的结果汇总。
 >
 > **背景**: kai (KAI0 base+dagger, 6512 ep) + vis (vis_v2_merged, 895 ep) 跨本体混合时 naive joint norm 失败 (`mixed_pure2_1800_6000` 真机抖动严重)。本实验汇总三种显式 conditioning 方式 (改变模型对 domain 的感知方式) 的真机/val 表现, 用于 paper E3.7 / E3.8 / E3.9 ablation 主线。
 >
@@ -9,11 +9,11 @@
 > **最近更新**: 2026-05-22 (Stage 1 76d44 step 2000 ckpt mu PASS 验证, Soft Prompt 实现端到端正确; Hard Prompt exp1 完成 step 49999)
 >
 > **关联文档**:
-> - `docs/deployment/cross_embodiment_data_reuse_plan.md` — Track B / Track C 完整执行计划 + 假说 H1-H4
-> - `docs/deployment/cross_embodiment_data_reuse_plan.md` §6.2 — Soft Prompt (Track B) 设计
-> - `docs/deployment/cross_embodiment_data_reuse_plan.md` §6.3 — Action Head Cond Emb (Track C) 设计
-> - `docs/training/00_training_history.md` — 全量训练历史索引
-> - `docs/training/training_paradigm_comparison.md` — 一阶段 vs 两阶段范式对比
+> - `docs/deployment/strategy/cross_embodiment_strategy.md` — 跨本体战略 + Tri-track (A/C/X) + 假说 H1-H4 + 决策点
+> - `docs/deployment/strategy/cross_embodiment_strategy.md` §5.2 — Conditioning 选项 (Hard / Soft / Action Head)
+> - `docs/deployment/strategy/cross_embodiment_strategy.md` §5.3 — Action Head Cond Emb (Track C 方案 A) 设计要点
+> - `00_training_history.md` — 全量训练历史索引
+> - `training_paradigm_comparison.md` — 一阶段 vs 两阶段范式对比
 
 ---
 
@@ -50,7 +50,7 @@
 | kai0_dagger (官方) | 50 | **0.0130** ❌ 最差 (+69% vs base) | 0.0267 | 0.0435 | 0.0597 |
 | vis_v2_merged (自建) | 50 | **0.0082** | 0.0188 | 0.0329 | 0.0517 |
 
-> **观察**: dagger 在所有 horizon 都明显差 — 验证 cross_embodiment_data_reuse_plan.md 决策点 1 "dagger 不引入 policy" 是合理的。vis 仅微差于 base (+6.5% @1), hard prompt 对自建数据 transfer OK。
+> **观察**: dagger 在所有 horizon 都明显差 — 验证 `cross_embodiment_strategy.md` §9 决策点 1 "dagger 不引入 policy" 是合理的。vis 仅微差于 base (+6.5% @1), hard prompt 对自建数据 transfer OK。
 >
 > **参考对照** (00_training_history.md):
 > - 老 SOTA `mixed_pure2_1800_6000` (vis val): MAE@1=0.0085 — exp1 vis 0.0082 微胜 ✓
@@ -72,7 +72,7 @@
 
 > **方案 A 选定 + 单阶段修订**: 4 候选 (A Concat / B FiLM / C adaLN / D Cross-Attn) 选 A。**2026-05-22 PM**: 经 §6.3.6 信号路径分析, action expert 端注入信号短 (4-8 层), 不需 3-stage curriculum, 改单阶段 joint。Track B 同期决定保留 Stage 1 不推进。
 > **真机评估目标**: vis (B 真机). 训练数据: kai + vis 跨本体混合 (vis × 7 balanced).
-> 设计原理详见 `cross_embodiment_data_reuse_plan.md` §6.3.1 + §6.3.6。
+> 设计原理详见 `cross_embodiment_strategy.md` §5.3。
 
 | 步骤 | Job ID | Init | 数据 | Step | num_workers | rate | Best Val MAE@1 (per-source) | 真机平滑度 | 真机成功率 (B 真机) | 备注 |
 |---|---|---|---|---:|---:|---:|---|---:|---:|---|

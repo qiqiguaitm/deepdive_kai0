@@ -27,7 +27,7 @@ Usage (sim01, after `convert_kai0_to_v1.py` 出 .pkl):
 
 Health check: curl http://<host>:8002/healthz → "OK"
 
-See docs/deployment/realtime_vla_optimization_analysis.md §7.2 + §6 for context.
+See docs/deployment/inference/realtime_vla/strategy.md §7.2 + §6 for context.
 """
 import argparse
 import json

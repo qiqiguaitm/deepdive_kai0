@@ -63,10 +63,10 @@ docs/training/
 
 | 文档 | 用途 |
 |---|---|
-| `docs/deployment/cross_embodiment_strategy.md` | ⭐ 跨本体战略 (3 robots / 4-层 ROI / norm-stats 实证 / Conditioning / RTC-TAC / Tri-track / 决策点) |
-| `docs/deployment/realtime_vla_optimization_analysis.md` | 实时推理优化路线 (PyTorch+Triton 选项 X) |
-| `docs/deployment/training_servers_knowledge_base.md` | 训练集群 (uc01-03 / Robot-North-H20 / robot-task / gf0-3) |
-| `docs/deployment/analysis_kai0_xvla.md` | KAI0 vs XVLA 历史对比 (reference) |
+| `docs/deployment/strategy/cross_embodiment_strategy.md` | ⭐ 跨本体战略 (3 robots / 4-层 ROI / norm-stats 实证 / Conditioning / RTC-TAC / Tri-track / 决策点) |
+| `docs/deployment/inference/realtime_vla/` (4 文件: strategy / roadmap / v1_triton_log / layer_b_plan) | 实时推理优化路线 (PyTorch+Triton 选项 X) |
+| `docs/deployment/training_ops/` (overview + storage_and_env + ssh_and_credentials + data_sync_tos + submission/) | 训练集群 (uc01-03 / Robot-North-H20 / robot-task / gf0-3) |
+| `docs/deployment/README.md` | ⭐ deployment 总入口 (6 场景多叉树, 跨场景任务流程) |
 
 **何时去看 deployment**: plan 涉及 Track A/C/X 的战略边界决策 (3 robot embodiment gap / Conditioning 注入点选择 / TAC 集成方案), 或需要查 norm-stats / 假说矩阵的实证依据时。
 

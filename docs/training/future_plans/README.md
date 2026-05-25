@@ -2,7 +2,7 @@
 
 > **范围**: 列出所有"待启动 / 进行中"的训练计划, 每行简表 + 链接到单文件详细计划。
 > **更新**: 2026-05-25。
-> **上游战略文档**: [`../../deployment/cross_embodiment_strategy.md`](../../deployment/cross_embodiment_strategy.md) (3 robots / 4-层 ROI / Tri-track 架构 / 决策点)。
+> **上游战略文档**: [`../../deployment/strategy/cross_embodiment_strategy.md`](../../deployment/strategy/cross_embodiment_strategy.md) (3 robots / 4-层 ROI / Tri-track 架构 / 决策点)。
 
 ---
 
@@ -65,9 +65,9 @@
 ## 链路图: future_plans → 上游战略
 
 ```
-docs/deployment/cross_embodiment_strategy.md  (战略层: 3 robots / Tri-track / Conditioning / TAC / 决策点)
+docs/deployment/strategy/cross_embodiment_strategy.md  (战略层: 3 robots / Tri-track / Conditioning / TAC / 决策点)
    ├── §3 4-层 ROI         ──→ plans/ssl_phase_pretrain_pipeline.md
    ├── §5/§7 Track X       ──→ plans/xvla_track_x_curriculum.md
    └── §6 RTC/TAC + §7     ──→ plans/pytorch_native_vis_v2_full.md
-                                (+ docs/deployment/realtime_vla_optimization_analysis.md §1.4 选项 X)
+                                (+ docs/deployment/inference/realtime_vla/strategy.md §1.4 选项 X)
 ```

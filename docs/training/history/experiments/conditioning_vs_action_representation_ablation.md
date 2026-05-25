@@ -10,7 +10,7 @@
 >
 > **关联文档**:
 > - `xvla_conditioning_methods_results.md` — Hard / Soft / Action Head 三种 conditioning 方式对照 (相同 abs action 下)
-> - `../../../deployment/cross_embodiment_strategy.md` §5.3 — Track C 方案 A (Action Head Cond Token) 设计与决策
+> - `../../../deployment/strategy/cross_embodiment_strategy.md` §5.3 — Track C 方案 A (Action Head Cond Token) 设计与决策
 > - `00_training_history.md` — 全量训练历史榜单
 > - `task_e_master_plan.md` §2.1 — Task E 早期 abs vs delta 结论 (v14 delta 同步数劣于 abs)
 

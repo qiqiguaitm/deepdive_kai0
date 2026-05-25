@@ -2,7 +2,7 @@
 
 > **状态**: 🟢 RUNNING (2026-05-23 启动) — Stage A 进行中, Stage B 待启动。
 > **关联 task**: `#17 Track X X-VLA 官方架构训练`。
-> **战略上下文**: [cross_embodiment_strategy.md](../../../deployment/cross_embodiment_strategy.md) §1 (3 robots) + §5.2 (Soft Prompt) + §7 (Tri-track)。
+> **战略上下文**: [cross_embodiment_strategy.md](../../../deployment/strategy/cross_embodiment_strategy.md) §1 (3 robots) + §5.2 (Soft Prompt) + §7 (Tri-track)。
 
 ## 1. 核心思路
 
@@ -66,7 +66,7 @@ base ckpt 中未占用 slot:
 
 ## 8. 关联 paper ablation
 
-(完整 Phase 3 ablation 设计见 [`cross_embodiment_strategy.md`](../../../deployment/cross_embodiment_strategy.md) §9 决策点 + §6 RTC/TAC 集成)
+(完整 Phase 3 ablation 设计见 [`cross_embodiment_strategy.md`](../../../deployment/strategy/cross_embodiment_strategy.md) §9 决策点 + §6 RTC/TAC 集成)
 
 Phase 3 table 中:
 - **X3.A** Track X (3-domain ⭐) — Florence2 + Soft Prompt, 全数据

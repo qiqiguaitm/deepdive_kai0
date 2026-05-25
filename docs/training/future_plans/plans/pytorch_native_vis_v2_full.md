@@ -6,10 +6,10 @@
 
 ## 1. 动机
 
-已实现 20Hz JAX→PyTorch 转换部署, 但**转换有精度损失**。需 PyTorch 原生训练直出 2 个 ckpt (delta + absolute), 用于 `realtime_vla_optimization_analysis.md` §1.4 选项 X "双推理架构并存" 路线 — 新 ckpt 走 PyTorch+Triton 5-10× 加速 (V1 论文 105ms→27ms)。
+已实现 20Hz JAX→PyTorch 转换部署, 但**转换有精度损失**。需 PyTorch 原生训练直出 2 个 ckpt (delta + absolute), 用于 `inference/realtime_vla/strategy.md` §1.4 选项 X "双推理架构并存" 路线 — 新 ckpt 走 PyTorch+Triton 5-10× 加速 (V1 论文 105ms→27ms)。
 
-参考: [realtime_vla_optimization_analysis.md](../../../deployment/realtime_vla_optimization_analysis.md) §1.4 选项 X + §3.4.1 PyTorch 等效性 POC。
-战略上下文: [cross_embodiment_strategy.md](../../../deployment/cross_embodiment_strategy.md)。
+参考: [inference/realtime_vla/strategy.md](../../../deployment/inference/realtime_vla/strategy.md) §1.4 选项 X + §3.4.1 PyTorch 等效性 POC。
+战略上下文: [cross_embodiment_strategy.md](../../../deployment/strategy/cross_embodiment_strategy.md)。
 
 ## 2. 数据与框架
 

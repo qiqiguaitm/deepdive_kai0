@@ -270,4 +270,4 @@
   - `vis_base_40k step 36000`: `/vePFS/tim/workspace/deepdive_kai0_tmp/data/vis_base_40k_best_step36000.tar`
 - 中间 step ckpts (供 Phase 0.A 早期 ckpt 测试): `/vePFS/.../checkpoints/pi05_flatten_fold_mix_vis600/mix_vis600_v1/{2000,4000,...}/`
 - 数据 build 脚本: `train_scripts/data/build_task_a_{vis_base,mix_vis600,pure_vis600}.py`
-- sim01 部署文档: `docs/deployment/sim01_deployment.md`
+- sim01 部署文档: `docs/deployment/inference/sim01_deployment.md`

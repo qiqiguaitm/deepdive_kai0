@@ -260,7 +260,7 @@ SKIP_ARMS=1 SKIP_CAMERAS=1 SKIP_PEDAL=1 SKIP_DEPS=1 ./run.sh start backend
 
 ## 9. 历史踩坑速查
 
-详见 `docs/deployment/task_a_real_robot_grasp_corner_debug_log.md` 等. 本指南只快速列:
+详见 `docs/deployment/incidents/task_a_real_robot_grasp_corner_debug_log.md` 等. 本指南只快速列:
 
 - **"replay 瞬间完成 100%"** → 多个 race / 老 cache bug 全已修 (2026-04-30 完工)
 - **"右臂不动"** → 不是数据问题, 是 publisher 抢 (teleop + replay 同跑)

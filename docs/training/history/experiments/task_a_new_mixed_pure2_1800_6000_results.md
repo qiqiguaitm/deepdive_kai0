@@ -79,7 +79,7 @@
 
 ### A.5 集群训练经验 (重大坑)
 
-详见 `docs/deployment/training_servers_knowledge_base.md` section 13。
+详见 `docs/deployment/training_ops/overview.md` section 13。
 
 - **mesh `[3,8]` HSDP 首次编译死锁 ≥105 分钟** (SPMD partitioner mesh 转换慢路径)
 - **mesh `[1,24]` 全 FSDP 8 分钟编译完成** ✅

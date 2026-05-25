@@ -1,6 +1,6 @@
 """GPU-accelerated equivalent of openpi_client.image_tools.resize_with_pad.
 
-P2 Level 1 (2026-05-23, §7.8 in realtime_vla_optimization_analysis.md).
+P2 Level 1 (2026-05-23, §7.8 in inference/realtime_vla/strategy.md).
 Replaces the 3× CPU PIL resize chain in policy_inference_node._get_observation
 with a single batched torch GPU call. Numerical parity within ~1 pixel value
 (antialiased bilinear matches PIL.Image.BILINEAR + antialias).

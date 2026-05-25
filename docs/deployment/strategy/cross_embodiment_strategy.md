@@ -360,6 +360,6 @@ def compute_loss(rng, obs, actions, *, max_delay=10):
 
 - **Plan 详情**: `docs/training/future_plans/plans/` (`ssl_phase_pretrain_pipeline.md`, `xvla_track_x_curriculum.md`, `pytorch_native_vis_v2_full.md`)
 - **Conditioning 跟踪**: `docs/training/history/experiments/xvla_conditioning_methods_results.md`, `conditioning_vs_action_representation_ablation.md`
-- **实时推理**: `docs/deployment/realtime_vla_optimization_analysis.md`, `docs/deployment/rtc_implementation.md`
+- **实时推理**: `docs/deployment/inference/realtime_vla/strategy.md`, `docs/deployment/inference/rtc_implementation.md`
 - **数据集诊断**: `docs/training/history/experiments/dataset_diagnostic_report.md`
 - **Norm-stats ablation 实测**: `docs/training/history/experiments/norm_stats_ablation_apr28_450.md`

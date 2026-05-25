@@ -2,7 +2,7 @@
 
 > **状态**: Phase 0 部分 done (Kai0 base+dagger CoTracker3 + SAM2), 余下待启动。
 > **关联 task**: `#11 SSL Phase 0`, `#12 SSL Phase 1`, `#13 SSL Phase 2`, `#14 SSL Phase 3`。
-> **战略上下文**: [cross_embodiment_strategy.md](../../../deployment/cross_embodiment_strategy.md) §3 (4-层 ROI) + §7 (Tri-track) + §8 (风险)。
+> **战略上下文**: [cross_embodiment_strategy.md](../../../deployment/strategy/cross_embodiment_strategy.md) §3 (4-层 ROI) + §7 (Tri-track) + §8 (风险)。
 
 ## Phase 0 — 数据预处理 🔄 in_progress (启动 2026-05-21)
 

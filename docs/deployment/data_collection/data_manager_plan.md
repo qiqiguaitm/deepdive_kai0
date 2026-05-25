@@ -18,7 +18,7 @@
 - 顶栏「切换到管理员」直接进入，无密码（本机内网部署，信任环境）。
 - **额外解锁**：
   - **任务 / Prompt 模板管理**：新增 / 编辑 / 禁用任务项与 prompt 条目（供采集员下拉使用）。
-  - **Rerun 可视化**：对任意已采 episode 或实时流启动 Rerun viewer（三路视频 + 14 维关节曲线 + 动作指令 + 时间戳对齐），复用 `docs/deployment/inference_visualization.md` / `inference_visualization_mesh.md` 管线，按需加载 mesh 版本。
+  - **Rerun 可视化**：对任意已采 episode 或实时流启动 Rerun viewer（三路视频 + 14 维关节曲线 + 动作指令 + 时间戳对齐），复用 `docs/deployment/visualization/inference_visualization.md` / `inference_visualization_mesh.md` 管线，按需加载 mesh 版本。
   - 历史 episode 打标 / 删除 / 重命名 / 批量导出。
   - 质检阈值、相机/CAN、存盘路径等配置修改。
   - 后端诊断：ROS2 话题健康、录制 worker 日志、服务重启。

@@ -61,7 +61,7 @@ case "$mode" in
         apply true  16 0.5  3.0  8 8 0.25
         ;;
     v1_default)
-        # V1 default (2026-05-22 sweep M2-C, see docs/deployment/rtc_implementation.md §7).
+        # V1 default (2026-05-22 sweep M2-C, see docs/deployment/inference/rtc_implementation.md §7).
         # 10Hz replan, latency_k=3, exec_h=6 — derived from V1 forward 34ms + RTT 77ms.
         # Validated on task_a_new_pure_200_step49999: image_age -30% vs jax_legacy,
         # no GPU saturation (P50 stays 70ms), chunk MAE unchanged.

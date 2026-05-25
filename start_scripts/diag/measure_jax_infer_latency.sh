@@ -89,7 +89,7 @@ print(f"  PyTorch E max-autotune (offline 5090, random):     41.0 ms (P50)")
 # 跨阈值判断 (用于决策推理优化路线)
 p50 = np.percentile(clean, 50)
 print()
-print("=== Decision per docs/deployment/realtime_vla_optimization_analysis.md §4.1 ===")
+print("=== Decision per docs/deployment/inference/realtime_vla/strategy.md §4.1 ===")
 if p50 < 80:
     print(f"  P50 = {p50:.0f} ms → 模型已很快, #6 浅层收益小, 阶段 3 优先级可降低")
 elif p50 < 200:

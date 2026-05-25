@@ -11,7 +11,7 @@
 > **X-VLA conditioning 主线 (2026-05-22 新增)**:
 > - **`xvla_conditioning_methods_results.md`** ⭐ — **新增主索引**: Hard Prompt / Soft Prompt (Track B) / Action Head Cond (Track C) 三种 conditioning 方式在 kai+vis 混合数据 (7407 ep) 同等条件下的对照实验, paper E3.7/E3.8/E3.9 ablation 主线
 > - **`conditioning_vs_action_representation_ablation.md`** ⭐ 新 (2026-05-23) — **Conditioning × Action Rep 2×2 ablation**: 同 init 同 step 同 hparams 下 (E3.6 / pi05 delta / Track C abs / Action Cond × delta) 系统对比 conditioning 与 abs/delta 各自贡献. 用于诊断 "Action Cond × delta 真机震动" 归因
-> - `../../../deployment/cross_embodiment_strategy.md` — 跨本体战略 (Track A SSL / Track C Action Head Cond / Track X X-VLA 官方) + 假说 H1-H4 + 决策点 (Track B 已废弃)
+> - `../../../deployment/strategy/cross_embodiment_strategy.md` — 跨本体战略 (Track A SSL / Track C Action Head Cond / Track X X-VLA 官方) + 假说 H1-H4 + 决策点 (Track B 已废弃)
 >
 > **action-only / finetune 历史**:
 > - `task_e_master_plan.md` — Task E 完整规划与所有 Phase 1/2 实验细节
@@ -24,6 +24,7 @@
 > - **`task_a_new_pure2_1800_new_norm_js_results.md`** — 1800 ep `-new` + mixed_1_clean init, js03+04 16-GPU HSDP, MAE 0.0090 (未超老 SOTA, +5.9%)
 > - **`task_a_new_pure_1800_new_norm_base_mixed1_results.md`** — uc02 单机 8 GPU, 1800 ep + **mixed_1** init, MAE@1=0.0088, **@50=0.0258 全 long-horizon 胜老 SOTA 9-23%** (两阶段范式)
 > - **`task_a_new_smooth_800_new_norm_results.md`** — uc03 单机, 811 ep vis_clean_v2 + mixed_1_clean init, MAE@1=0.0089, 但 @50=0.0636 long-horizon 差 (无 mirror augmentation)
+> - **`pi05_flatten_fold_vis_v2_full`** (2026-05-25 新) — Beijing 8 H20 单节点, **vis_v2_full (1409 ep / 1.93M frames / 16 v2 dates 04-23 → 05-22) + pi05_base init**, 50k step (x94g2 → 24h timeout → qnq5j resume from 34k → completed 49999). Eval MAE@1=0.0131 / @50=0.1138 (vis_v2_val50 前 50 ep). 单源训练, 健康收敛 (无 datasets_yaml/balanced sampling 引起的 "predict-zero" collapse)
 > - **`training_paradigm_comparison.md`** — single-stage vs two-stage 训练范式对比 (pi05_base+7900ep 一次性 vs mixed_1+1800ep 两阶段, 决策树)
 > - **`docs/security/2026-05-16_rvn_miner_incident.md`** — Ravencoin 挖矿木马入侵事件报告 (uc01/02/03, SSH 密码爆破 + 横向移动, 已处置)
 > - **`task_p_unfreeze_20k_v2_results.md`** — uc02 v2 数据集对比 (Task_P/v2_aligned 84 ep + action=state + 30fps interp + seed=123, best 0.0070, -64% vs orig)

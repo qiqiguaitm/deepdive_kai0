@@ -11,7 +11,7 @@
 #
 # 该 launcher 自己读 sidecar + 注入 OPENPI_EXTRA_CONFIG, 不再编辑 config.py.
 # Sidecar 由 train_scripts/data/pack_inference_ckpt.py 在打包推理 bundle 时
-# 自动生成. 历史不带 sidecar 的 ckpt 可参考 docs/deployment/checkpoints_layout.md
+# 自动生成. 历史不带 sidecar 的 ckpt 可参考 docs/deployment/training_ops/checkpoints_layout.md
 # §"Type A flat bundle" 手工补齐 (~5 KB 额外文件, 不动 12 GB params).
 #
 # 实验记录请写到 docs/training/<exp>_results.md, 不要再往这里堆.
