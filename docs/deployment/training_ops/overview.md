@@ -60,7 +60,7 @@ cd ~/workspace/deepdive_kai0/kai0   # uc01/uc02
 .venv/bin/python scripts/compute_norm_states_fast.py --config-name <config_name>
 
 # Step 2: 启动训练 (JAX 全参微调)
-nohup bash train_scripts/launch/run_<config>_gf<N>.sh > /tmp/train_<config>.log 2>&1 &
+nohup bash train_scripts/kai/launch/run_<config>_gf<N>.sh > /tmp/train_<config>.log 2>&1 &
 disown $!
 ```
 
@@ -123,7 +123,7 @@ disown $!
 
 ```bash
 ssh -p 7888 root@124.174.16.237
-bash /vePFS-North-E/vis_robot/workspace/deepdive_kai0/train_scripts/launch/run_gf3_smoke.sh
+bash /vePFS-North-E/vis_robot/workspace/deepdive_kai0/train_scripts/kai/launch/run_gf3_smoke.sh
 # log: /vePFS-North-E/vis_robot/logs/gf3_smoke_*.log
 ```
 

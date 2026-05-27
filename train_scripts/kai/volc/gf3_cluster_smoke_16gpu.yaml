@@ -1,0 +1,129 @@
+# gf3 / Robot-North-H20 16-GPU cluster smoke: pi05init on A_new_pure_200
+#
+#   Region:   cn-beijing
+#   Queue:    Robot-North-H20  (q-20260516104642-khch9, zone cn-beijing-e)
+#   Hosts:    2  × ml.hpcpni3ln.45xlarge  (each = 8× H20-SXM5-96GB + RDMA)
+#   GPUs:     16 (FSDP=16)
+#   Storage:  vepfs-cnbj875793a96d6b  → /vePFS-North-E
+#   Image:    visincept-cn-beijing.cr.volces.com/grasp/h2r:1.0
+#
+#   Config:   pi05_flatten_fold_a_new_pure_1200  (tracked variant; dataset shape identical to _200)
+#   Init:     pi05_base/params  (already extracted on /vePFS-North-E from TOS pi05_base.tar)
+#   Goal:     boot cleanly, multi-host JAX init, get past step 0, hit inline_eval @ step 2000
+#
+# Submit:
+#   source ~/.volc_creds
+#   python train_scripts/kai/volc/submit_yaml.py train_scripts/kai/volc/gf3_cluster_smoke_16gpu.yaml
+
+TaskName: "gf3-cluster-smoke-16gpu"
+Description: "gf3 16-GPU smoke (2×8 H20 RDMA) — pi05init on A_new_pure_200, FSDP=16"
+Tags: []
+
+UserCodePath: ""
+RemoteMountCodePath: ""
+
+ImageUrl: "visincept-cn-beijing.cr.volces.com/grasp/h2r:1.0"
+
+ResourceQueueName: "Robot-North-H20"
+
+Framework: "PyTorch"  # gives MLP_WORKER_0_HOST / MLP_ROLE_INDEX / MLP_WORKER_NUM env vars
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 2
+    Flavor: "ml.hpcpni3ln.45xlarge"  # 8× H20-SXM5-96GB per host, RDMA-capable
+
+ActiveDeadlineSeconds: 14400  # 4h cap — smoke test should reach first eval well under 1h
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnbj875793a96d6b"
+    SubPath: "vis_robot"               # AK only has RDWR on vis_robot/ subpath, not vePFS root
+    MountPath: "/vePFS-North-E/vis_robot"
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+    IsPrivate: false
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+    IsPrivate: false
+  - Name: TOKENIZERS_PARALLELISM
+    Value: "false"
+    IsPrivate: false
+  - Name: NCCL_DEBUG
+    Value: "INFO"  # first cluster run: see RDMA transport + ring details
+    IsPrivate: false
+  - Name: OMP_NUM_THREADS
+    Value: "8"
+    IsPrivate: false
+  - Name: XLA_PYTHON_CLIENT_MEM_FRACTION
+    Value: "0.85"  # leave room for NCCL RDMA buffers
+    IsPrivate: false
+  - Name: JAX_COMPILATION_CACHE_MIN_ENTRY_SIZE_BYTES
+    Value: "-1"
+    IsPrivate: false
+  - Name: JAX_COMPILATION_CACHE_MIN_COMPILE_TIME_SECS
+    Value: "1"
+    IsPrivate: false
+  - Name: JAX_ENABLE_EMPTY_ARRAYS
+    Value: "true"
+    IsPrivate: false
+
+Entrypoint: |
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  LOG_DIR=/vePFS-North-E/vis_robot/logs
+  mkdir -p "$LOG_DIR"
+  LOG="$LOG_DIR/cluster_smoke_16gpu_${STAMP}_node${MLP_ROLE_INDEX:-0}.log"
+  exec >> "$LOG" 2>&1
+  echo "=== entrypoint start $(date) node=${MLP_ROLE_INDEX:-0}/${MLP_WORKER_NUM:-1} ==="
+  set -ex
+
+  echo "[multinode env]"
+  echo "  MLP_WORKER_0_HOST=${MLP_WORKER_0_HOST}"
+  echo "  MLP_WORKER_0_PORT=${MLP_WORKER_0_PORT}"
+  echo "  MLP_WORKER_NUM=${MLP_WORKER_NUM}"
+  echo "  MLP_ROLE_INDEX=${MLP_ROLE_INDEX}"
+  echo "  MLP_WORKER_GPU=${MLP_WORKER_GPU}"
+  nvidia-smi -L
+  ip -br addr | head
+
+  KAI0=/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0
+
+  # ---- venv is fully self-contained on vePFS ----
+  #   .venv/bin/python   → /vePFS-North-E/vis_robot/workspace/.uv_python/cpython-3.12.13-linux-x86_64-gnu/bin/python3.12
+  #   .venv/pyvenv.cfg   home = /vePFS-North-E/vis_robot/workspace/.uv_python/cpython-3.12.13-linux-x86_64-gnu/bin
+  # Any node that mounts vepfs-cnbj875793a96d6b at /vePFS-North-E can use it directly.
+  cd "$KAI0"
+  ls -la .venv/bin/python
+  source .venv/bin/activate
+  python -c "import torch, jax; print(f'torch {torch.__version__} jax {jax.__version__} devs={[d.device_kind for d in jax.devices()]}')"
+
+  # ---- JAX multinode env (固定 port 15830, MLP_WORKER_0_PORT=2222 is SSH on volc, avoid) ----
+  export JAX_COORDINATOR_ADDRESS="${MLP_WORKER_0_HOST}:15830"
+  export JAX_NUM_PROCESSES="${MLP_WORKER_NUM:-2}"
+  export JAX_PROCESS_INDEX="${MLP_ROLE_INDEX:-0}"
+  echo "JAX coord: $JAX_COORDINATOR_ADDRESS  procs=$JAX_NUM_PROCESSES  idx=$JAX_PROCESS_INDEX"
+
+  # ---- training cmd (FSDP=16, batch=128 = 8/GPU like uc cluster) ----
+  exec python -u scripts/train.py pi05_flatten_fold_a_new_pure_1200 \
+    --exp-name="cluster_smoke_16gpu_a_new_pure_200_${STAMP}" \
+    --fsdp-devices 16 \
+    --batch-size 128 \
+    --num-workers 16 \
+    --inline-eval-every 1 \
+    --data.repo-id /vePFS-North-E/vis_robot/dataset/KAI0/Task_A/self_built/A_new_pure_200 \
+    --inline-eval-val-root /vePFS-North-E/vis_robot/dataset/KAI0/Task_A/self_built/A_new_pure_200_val \
+    --weight-loader.params-path /vePFS-North-E/vis_robot/base_init_ckpts/extracted/pi05_base/params \
+    --checkpoint-base-dir /vePFS-North-E/vis_robot/checkpoints \
+    --no-wandb-enabled \
+    --overwrite
+
+RetryOptions:
+    EnableRetry: false
+    MaxRetryTimes: 0
+
+AccessType: "Public"

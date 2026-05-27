@@ -88,7 +88,7 @@ export JAX_NUM_PROCESSES=<total processes>
 export JAX_PROCESS_INDEX=<this process's index>
 ```
 
-See `train_scripts/launch/run_multinode.sh` for a full example.
+See `train_scripts/kai/launch/run_multinode.sh` for a full example.
 
 ## Env var profiles (set by `setup_env.sh`)
 

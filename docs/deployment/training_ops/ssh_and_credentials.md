@@ -43,7 +43,7 @@ alias uc03='ssh ubuntu@117.50.217.231'
 ### 4.3 TOS 凭据 / Bucket
 
 - Bucket: `transfer-shanghai` @ `tos-cn-shanghai.volces.com` (region `cn-shanghai`)
-- 读凭据: hardcoded 在 `train_scripts/data/from_tos_file.py` (公开)
+- 读凭据: hardcoded 在 `train_scripts/kai/data/from_tos_file.py` (公开)
 - 写凭据: `VOLC_TOS_AK` / `VOLC_TOS_SK` env vars 或 `tosutil` 配置
 
 > **完整 TOS 数据同步架构 (sim01 是源 → TOS 枢纽 → 各训练服务器) 见 §6**。本节仅记录凭据/bucket 信息。

@@ -1,0 +1,8 @@
+# Mixed dataset for exp2 (X-VLA soft prompt).
+# Same prompt for all entries (no per-domain prefix); per-domain learnable tokens
+# are injected by Pi0.soft_prompt_hub via obs.dataset_id.
+# domain_id: 0 = official (kai0_base + kai0_dagger), 1 = vis (self-collected).
+roots:
+  - {root: /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_base,       domain_id: 0}
+  - {root: /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_dagger,     domain_id: 0}
+  - {root: /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged,   domain_id: 1}

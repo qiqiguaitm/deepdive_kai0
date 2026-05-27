@@ -211,7 +211,7 @@
 ### 7.1 No-cond model (pi05 delta) eval
 ```bash
 ssh gf3 'cd /vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0 && \
-  .venv/bin/python -u ../train_scripts/eval/eval_val_action_mse.py \
+  .venv/bin/python -u ../train_scripts/kai/eval/eval_val_action_mse.py \
       --config pi05_flatten_fold_task_a_base_delta \
       --ckpt /vePFS-North-E/.../pi05_flatten_fold_task_a_base_delta/49999 \
       --val /tmp/vis_v2_val50 \
@@ -222,7 +222,7 @@ ssh gf3 'cd /vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0 && \
 ### 7.2 Conditioning model (Action Cond) eval — **必须** 传 dataset_id 和 correct prompt
 ```bash
 ssh gf3 'cd /vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0 && \
-  .venv/bin/python -u ../train_scripts/eval/eval_val_action_mse.py \
+  .venv/bin/python -u ../train_scripts/kai/eval/eval_val_action_mse.py \
       --config xvla_actcond_single_stage_joint_delta \
       --ckpt /vePFS-North-E/.../xvla_actcond_single_stage_joint_delta/49999 \
       --val /tmp/vis_v2_val50 \

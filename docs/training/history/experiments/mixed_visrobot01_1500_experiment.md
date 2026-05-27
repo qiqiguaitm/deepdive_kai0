@@ -3,7 +3,7 @@
 > 日期：2026-04-25 ~ 2026-04-26
 > 配置：`pi05_flatten_fold_mixed_visrobot01`
 > 实验名：`mixed_visrobot01_1500`
-> 启动脚本：`train_scripts/launch/run_task_a_official_dynamic.sh`
+> 启动脚本：`train_scripts/kai/launch/run_task_a_official_dynamic.sh`
 > 状态：✅ 已完成
 
 ---
@@ -54,7 +54,7 @@ export XLA_PYTHON_CLIENT_MEM_FRACTION=0.9
 
 cd /VLA-Data/scripts/xyh/deepdive_kai0
 
-bash train_scripts/launch/run_task_a_official_dynamic.sh \
+bash train_scripts/kai/launch/run_task_a_official_dynamic.sh \
   pi05_flatten_fold_mixed_visrobot01 \
   --exp-name mixed_visrobot01_1500 \
   --project-name kai0_policy_exp \

@@ -795,7 +795,7 @@ step 26-29999 plateau @ 0.0140-0.0141。**部署 tar**: `/vePFS/.../deepdive_kai
 | pi05 模型 + Action Expert 定义 | `kai0/src/openpi/models/pi0.py` |
 | `get_freeze_filter()` 工具 | `kai0/src/openpi/models/pi0_config.py` |
 | Agilex policy 输入/输出变换 | `kai0/src/openpi/policies/agilex_policy.py` |
-| 训练启动入口 | `scripts/start_train.sh` / `train_scripts/launch/start_train.sh` |
+| 训练启动入口 | `scripts/start_train.sh` / `train_scripts/kai/launch/start_train.sh` |
 | 独立评测脚本 | `scripts/eval_val_action_mse.py` |
 | Ckpt 评测自动归档 | `scripts/auto_eval_v2.sh` |
 | 空间镜像 | `kai0/train_deploy_alignment/space_mirroring.py` |

@@ -136,9 +136,9 @@ export function ReplayPanel({ ep, role, onCloned, onDeleted }: Props) {
           marginTop: 12, padding: 8, fontSize: 12, color: "var(--muted)",
           border: "1px dashed var(--border)", borderRadius: 6,
         }}>
-          下发到机械臂请使用 <code>./start_scripts/start_autonomy.sh --replay</code>
+          下发到机械臂请使用 <code>./start_scripts/kai/start_autonomy.sh --replay</code>
           (真机) 或 <code>--replay --sim</code> (仿真), 然后 <br />
-          <code>./start_scripts/start_replay_test.sh {ep.task_id}/{ep.subset}/&lt;date&gt;/{ep.episode_id}</code>
+          <code>./start_scripts/kai/start_replay_test.sh {ep.task_id}/{ep.subset}/&lt;date&gt;/{ep.episode_id}</code>
         </div>
       )}
 

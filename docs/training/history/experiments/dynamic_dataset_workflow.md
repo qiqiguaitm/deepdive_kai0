@@ -48,10 +48,10 @@ norm_stats = _checkpoints.load_norm_stats(checkpoint_dir / "assets", data_config
 
 | 文件 | 用途 |
 |---|---|
-| `train_scripts/data/build_task_a_mixed.py` | 构建 3 源混合数据集（visrobot01 + existing base + dagger），加 `--val-size` 切 val 分层抽样 |
-| `train_scripts/data/generate_episodes_stats.py` | v2.1 required per-episode stats |
+| `train_scripts/kai/data/build_task_a_mixed.py` | 构建 3 源混合数据集（visrobot01 + existing base + dagger），加 `--val-size` 切 val 分层抽样 |
+| `train_scripts/kai/data/generate_episodes_stats.py` | v2.1 required per-episode stats |
 | `kai0/scripts/compute_norm_states_fast.py` | 全局 norm_stats（state/action mean/std/q01/q99）|
-| `train_scripts/launch/run_taska_mixed_gf1.sh` | 初次启动（用 `--overwrite`）|
+| `train_scripts/kai/launch/run_taska_mixed_gf1.sh` | 初次启动（用 `--overwrite`）|
 | **`/tmp/dynamic_dataset_train.sh`** | **本方案核心 watcher** |
 
 ## 工作流
@@ -114,16 +114,16 @@ cd /vePFS/tim/workspace/deepdive_kai0
 PYTHON=/home/tim/workspace/deepdive_kai0/kai0/.venv/bin/python
 
 # 构建数据
-$PYTHON train_scripts/data/build_task_a_mixed.py --val-size 21 --force
-$PYTHON train_scripts/data/generate_episodes_stats.py \
+$PYTHON train_scripts/kai/data/build_task_a_mixed.py --val-size 21 --force
+$PYTHON train_scripts/kai/data/generate_episodes_stats.py \
     /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A_mixed_gf1/base
-$PYTHON train_scripts/data/generate_episodes_stats.py \
+$PYTHON train_scripts/kai/data/generate_episodes_stats.py \
     /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A_mixed_gf1/val
 source setup_env.sh; export KAI0_DATA_ROOT OPENPI_DATA_HOME PYTORCH_CKPT_BASE
 cd kai0; $PYTHON scripts/compute_norm_states_fast.py --config-name pi05_flatten_fold_mixed_visrobot01; cd ..
 
 # 启动训练（前台，log 到 /tmp/train_taska_mixed.log）
-nohup bash train_scripts/launch/run_taska_mixed_gf1.sh > /tmp/train_taska_mixed.log 2>&1 &
+nohup bash train_scripts/kai/launch/run_taska_mixed_gf1.sh > /tmp/train_taska_mixed.log 2>&1 &
 ```
 
 ### 2. 启动 watcher（人工，一次性）

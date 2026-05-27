@@ -127,7 +127,7 @@
 
 ```bash
 # 1. AE inference on dagger_with_stage (gf1 单 GPU ~1-2h)
-bash train_scripts/launch/run_ae_infer_dagger.sh
+bash train_scripts/kai/launch/run_ae_infer_dagger.sh
 # → dagger_with_stage/data_KAI0_100000/*.parquet (含 absolute_advantage 列)
 
 # 2. Sanity check: AE 输出分布 vs advantage 的分布
@@ -231,11 +231,11 @@ RandomCrop(0.90)             # 新增
 
 ```bash
 # gf1 vanilla (20:20 启动)
-bash train_scripts/launch/run_awbc_v2_gf1.sh
+bash train_scripts/kai/launch/run_awbc_v2_gf1.sh
 # Config: pi05_flatten_fold_awbc_v2，data=awbc_v2_full 6512ep，30K steps
 
 # gf0 robust (并行，20:20 启动)
-bash train_scripts/launch/run_awbc_v2_robust_gf0.sh
+bash train_scripts/kai/launch/run_awbc_v2_robust_gf0.sh
 # Config: pi05_flatten_fold_awbc_v2_robust，data=awbc_v2_full 6512ep，30K steps
 ```
 
@@ -898,16 +898,16 @@ Day 4:
 cd /vePFS/tim/workspace/deepdive_kai0
 
 # Step 1: 生成 split
-python train_scripts/data/split_advantage_stage.py
+python train_scripts/kai/data/split_advantage_stage.py
 
 # Step 2 (在 gf1 执行): 预提取 tube features
-ssh ... "bash train_scripts/stage_classifier/precompute_gf1.sh"
+ssh ... "bash train_scripts/kai/stage_classifier/precompute_gf1.sh"
 
 # Step 3 (gf1): 训练
-ssh ... "bash train_scripts/launch/run_stage_classifier_gf1.sh"
+ssh ... "bash train_scripts/kai/launch/run_stage_classifier_gf1.sh"
 
 # Step 4 (gf1): 推理 dagger
-ssh ... "bash train_scripts/stage_classifier/infer_dagger_gf1.sh"
+ssh ... "bash train_scripts/kai/stage_classifier/infer_dagger_gf1.sh"
 
 # Step 5: 下游 AWBC
 # ... (复用之前的 AE inference + discretize + merge pipeline)

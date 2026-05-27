@@ -66,5 +66,5 @@ export const api = {
 
 // Real-arm replay was removed from the data_manager web UI — collect mode only.
 // To replay an episode on real arms or sim:
-//   ./start_scripts/start_autonomy.sh --replay [--sim]
-//   ./start_scripts/start_replay_test.sh <task>/<subset>/<date>/<episode_id>
+//   ./start_scripts/kai/start_autonomy.sh --replay [--sim]
+//   ./start_scripts/kai/start_replay_test.sh <task>/<subset>/<date>/<episode_id>

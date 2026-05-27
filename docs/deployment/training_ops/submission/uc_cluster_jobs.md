@@ -111,7 +111,7 @@ uc 集群与 vePFS 不直接共享, 跨集群数据流动经 gf0 中转:
 
 | 操作 | 命令模板 |
 |---|---|
-| **火山 提交** | `ssh gf0 "cd /vePFS/.../kai0 && python train_scripts/volc/submit_yaml.py <yaml>"` |
+| **火山 提交** | `ssh gf0 "cd /vePFS/.../kai0 && python train_scripts/kai/volc/submit_yaml.py <yaml>"` |
 | **火山 list** | `ssh gf0 "mlp job list --state Running"` |
 | **火山 stop** | `ssh gf0 "mlp job stop --id t-..."` |
 | **火山 logs** | `ssh -t gf0 "mlp job logs --id t-... --follow"` |
@@ -126,7 +126,7 @@ uc 集群与 vePFS 不直接共享, 跨集群数据流动经 gf0 中转:
 
 ```bash
 # 火山控制
-alias vsubmit='ssh gf0 "cd /vePFS/tim/workspace/deepdive_kai0 && python train_scripts/volc/submit_yaml.py"'
+alias vsubmit='ssh gf0 "cd /vePFS/tim/workspace/deepdive_kai0 && python train_scripts/kai/volc/submit_yaml.py"'
 alias vlist='ssh gf0 "mlp job list --state Running --page-size 30"'
 alias vget='ssh gf0 "mlp job get -o json --id"'
 alias vstop='ssh gf0 "mlp job stop --id"'

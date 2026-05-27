@@ -65,7 +65,7 @@ grep "inline-eval" logs/train_<exp>.log \
 > 硬件：sim01 / gf0 / gf1 / gf2 (描述 GPU 型号 + 数量)
 > 启动命令：
 > ```bash
-> ./train_scripts/launch/start_train.sh <config> <exp_name> <gpu_id>
+> ./train_scripts/kai/launch/start_train.sh <config> <exp_name> <gpu_id>
 > ```
 
 ## 1. 实验设定

@@ -238,11 +238,11 @@ XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/train.py pi05_flatten_fold_awb
 
 产物：`checkpoints/pi05_flatten_fold_awbc/awbc_v1/{5000,...,100000}/`。
 
-Launchers 参考 `train_scripts/launch/run_awbc_{baseline,q5drop,v2_*,daggeronly}_*.sh`。
+Launchers 参考 `train_scripts/kai/launch/run_awbc_{baseline,q5drop,v2_*,daggeronly}_*.sh`。
 
 #### 1.5.5 推理时 prompt 硬性要求
 
-Serving 端（`start_scripts/start_policy_node.sh` → `serve_policy.py`）**不硬编码** advantage 标签，由调用方通过 `task` 字段传入。要激活"高 advantage"策略必须传：
+Serving 端（`start_scripts/kai/start_policy_node.sh` → `serve_policy.py`）**不硬编码** advantage 标签，由调用方通过 `task` 字段传入。要激活"高 advantage"策略必须传：
 
 ```
 "Flatten and fold the cloth. Advantage: positive"

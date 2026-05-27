@@ -20,8 +20,8 @@
 ### 1.1 autonomy (跑 policy 推理)
 ```bash
 cd /home/tim/workspace/deepdive_kai0
-./start_scripts/start_autonomy.sh                  # 前台
-nohup ./start_scripts/start_autonomy.sh > /tmp/autonomy.log 2>&1 &  # 后台
+./start_scripts/kai/start_autonomy.sh                  # 前台
+nohup ./start_scripts/kai/start_autonomy.sh > /tmp/autonomy.log 2>&1 &  # 后台
 disown
 # 停: Ctrl+C 或 pkill -f autonomy_launch
 ```
@@ -29,20 +29,20 @@ disown
 ### 1.2 replay-only (只 replay, slim, 推荐)
 ```bash
 cd /home/tim/workspace/deepdive_kai0
-./start_scripts/start_replay_stack.sh              # 前台
-nohup ./start_scripts/start_replay_stack.sh > /tmp/replay.log 2>&1 &  # 后台
+./start_scripts/kai/start_replay_stack.sh              # 前台
+nohup ./start_scripts/kai/start_replay_stack.sh > /tmp/replay.log 2>&1 &  # 后台
 disown
 # 停 (干净):
-./start_scripts/start_replay_stack.sh stop
+./start_scripts/kai/start_replay_stack.sh stop
 ```
 
 ### 1.3 data_collect (采集 + UI)
 ```bash
 cd /home/tim/workspace/deepdive_kai0
-./start_scripts/start_data_collect.sh              # 起 5 个服务
-./start_scripts/start_data_collect.sh status       # 看状态
-./start_scripts/start_data_collect.sh logs backend # 看 backend 日志
-./start_scripts/start_data_collect.sh stop         # 全停
+./start_scripts/kai/start_data_collect.sh              # 起 5 个服务
+./start_scripts/kai/start_data_collect.sh status       # 看状态
+./start_scripts/kai/start_data_collect.sh logs backend # 看 backend 日志
+./start_scripts/kai/start_data_collect.sh stop         # 全停
 ```
 
 ⚠️ 单独起 backend (不带 teleop):
@@ -66,9 +66,9 @@ SKIP_ARMS=1 SKIP_CAMERAS=1 SKIP_PEDAL=1 SKIP_DEPS=1 ./run.sh start backend
 ### 2.2 CLI 脚本
 ```bash
 cd /home/tim/workspace/deepdive_kai0
-./start_scripts/start_replay_test.sh Task_A/base/2026-04-28/42         # 自录数据
-./start_scripts/start_replay_test.sh Task_A/base/kai0_official_base/104 # kai0 官方
-./start_scripts/start_replay_test.sh Task_A/base/2026-04-28/42 0.7      # 0.7× 慢速
+./start_scripts/kai/start_replay_test.sh Task_A/base/2026-04-28/42         # 自录数据
+./start_scripts/kai/start_replay_test.sh Task_A/base/kai0_official_base/104 # kai0 官方
+./start_scripts/kai/start_replay_test.sh Task_A/base/2026-04-28/42 0.7      # 0.7× 慢速
 ```
 脚本自动: 检 marker → detect 节点 (`/replay` 优先) → S3 parquet shape → 打印 confirm prompt → 真发 → 进度 echo.
 
@@ -189,7 +189,7 @@ curl -sS -X POST http://localhost:8787/api/replay/preflight \
 ### 场景 A: 纯 replay 测试 (推荐, 最轻)
 ```bash
 # 1. 干净起 slim replay
-nohup /home/tim/workspace/deepdive_kai0/start_scripts/start_replay_stack.sh > /tmp/replay.log 2>&1 &
+nohup /home/tim/workspace/deepdive_kai0/start_scripts/kai/start_replay_stack.sh > /tmp/replay.log 2>&1 &
 disown
 sleep 3
 
@@ -200,14 +200,14 @@ SKIP_ARMS=1 SKIP_CAMERAS=1 SKIP_PEDAL=1 SKIP_DEPS=1 ./run.sh start backend
 # 3. 浏览器测 / CLI 测均可
 
 # 4. 收
-/home/tim/workspace/deepdive_kai0/start_scripts/start_replay_stack.sh stop
+/home/tim/workspace/deepdive_kai0/start_scripts/kai/start_replay_stack.sh stop
 pkill -f 'uvicorn.*app.main'
 ```
 
 ### 场景 B: 先采集后 replay 验证
 ```bash
 # 1. 起 data_collect 全栈
-/home/tim/workspace/deepdive_kai0/start_scripts/start_data_collect.sh
+/home/tim/workspace/deepdive_kai0/start_scripts/kai/start_data_collect.sh
 # 浏览器录数据...
 
 # 2. 录完, 切到 replay (见 §3.1)
@@ -228,7 +228,7 @@ disown && sleep 3 && ros2 daemon stop && ros2 daemon start
 
 ```bash
 # 起 autonomy
-nohup /home/tim/workspace/deepdive_kai0/start_scripts/start_autonomy.sh > /tmp/autonomy.log 2>&1 &
+nohup /home/tim/workspace/deepdive_kai0/start_scripts/kai/start_autonomy.sh > /tmp/autonomy.log 2>&1 &
 disown
 # 等 ~30 秒 warmup, 看 log 出现 'Inference loop started'
 
@@ -244,10 +244,10 @@ SKIP_ARMS=1 SKIP_CAMERAS=1 SKIP_PEDAL=1 SKIP_DEPS=1 ./run.sh start backend
 
 | 文件 | 作用 |
 |---|---|
-| `start_scripts/start_autonomy.sh` | autonomy 启动 + 写 marker=autonomy |
-| `start_scripts/start_replay_stack.sh` | slim 启动 + 写 marker=replay + stop 子命令 |
-| `start_scripts/start_data_collect.sh` | data_collect 启动 + 写 marker=teleop / stop 删 marker |
-| `start_scripts/start_replay_test.sh` | CLI 端到端测试 (auto-detect 节点) |
+| `start_scripts/kai/start_autonomy.sh` | autonomy 启动 + 写 marker=autonomy |
+| `start_scripts/kai/start_replay_stack.sh` | slim 启动 + 写 marker=replay + stop 子命令 |
+| `start_scripts/kai/start_data_collect.sh` | data_collect 启动 + 写 marker=teleop / stop 删 marker |
+| `start_scripts/kai/start_replay_test.sh` | CLI 端到端测试 (auto-detect 节点) |
 | `ros2_ws/src/piper/scripts/replay_node.py` | slim replay 节点 (无 JAX) |
 | `ros2_ws/src/piper/scripts/policy_inference_node.py` | 完整 policy + replay 节点 |
 | `ros2_ws/src/piper/launch/replay_launch.py` | slim 栈 launch |

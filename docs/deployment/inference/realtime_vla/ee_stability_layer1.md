@@ -292,11 +292,11 @@ Deploy-side 已榨干. 进一步改善 (init pose 全空间稳 + gripper binariz
 |---|---|---|
 | `17ed253` | `ros2_ws/src/piper/scripts/policy_inference_node.py` `ros2_ws/src/piper/launch/autonomy_launch.py` | 1.1B min_jerk quintic smoothstep + launch arg toggle |
 | `f9fdd9a` | (同上 2 文件) | 1.1E publish-time EMA + launch arg toggle |
-| `be851bc` | `ros2_ws/src/piper/scripts/policy_inference_node.py` `start_scripts/start_autonomy_v1.sh` | 1.1E gripper-skip + RTC defaults retune (k/exec/smooth/publish) |
+| `be851bc` | `ros2_ws/src/piper/scripts/policy_inference_node.py` `start_scripts/kai/start_autonomy_v1.sh` | 1.1E gripper-skip + RTC defaults retune (k/exec/smooth/publish) |
 
 **回退方法** (若发现新 ckpt 上反向): 
 ```bash
-./start_scripts/start_autonomy_from_ckpt_v1.sh <ckpt> --execute \
+./start_scripts/kai/start_autonomy_from_ckpt_v1.sh <ckpt> --execute \
     rtc_smooth_method:=linear publish_smooth_alpha:=1.0 \
     latency_k:=2 rtc_execute_horizon:=4 min_smooth_steps:=3 publish_rate:=30
 ```

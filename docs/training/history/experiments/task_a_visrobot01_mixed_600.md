@@ -3,8 +3,8 @@
 > **范围**: 2026-04-24 ~ 04-28 在 gf0/gf1 上的 Task A "Flatten and fold the cloth" 全参数微调系列
 > **训练框架**: openpi (JAX) + pi05 (PaliGemma + Action Expert), 全部 8×A100 80GB FSDP=8
 > **配置文件**: `kai0/src/openpi/training/config.py` (`pi05_flatten_fold_*` 系列)
-> **构建脚本**: `train_scripts/data/build_task_a_{vis_base,mix_vis600,pure_vis600,mix_vis600_split,pure_vis600_split}.py`
-> **launcher**: `train_scripts/launch/run_{taska_mixed_gf0,visrobot01_only_2k_gf0,resume_visrobot01_only_gf1,mix_vis600_gf0,pure_vis600_gf1}.sh`
+> **构建脚本**: `train_scripts/kai/data/build_task_a_{vis_base,mix_vis600,pure_vis600,mix_vis600_split,pure_vis600_split}.py`
+> **launcher**: `train_scripts/kai/launch/run_{taska_mixed_gf0,visrobot01_only_2k_gf0,resume_visrobot01_only_gf1,mix_vis600_gf0,pure_vis600_gf1}.sh`
 
 ## 公共 Init (重要 — 所有 7 个 run 共用)
 
@@ -359,7 +359,7 @@ ffmpeg -i <mirror.mp4> -c:v libx264 \
 - 验证: random seek 3.16ms → **0.85ms** (-73%)
 - 训练步速: 8.4 → **2.5 s/step** (-70%)
 
-详见 commit `18e3942` `train_scripts/data/reencode_pure_vis600_mirrors.sh` + `build_task_a_pure_vis600.py` patch。
+详见 commit `18e3942` `train_scripts/kai/data/reencode_pure_vis600_mirrors.sh` + `build_task_a_pure_vis600.py` patch。
 
 ### 5.4 完整 inline-eval 历史 (15 个数据点)
 

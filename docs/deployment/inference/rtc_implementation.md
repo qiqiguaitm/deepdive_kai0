@@ -1,7 +1,7 @@
 # RTC (Real-Time Chunking) 实现方案
 
 > 现行 autonomy 栈中 π₀.5 + RTC 的端到端实现说明: 模型层引导 + 运行时双时钟流水
-> + 调参入口. 适用于 sim01 部署 (`./start_scripts/start_autonomy.sh`).
+> + 调参入口. 适用于 sim01 部署 (`./start_scripts/kai/start_autonomy.sh`).
 
 ## 1. 设计目标与命名
 
@@ -169,7 +169,7 @@ ros2 param set /policy_inference decay_alpha             <float>   # 默认 0.25
 
 ### 7.2 通过 `rtc_apply.sh` 预设 (快捷方式)
 
-`start_scripts/rtc_apply.sh` 把 7 个参数打包成几个常用组合:
+`start_scripts/kai/rtc_apply.sh` 把 7 个参数打包成几个常用组合:
 
 | preset | enable_rtc | exec_h | max_guid | infer_rate | lat_k | smooth | 用途 |
 |---|---|---|---|---|---|---|---|
@@ -183,9 +183,9 @@ ros2 param set /policy_inference decay_alpha             <float>   # 默认 0.25
 
 用法:
 ```bash
-./start_scripts/start_autonomy.sh                  # 在终端 A 起栈
-./start_scripts/rtc_apply.sh                       # 终端 B: 查看当前
-./start_scripts/rtc_apply.sh rtc_tight              # 切到 tight 预设
+./start_scripts/kai/start_autonomy.sh                  # 在终端 A 起栈
+./start_scripts/kai/rtc_apply.sh                       # 终端 B: 查看当前
+./start_scripts/kai/rtc_apply.sh rtc_tight              # 切到 tight 预设
 ```
 
 ### 7.3 通过 launch 参数 (启动时一次性)
@@ -231,8 +231,8 @@ ros2 launch piper autonomy_launch.py \
 | `kai0/src/openpi/training/config.py:1316` | `pi05_flatten_fold_normal` 配置 (本仓默认) |
 | `ros2_ws/src/piper/scripts/policy_inference_node.py` | 运行时调度 + StreamActionBuffer + RTC 注入 |
 | `ros2_ws/src/piper/launch/autonomy_launch.py` | 启动 wrapper + launch 参数声明 |
-| `start_scripts/start_autonomy.sh` | 一键启动脚本 (设置 XLA_FLAGS + GPU 选择 + ros2 launch) |
-| `start_scripts/rtc_apply.sh` | 运行时 preset 切换器 |
+| `start_scripts/kai/start_autonomy.sh` | 一键启动脚本 (设置 XLA_FLAGS + GPU 选择 + ros2 launch) |
+| `start_scripts/kai/rtc_apply.sh` | 运行时 preset 切换器 |
 
 ## 11. 已知问题 / 后续
 

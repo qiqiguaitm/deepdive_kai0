@@ -114,7 +114,7 @@ r = api.get_job({'Id': 't-20260520225742-jv6jk'})
 print(r['Result'].get('State'))    # Running / Success / Failed / Stopped
 ```
 
-**封装好的 helper** (用 submit_yaml.py CLI 形式, 处理 dry-run + 错误): `train_scripts/volc/submit_yaml.py`。
+**封装好的 helper** (用 submit_yaml.py CLI 形式, 处理 dry-run + 错误): `train_scripts/kai/volc/submit_yaml.py`。
 
 > **Queue ID + 容量速查见 §5.6.c.2** (附实测可用 / 已用 GPU 数)。
 
@@ -122,7 +122,7 @@ print(r['Result'].get('State'))    # Running / Success / Failed / Stopped
 
 > ℹ️ **集群训练当前走 §5.6.c (vsubmit 一键提交)**。本节列出 YAML 中针对 16-GPU H20 集群的关键字段差异 (与 8 GPU 单节点对比), 用于自定义 YAML 编写。
 
-模板: `train_scripts/volc/gf3_cluster_smoke_16gpu.yaml` (2 节点 × 8 H20 = 16 GPU, FSDP=16)。
+模板: `train_scripts/kai/volc/gf3_cluster_smoke_16gpu.yaml` (2 节点 × 8 H20 = 16 GPU, FSDP=16)。
 
 ```yaml
 # 实测可工作 (2026-05-21 X-VLA Stage 1 76d44):
@@ -154,9 +154,9 @@ Storages:
 提交:
 ```bash
 source ~/.volc_creds
-python train_scripts/volc/submit_yaml.py train_scripts/volc/gf3_cluster_smoke_16gpu.yaml
+python train_scripts/kai/volc/submit_yaml.py train_scripts/kai/volc/gf3_cluster_smoke_16gpu.yaml
 # 或 dry-run:
-python train_scripts/volc/submit_yaml.py train_scripts/volc/gf3_cluster_smoke_16gpu.yaml --dry-run
+python train_scripts/kai/volc/submit_yaml.py train_scripts/kai/volc/gf3_cluster_smoke_16gpu.yaml --dry-run
 ```
 
 **vePFS 与 .venv self-containment (关键)**: gf3 上的 `.venv` 是经 sed 重写并把 uv-managed Python 一并搬到 vePFS 的版本 (见 §3.1 注解), volc 集群任一新节点 mount `vepfs-cnbj875793a96d6b` 后 `source .venv/bin/activate` 直接可用, **无需在每节点重装**。

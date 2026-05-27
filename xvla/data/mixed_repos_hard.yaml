@@ -1,0 +1,7 @@
+# Mixed dataset for exp1 (hard prompt).
+# Mirrors xvla/data/mixed_hard/ with patched tasks.jsonl per domain.
+# Use with prompt_from_task=True.
+roots:
+  - /vePFS/tim/workspace/deepdive_kai0/xvla/data/mixed_hard/kai0_base       # "kai Flatten and fold the cloth."
+  - /vePFS/tim/workspace/deepdive_kai0/xvla/data/mixed_hard/kai0_dagger     # "kai Flatten and fold the cloth."
+  - /vePFS/tim/workspace/deepdive_kai0/xvla/data/mixed_hard/vis_v2_merged   # "vis Flatten and fold the cloth."

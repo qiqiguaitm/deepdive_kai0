@@ -85,7 +85,7 @@
 
 **改动文件**:
 - `ros2_ws/src/piper/scripts/policy_inference_node.py::_get_synced_frame` — 接收图像时用 `header.stamp` 反查 joint deque, 而非"图像到达时"的关节
-- 新增 `start_scripts/diag/measure_latencies.py` — 一次性 autonomy session 标定脚本
+- 新增 `start_scripts/kai/diag/measure_latencies.py` — 一次性 autonomy session 标定脚本
 
 **步骤**:
 1. 跑一次完整 autonomy 周期, 记录:
@@ -289,7 +289,7 @@
 #### 3.4.3 sidecar framework 字段 + 启动脚本分支 (1-3 天)
 
 **改动文件**:
-- `start_scripts/start_autonomy_from_ckpt.sh`:
+- `start_scripts/kai/start_autonomy_from_ckpt.sh`:
   ```bash
   FRAMEWORK=$(python -c "import json; print(json.load(open('$CKPT_DIR/train_config.json')).get('framework', 'jax'))")
   if [ "$FRAMEWORK" = "pytorch" ]; then
@@ -309,7 +309,7 @@
   {"base_config_name": "...", "override_asset_id": "...", "framework": "jax"}
   // 或 "framework": "pytorch", 默认 "jax" 向后兼容
   ```
-- `start_scripts/start_autonomy.sh` 接受 `config_name:=` 参数时透传给两个 serve
+- `start_scripts/kai/start_autonomy.sh` 接受 `config_name:=` 参数时透传给两个 serve
 
 #### 3.4.4 新 fine-tune 切 PyTorch 策略 (持续, per-ckpt)
 
@@ -456,7 +456,7 @@ self.get_logger().info(f'infer {infer_ms:.0f}ms | chunk={actions.shape} | ...')
 
 **测量范围 (client 视角)**: `t_start` 含 obs 构造 + WebSocket send → server side JAX `sample_actions` JIT 推理 → WebSocket recv → ROS 落 actions. 这是 **端到端 RTT** , **不是裸 GPU 推理时间**.
 
-**测量工具**: `start_scripts/diag/measure_jax_infer_latency.sh` (87 行) 自动从 `~/.ros/log/` 找最新含 `infer XXXms` 的 log, 提取数值, 算分位数 + 阈值决策.
+**测量工具**: `start_scripts/kai/diag/measure_jax_infer_latency.sh` (87 行) 自动从 `~/.ros/log/` 找最新含 `infer XXXms` 的 log, 提取数值, 算分位数 + 阈值决策.
 
 #### 4.1.2 实验配置
 
@@ -554,13 +554,13 @@ P50 = 196 ms → 落在 "100-200ms 标准 5090 baseline" 档:
 
 ```bash
 # 自动找最新 log
-./start_scripts/diag/measure_jax_infer_latency.sh
+./start_scripts/kai/diag/measure_jax_infer_latency.sh
 
 # 指定 log
-./start_scripts/diag/measure_jax_infer_latency.sh <log_file>
+./start_scripts/kai/diag/measure_jax_infer_latency.sh <log_file>
 
 # 调过滤
-SKIP_WARMUP=10 MAX_MS=300 ./start_scripts/diag/measure_jax_infer_latency.sh
+SKIP_WARMUP=10 MAX_MS=300 ./start_scripts/kai/diag/measure_jax_infer_latency.sh
 ```
 
 ### 4.2 测试 2: Piper 关节 t_motion 滞后

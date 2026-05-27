@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Source this file before running any train_scripts/ or start_scripts/.
+# Source this file before running any train_scripts/ or start_scripts/kai/.
 #
 #   source setup_env.sh
 #

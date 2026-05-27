@@ -1688,7 +1688,7 @@ _CONFIGS = [
         model=pi0_config.Pi0Config(pi05=True),
         data=LerobotAgilexDataConfig(
             repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_base",
-            datasets_yaml="/vePFS/tim/workspace/deepdive_kai0/train_scripts/data/kai0_official_repos.yaml",
+            datasets_yaml="/vePFS/tim/workspace/deepdive_kai0/train_scripts/kai/data/kai0_official_repos.yaml",
             default_prompt="kai Flatten and fold the cloth.",
             use_delta_joint_actions=False,
         ),

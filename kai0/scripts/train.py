@@ -57,8 +57,27 @@ def _load_val_data(val_root: str, n_frames_per_ep: int):
     import pyarrow.parquet as pq
     import av as _av
     val_root_p = Path(val_root)
+    # Fail fast: missing val data is a config bug (silently returning [] causes
+    # all inline-eval to report MAE=0.0, masking real training health).
+    if not val_root_p.exists():
+        raise FileNotFoundError(
+            f"inline_eval_val_root does not exist: {val_root}\n"
+            f"  Build it (symlink or copy) before training. See "
+            f"docs/training/history/experiments/training_cli_notes.md for setup."
+        )
+    chunk_dir = val_root_p / "data" / "chunk-000"
+    if not chunk_dir.exists():
+        raise FileNotFoundError(
+            f"inline_eval_val_root has no data/chunk-000/: {val_root}"
+        )
+    parquet_files = sorted(chunk_dir.glob("episode_*.parquet"))
+    if not parquet_files:
+        raise RuntimeError(
+            f"inline_eval_val_root has no episode_*.parquet files in {chunk_dir}\n"
+            f"  Verify symlinks point to real files, not broken targets."
+        )
     samples = []
-    for ep_path in sorted((val_root_p / "data" / "chunk-000").glob("episode_*.parquet")):
+    for ep_path in parquet_files:
         df = pq.read_table(ep_path).to_pandas()
         ep_idx = int(ep_path.stem.split("_")[1])
         state = np.stack([np.asarray(x, dtype=np.float32) for x in df["observation.state"]])
@@ -86,6 +105,12 @@ def _load_val_data(val_root: str, n_frames_per_ep: int):
             vids[cam] = picked
         samples.append({"ep_idx": ep_idx, "length": L, "state": state, "action": action,
                         "images": vids, "q_idx": q_idx})
+    # Sanity: if we got 0 samples but parquet files existed, something is silently broken.
+    if not samples:
+        raise RuntimeError(
+            f"inline_eval_val_root found {len(parquet_files)} parquets but loaded 0 samples — "
+            f"check parquet content + video paths."
+        )
     _VAL_CACHE = {"root": val_root, "samples": samples}
     return samples
 

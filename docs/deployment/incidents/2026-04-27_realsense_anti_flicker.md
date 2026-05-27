@@ -27,7 +27,7 @@
 | 用途 | 文件 | 改动 |
 |------|------|------|
 | 部署 / 推理 | `ros2_ws/src/piper/scripts/multi_camera_node.py:131-148` | `pipeline.start` 后通过 `set_option` 设 PLF=1；`is_d435=False` 分支额外锁 `enable_auto_exposure=0`、`exposure=20000` |
-| 数据采集 | `start_scripts/launch_3cam.py:21-58` | `make_camera_node` 加 `is_d405` 参数；D435 设 `rgb_camera.power_line_frequency=1`；D405 额外设 `depth_module.enable_auto_exposure=False` 和 `depth_module.exposure=20000` |
+| 数据采集 | `start_scripts/kai/launch_3cam.py:21-58` | `make_camera_node` 加 `is_d405` 参数；D435 设 `rgb_camera.power_line_frequency=1`；D405 额外设 `depth_module.enable_auto_exposure=False` 和 `depth_module.exposure=20000` |
 
 ---
 

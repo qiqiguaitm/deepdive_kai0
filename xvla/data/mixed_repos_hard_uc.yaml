@@ -1,0 +1,6 @@
+# uc cluster version of mixed_repos_hard.yaml.
+# Mirrors live on uc01 NFS, source data is uc-local.
+roots:
+  - /data/shared/ubuntu/workspace/deepdive_kai0/xvla/data/mixed_hard/kai0_base
+  - /data/shared/ubuntu/workspace/deepdive_kai0/xvla/data/mixed_hard/kai0_dagger
+  - /data/shared/ubuntu/workspace/deepdive_kai0/xvla/data/mixed_hard/vis_v2_merged

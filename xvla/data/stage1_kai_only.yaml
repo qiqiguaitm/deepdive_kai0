@@ -1,0 +1,5 @@
+# Stage 1: kai warmup (官方数据). domain_id=0 for both (kai0_base + kai0_dagger).
+# Init: pi0.5 base. Full unfreeze. Soft prompt hub gets X-VLA std=0.02 init.
+roots:
+  - {root: /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_base,   domain_id: 0}
+  - {root: /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_dagger, domain_id: 0}

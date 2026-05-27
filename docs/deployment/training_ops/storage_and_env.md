@@ -192,7 +192,7 @@ deepdive_kai0/
 > - **gf0**: vePFS 上的 `.venv` 是 symlink, 真实 venv 在本机 `/home/tim/.kai0_venv` (不跨机)
 > - **gf3**: `.venv` 完全 self-contained 在 vePFS 上 — `python` 二进制 + uv-managed Python tree 都在 `/vePFS-North-E/vis_robot/workspace/.uv_python/cpython-3.12.13-linux-x86_64-gnu/` 下, `pyvenv.cfg home =` 也指 vePFS 路径。这样 volc 集群任意新节点 mount vePFS-North-E 后 `source .venv/bin/activate` 即可直接用, **无需在每节点重装**。
 >
-> **gf3 venv 构建路径 (2026-05-20)**: 由于 GitHub HTTPS 在 cn-beijing 跨 region 极不稳 (lerobot git fetch 反复 TLS stream cancel), 直接在 gf3 跑 `uv sync` 失败。改为: ① uc01 上 `tar` 现成 `.venv` (8.2 GB) + uv-managed Python (104 MB) 上传到 TOS `from_uc01/gf3/`; ② gf3 拉取后解压 + sed 重写 hardcoded 路径 (`/data/shared/ubuntu/workspace/deepdive_kai0/kai0` → `/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0`, `/home/ubuntu/.local/share/uv` → `/root/.local/share/uv`); ③ 后续再把 uv-managed Python 也搬到 vePFS, .venv 重 symlink. 一键脚本: `/root/gf3_install_venv.sh` (副本: `train_scripts/launch/gf3_install_venv.sh`)。**全过程 6 分半**。
+> **gf3 venv 构建路径 (2026-05-20)**: 由于 GitHub HTTPS 在 cn-beijing 跨 region 极不稳 (lerobot git fetch 反复 TLS stream cancel), 直接在 gf3 跑 `uv sync` 失败。改为: ① uc01 上 `tar` 现成 `.venv` (8.2 GB) + uv-managed Python (104 MB) 上传到 TOS `from_uc01/gf3/`; ② gf3 拉取后解压 + sed 重写 hardcoded 路径 (`/data/shared/ubuntu/workspace/deepdive_kai0/kai0` → `/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0`, `/home/ubuntu/.local/share/uv` → `/root/.local/share/uv`); ③ 后续再把 uv-managed Python 也搬到 vePFS, .venv 重 symlink. 一键脚本: `/root/gf3_install_venv.sh` (副本: `train_scripts/kai/launch/gf3_install_venv.sh`)。**全过程 6 分半**。
 
 ### 3.2 关键依赖 (各机基本一致)
 

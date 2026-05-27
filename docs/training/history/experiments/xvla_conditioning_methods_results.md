@@ -187,7 +187,7 @@
 # 在 uc01 上跑
 ssh uc01
 cd /data/shared/ubuntu/workspace/deepdive_kai0/kai0
-.venv/bin/python ../train_scripts/eval/eval_val_action_mse.py \
+.venv/bin/python ../train_scripts/kai/eval/eval_val_action_mse.py \
     --config xvla_exp1_hard_prompt_merged_uc \
     --ckpt /data/shared/ubuntu/local_ckpts/xvla_exp1_hard_prompt_merged_uc/xvla_exp1_hard_prompt_merged_uc/49999 \
     --val <val_path>

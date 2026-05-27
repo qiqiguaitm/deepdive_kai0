@@ -1,0 +1,119 @@
+# X-VLA hard-prompt experiment 2: vis_base v2 all (895 ep) + "vis " prompt prefix
+#
+#   Config:   pi05_flatten_fold_vis_base_v2_all_vis_prompt
+#   Init:     pi05_base
+#   Cluster:  2 host × 8 A100 = 16 GPU (volc multinode)
+#   Hyperparams: batch 128, FSDP=16, 50k step, cosine LR 1.5e-5→1.5e-6
+#
+# Submit:
+#   python submit_yaml.py exp2_vis_v2_all_vis_prompt_16gpu.yaml
+
+TaskName: "exp2-vis-v2-vis-prompt-16gpu"
+Description: "X-VLA hard-prompt exp 2: vis_base v2 all (895 ep) + 'vis ' prefix, 2-host 16 GPU"
+Tags: []
+
+UserCodePath: ""
+RemoteMountCodePath: ""
+
+ImageUrl: "visincept-cn-shanghai.cr.volces.com/grasp/h2r:1.0"
+
+ResourceQueueName: "robot-task"
+
+Framework: "PyTorch"        # gives MLP_WORKER_0_HOST / MLP_ROLE_INDEX / MLP_WORKER_NUM env vars
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 2
+    Flavor: "ml.hpcpni2.28xlarge"   # 8 GPU A100 per host × 2 = 16 GPU
+
+ActiveDeadlineSeconds: 172800        # 48 h cap
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnsh075262e1f815"
+    SubPath: ""
+    MountPath: "/vePFS"
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+    IsPrivate: false
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+    IsPrivate: false
+  - Name: TOKENIZERS_PARALLELISM
+    Value: "false"
+    IsPrivate: false
+  - Name: NCCL_DEBUG
+    Value: "INFO"            # first run: see transport
+    IsPrivate: false
+  - Name: OMP_NUM_THREADS
+    Value: "8"
+    IsPrivate: false
+  - Name: XLA_PYTHON_CLIENT_MEM_FRACTION
+    Value: "0.85"            # leave room for NCCL RDMA
+    IsPrivate: false
+  - Name: JAX_COMPILATION_CACHE_MIN_ENTRY_SIZE_BYTES
+    Value: "-1"
+    IsPrivate: false
+  - Name: JAX_COMPILATION_CACHE_MIN_COMPILE_TIME_SECS
+    Value: "1"
+    IsPrivate: false
+  - Name: JAX_ENABLE_EMPTY_ARRAYS
+    Value: "true"
+    IsPrivate: false
+
+Entrypoint: |
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  LOG_DIR=/vePFS/tim/workspace/deepdive_kai0/logs
+  mkdir -p "$LOG_DIR"
+  LOG="$LOG_DIR/exp2_vis_v2_vis_prompt_${STAMP}_node${MLP_ROLE_INDEX:-0}.log"
+  exec >> "$LOG" 2>&1
+  echo "=== entrypoint start $(date) node=${MLP_ROLE_INDEX:-0}/${MLP_WORKER_NUM:-1} ==="
+  set -ex
+
+  echo "[multinode]"
+  echo "  MLP_WORKER_0_HOST=${MLP_WORKER_0_HOST}"
+  echo "  MLP_WORKER_0_PORT=${MLP_WORKER_0_PORT}"
+  echo "  MLP_WORKER_NUM=${MLP_WORKER_NUM}"
+  echo "  MLP_ROLE_INDEX=${MLP_ROLE_INDEX}"
+  echo "  MLP_WORKER_GPU=${MLP_WORKER_GPU}"
+  nvidia-smi -L
+
+  KAI0=/vePFS/tim/workspace/deepdive_kai0/kai0
+
+  # ---- bootstrap uv + Python 3.11 (root user; alias for .venv hardcoded /home/tim path) ----
+  if [ ! -x "$HOME/.local/bin/uv" ]; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+  fi
+  export PATH="$HOME/.local/bin:$PATH"
+  uv python install 3.11.15 2>&1 | tail -2
+
+  mkdir -p /home/tim/.local/share
+  ln -sfn /root/.local/share/uv /home/tim/.local/share/uv
+
+  # ---- activate venv ----
+  cd "$KAI0"
+  source .venv/bin/activate
+  python -c "import torch, jax; print(f'torch {torch.__version__} jax {jax.__version__} devs={len(jax.devices())}')"
+
+  # ---- JAX multinode env vars (固定 port 15830, 不用 MLP_WORKER_0_PORT=2222 = SSH 冲突) ----
+  export JAX_COORDINATOR_ADDRESS="${MLP_WORKER_0_HOST}:15830"
+  export JAX_NUM_PROCESSES="${MLP_WORKER_NUM:-2}"
+  export JAX_PROCESS_INDEX="${MLP_ROLE_INDEX:-0}"
+  echo "JAX coord: $JAX_COORDINATOR_ADDRESS  procs=$JAX_NUM_PROCESSES  idx=$JAX_PROCESS_INDEX"
+
+  # ---- launch openpi/JAX training (2-host × 8 GPU, FSDP=16) ----
+  exec python -u scripts/train.py pi05_flatten_fold_vis_base_v2_all_vis_prompt \
+    --exp-name exp2_vis_v2_vis_prompt \
+    --no-wandb-enabled \
+    --overwrite
+
+RetryOptions:
+    EnableRetry: false
+    MaxRetryTimes: 0
+
+AccessType: "Public"

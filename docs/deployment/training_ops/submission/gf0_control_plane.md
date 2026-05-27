@@ -29,7 +29,7 @@
 **为什么是 gf0**:
 1. ✅ **唯一稳定通公网 + 火山的机器** (uc / 本地有时网络抖动, gf3 是计算节点)
 2. ✅ **凭据集中** — AK/SK 只在 gf0 上, 不分散到多台 (减少泄露面)
-3. ✅ **已有 submit_yaml.py 基础设施** (`train_scripts/volc/submit_yaml.py`)
+3. ✅ **已有 submit_yaml.py 基础设施** (`train_scripts/kai/volc/submit_yaml.py`)
 4. ✅ **共享 vePFS 入口** — gf0 上 `/vePFS` 直接 visible 给 robot-task; Robot-North-H20 任务的 stdout 走 gf3 vePFS, 但 job 管理 (list/stop/logs) 都通过 gf0 经火山 API
 5. ✅ **TOS 跨 region 中转** — gf0 也是 cnsh↔cnbj 数据传输的网关
 6. ✅ **gf0 → uc SSH 已通** (2026-05-21 实测 — 见 §5.6.d)
@@ -130,7 +130,7 @@ alias vlog='ssh gf0"mlp job logs --follow --instance-name worker-0 --id"'  # vlo
 
 #### 5.6.c.4 gf0 上的提交脚本
 
-> 提交脚本统一放在 `/vePFS/tim/workspace/deepdive_kai0/train_scripts/volc/submit_yaml.py` (gf0 vePFS), 已 git 化随代码同步。
+> 提交脚本统一放在 `/vePFS/tim/workspace/deepdive_kai0/train_scripts/kai/volc/submit_yaml.py` (gf0 vePFS), 已 git 化随代码同步。
 
 > SDK 5.0.27 自带 `KeyError: '.models'` 反序列化 bug, 必须 monkey-patch (见 §5.6 提交脚本)。**或绕过 SDK 直接用 `volcengine.base.Service` 调用 OpenAPI** — 此方式无 bug 且代码更简:
 
@@ -209,13 +209,13 @@ if __name__ == "__main__":
 ssh gf0
 # AK/SK 已 export (在 ~/.bashrc 中 source ~/.volc/credentials parse)
 cd /vePFS/tim/workspace/deepdive_kai0
-python train_scripts/volc/submit_yaml.py train_scripts/volc/<your_task>.yaml
+python train_scripts/kai/volc/submit_yaml.py train_scripts/kai/volc/<your_task>.yaml
 ```
 
 本地一键提交 alias (`~/.bashrc` on laptop):
 ```bash
-alias vsubmit='ssh gf0 "cd /vePFS/tim/workspace/deepdive_kai0 && python train_scripts/volc/submit_yaml.py"'
-# 用法: vsubmit train_scripts/volc/x1_delta_joint_16gpu.yaml
+alias vsubmit='ssh gf0 "cd /vePFS/tim/workspace/deepdive_kai0 && python train_scripts/kai/volc/submit_yaml.py"'
+# 用法: vsubmit train_scripts/kai/volc/x1_delta_joint_16gpu.yaml
 ```
 
 #### 5.6.c.5 经 gf0 状态查询 (Python, 无 SDK bug)
@@ -338,7 +338,7 @@ ssh gf0 "tail -F /vePFS/tim/workspace/deepdive_kai0/logs/<exp_name>_*.log"
 **job 状态 dashboard** (gf0 + cron, 可选): 在 gf0 上跑 5 分钟轮询的脚本, 把 running/queueing 任务汇总写到 vePFS, 本地可定期 scp 拉。
 
 ```bash
-# /vePFS/tim/workspace/deepdive_kai0/train_scripts/volc/dashboard.sh (gf0)
+# /vePFS/tim/workspace/deepdive_kai0/train_scripts/kai/volc/dashboard.sh (gf0)
 #!/usr/bin/env bash
 OUT=/vePFS/tim/workspace/deepdive_kai0/logs/volc_dashboard.txt
 while true; do

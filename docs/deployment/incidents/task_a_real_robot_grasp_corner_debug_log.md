@@ -137,7 +137,7 @@
 
 #### 立即可执行的修复（不重训）
 
-1. **打开 RTC**（5 分钟）：`./start_scripts/rtc_apply.sh on` → 不行试 `rtc_tight`
+1. **打开 RTC**（5 分钟）：`./start_scripts/kai/rtc_apply.sh on` → 不行试 `rtc_tight`
 2. **换 ckpt**：把 launcher 默认 ckpt 加上 `mixed_gf0_173_v1 step 9000`（MAE@1=0.0129 全系列最佳，1:1:1 等量 mix + 短训，可能就是当前最优部署候选）
 3. **加 state 越界 warn**（P2，一行）：`if np.any(np.abs(qpos) > np.pi): self.get_logger().warn(...)`
 
@@ -181,11 +181,11 @@
 
 > 由 Phase 1 P1+P3 直接得出。当前 launcher 选 L 显式 `enable_rtc:=false`，自废 RTC 武功。temp.sh 第 211 行注释明确写 RTC tight 对"抓取瞬间偏"预期改善 15-30%。
 
-- [ ] 试 `./start_scripts/rtc_apply.sh on` (默认 RTC + 3Hz infer + smooth=8)
+- [ ] 试 `./start_scripts/kai/rtc_apply.sh on` (默认 RTC + 3Hz infer + smooth=8)
   - 真机测试: corner `___%`, flow `___%`
-- [ ] 试 `./start_scripts/rtc_apply.sh rtc_tight` (10Hz, exec_h=12, max_guid=0.8, smooth=3)
+- [ ] 试 `./start_scripts/kai/rtc_apply.sh rtc_tight` (10Hz, exec_h=12, max_guid=0.8, smooth=3)
   - 真机测试: corner `___%`, flow `___%`
-- [ ] 试 `./start_scripts/rtc_apply.sh rtc5` (6Hz, exec_h=16, max_guid=0.5)
+- [ ] 试 `./start_scripts/kai/rtc_apply.sh rtc5` (6Hz, exec_h=16, max_guid=0.5)
   - 真机测试: corner `___%`, flow `___%`
 
 #### C8 LoRA / adapter 微调（保底方案）
@@ -269,5 +269,5 @@
   - `pure_vis600 step 39999`: `/vePFS/tim/workspace/deepdive_kai0_tmp/data/pure_vis600_best_step39999.tar`
   - `vis_base_40k step 36000`: `/vePFS/tim/workspace/deepdive_kai0_tmp/data/vis_base_40k_best_step36000.tar`
 - 中间 step ckpts (供 Phase 0.A 早期 ckpt 测试): `/vePFS/.../checkpoints/pi05_flatten_fold_mix_vis600/mix_vis600_v1/{2000,4000,...}/`
-- 数据 build 脚本: `train_scripts/data/build_task_a_{vis_base,mix_vis600,pure_vis600}.py`
+- 数据 build 脚本: `train_scripts/kai/data/build_task_a_{vis_base,mix_vis600,pure_vis600}.py`
 - sim01 部署文档: `docs/deployment/inference/sim01_deployment.md`

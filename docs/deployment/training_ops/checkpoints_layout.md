@@ -197,7 +197,7 @@ md5sum <local_target_path>   # 必须等于 gf 源 md5
 kai0/.venv/bin/python -c "from openpi.training import config as c; print(c.get_config('<NAME>').name)"
 ```
 
-### 5.5 改 `start_scripts/start_autonomy_temp.sh`
+### 5.5 改 `start_scripts/kai/start_autonomy_temp.sh`
 - 注释掉旧 active launch 块
 - 加新选项块, 注明: 数据源 / 训练 schedule / norm_stats md5 / 备注 (例如 "best step", "long-schedule final" 等)
 - `checkpoint_dir:=kai0/checkpoints/<...>` 指向 §5.2 落盘的 ckpt 路径
