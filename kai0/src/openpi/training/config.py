@@ -1260,6 +1260,75 @@ _CONFIGS = [
         inline_eval_dataset_id=1,
     ),
 
+    # pi05 + TAC on A_new_pure_200 (NEW SOTA dataset, 200 ep '-new' curated).
+    # Same hparams as vis_v2_full_tac but with the pure_200 data — for direct
+    # comparison: does TAC also work on small high-quality curated dataset?
+    # vis_v2_full_tac (49999): MAE@1=0.0147, @50=0.1148 — paper RTC2 ablation
+    TrainConfig(
+        name="pi05_flatten_fold_a_new_pure_200_tac",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            tac_enabled=True,
+            tac_max_delay=6,
+        ),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS-North-E/vis_robot/dataset/KAI0/Task_A/self_built/A_new_pure_200",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS-North-E/vis_robot/base_init_ckpts/extracted/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6,
+        ),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root="/vePFS-North-E/vis_robot/dataset/KAI0/Task_A/self_built/A_new_pure_200_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
+
+    # pi05 + TAC v2 — same hparams as _tac, but trained AFTER the pi0.py:335
+    # convention bug fix (commit 5b6b75c). The _tac (no-v2) ckpt was trained on
+    # the buggy code where prefix time=1.0 fed pure noise instead of clean GT,
+    # making TAC training a no-op (verified: TAC v7 chunk |diff| = baseline).
+    # Use v2 to retain the buggy 26k ckpt as A/B baseline.
+    TrainConfig(
+        name="pi05_flatten_fold_a_new_pure_200_tac_v2",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            tac_enabled=True,
+            tac_max_delay=6,
+        ),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS-North-E/vis_robot/dataset/KAI0/Task_A/self_built/A_new_pure_200",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS-North-E/vis_robot/base_init_ckpts/extracted/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6,
+        ),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root="/vePFS-North-E/vis_robot/dataset/KAI0/Task_A/self_built/A_new_pure_200_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
+
     # pi05 + TAC (Training-time Action Conditioning, paper 2512.05964) on vis_v2_full.
     # Same data/hparams as pi05_flatten_fold_vis_v2_full but with tac_enabled=True.
     # Compare paper-RTC2 (TAC fine-tune) trained from pi05_base for 50k step.
