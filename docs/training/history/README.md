@@ -23,7 +23,8 @@
 | new_pure_1800_new_norm_base_mixed1 (两阶段) | ✅ done | [task_a_new_pure_1800_new_norm_base_mixed1_results.md](experiments/task_a_new_pure_1800_new_norm_base_mixed1_results.md) |
 | new_pure_200_new_norm | ✅ done | [task_a_new_pure_200_new_norm_results.md](experiments/task_a_new_pure_200_new_norm_results.md) |
 | new_pure2_1800_new_norm_js | ✅ done | [task_a_new_pure2_1800_new_norm_js_results.md](experiments/task_a_new_pure2_1800_new_norm_js_results.md) |
-| new_smooth_800_new_norm | ✅ done | [task_a_new_smooth_800_new_norm_results.md](experiments/task_a_new_smooth_800_new_norm_results.md) |
+| **vis curated subsets** (smooth_800 + 5day_recent) ⭐ 合并报告 | ✅ done | [task_a_vis_curated_subset_experiments.md](experiments/task_a_vis_curated_subset_experiments.md) |
+| ↳ new_smooth_800_new_norm (单独旧版) | ✅ done | [task_a_new_smooth_800_new_norm_results.md](experiments/task_a_new_smooth_800_new_norm_results.md) |
 | pure_1200_new_norm | ✅ done | [task_a_pure_1200_new_norm_results.md](experiments/task_a_pure_1200_new_norm_results.md) |
 | visrobot01 mixed 600 (jiu vis) | ✅ done | [task_a_visrobot01_mixed_600.md](experiments/task_a_visrobot01_mixed_600.md) |
 | mixed visrobot01 1500 (扩展 vis) | ✅ done | [mixed_visrobot01_1500_experiment.md](experiments/mixed_visrobot01_1500_experiment.md) |
@@ -57,6 +58,12 @@
 | XVLA conditioning 三方法 (hard / soft / action-cond) | 🟢 tracking | [xvla_conditioning_methods_results.md](experiments/xvla_conditioning_methods_results.md) |
 | Conditioning × Action Representation 2×2 ablation | 🟢 tracking | [conditioning_vs_action_representation_ablation.md](experiments/conditioning_vs_action_representation_ablation.md) |
 | Norm stats ablation (apr28 450) | ✅ done | [norm_stats_ablation_apr28_450.md](experiments/norm_stats_ablation_apr28_450.md) |
+
+### Track X (X-VLA 官方架构 native 训练) Ablation
+
+| 实验 | 状态 | 文件 |
+|---|---|---|
+| **X3.A vs X3.B vs X3.C Stage A** (XVLA 数据贡献 + Stage A 必要性) | ✅ **done** | [xvla_track_x_x3_ablation_results.md](experiments/xvla_track_x_x3_ablation_results.md) |
 
 ### 数据集诊断
 

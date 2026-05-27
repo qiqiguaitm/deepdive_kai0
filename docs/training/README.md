@@ -48,6 +48,7 @@ docs/training/
 | **看某个实验跑得怎么样** / 复盘 | `history/README.md` |
 | **看历史最好 MAE / 排行榜** | `history/experiments/00_training_history.md` |
 | **跨实验对比 / 反直觉归因 / "为什么 X 比 Y 差"** | `analysis/README.md` |
+| **vis 数据精选子集对比 (smooth_800 + 5day_recent 时间精选)** | `history/experiments/task_a_vis_curated_subset_experiments.md` |
 | **CLI 怎么写 / wandb 怎么看 / 数据集 workflow** | `history/experiments/training_cli_notes.md` / `wandb_monitoring.md` / `dynamic_dataset_workflow.md` |
 
 ### Step 2: 进入对应子目录, 读它的 README
