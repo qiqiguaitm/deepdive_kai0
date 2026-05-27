@@ -232,7 +232,8 @@ class Pi0(_model.BaseModel):
         at.Float[at.Array, "b s emb"],
         at.Bool[at.Array, "b s"],
         at.Bool[at.Array, " s"],
-        at.Float[at.Array, "b emb"] | None,
+        # TAC 路径下是 per-token time_for_emb (b, s, emb); 非 TAC 是 (b, emb) 或 None.
+        at.Float[at.Array, "b emb"] | at.Float[at.Array, "b s emb"] | None,
     ]:
         input_mask = []
         ar_mask = []
@@ -330,8 +331,15 @@ class Pi0(_model.BaseModel):
                 token_idx = token_idx[None, ...]
             prefix_mask_tac = token_idx < delay[..., None]  # (*batch_shape, ah)
             postfix_mask_tac = jnp.logical_not(prefix_mask_tac)
-            # Per-token time: prefix=1.0 (clean), postfix=sampled time (broadcast).
-            time_per_token = jnp.where(prefix_mask_tac, 1.0, time[..., None])  # (*b, ah)
+            # Per-token time: prefix=0.0 (clean GT), postfix=sampled time (broadcast).
+            # openpi convention: t=1=noise, t=0=clean data. x_t = t*noise + (1-t)*actions,
+            # so prefix t=0 → x_t = actions, the "previously committed action" context that
+            # the TAC paper (Algorithm 1) requires.
+            # Earlier value 1.0 was a convention flip bug — fed pure noise as prefix, making
+            # TAC training equivalent to "loss-mask prefix tokens" with no prefix-conditioning
+            # signal (verified by diagnostic: TAC v7 P1=0.067 ≈ no-TAC baseline 0.026 worse,
+            # 2026-05-27 chunk/noise diagnostic).
+            time_per_token = jnp.where(prefix_mask_tac, 0.0, time[..., None])  # (*b, ah)
             time_expanded = time_per_token[..., None]  # (*b, ah, 1)
             time_for_emb = time_per_token  # passed to embed_suffix as (b, ah)
         else:
