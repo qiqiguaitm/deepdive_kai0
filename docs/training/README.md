@@ -17,18 +17,21 @@ docs/training/
 │       ├── ssl_phase_pretrain_pipeline.md
 │       ├── xvla_track_x_curriculum.md
 │       └── ...                              # 旧 *_plan.md 系列
-└── history/                                 # 训练历史记录
-    ├── README.md                            # 全部历史实验简表 + best 排行榜
-    └── experiments/                         # 单个实验记录 (一文件一实验或一主题)
-        ├── 00_training_history.md           # ⭐ master 历史汇总 (TL;DR 排行榜)
-        ├── training_reproduction_log.md     # kai0 复现日志
-        ├── task_a_*_results.md              # Task A 各组结果
-        ├── task_p_*_results.md              # Task P 全解冻对照
-        ├── xvla_conditioning_methods_results.md
-        ├── conditioning_vs_action_representation_ablation.md
-        ├── training_cli_notes.md            # CLI 用法 (reference)
-        ├── wandb_monitoring.md              # W&B 监控 (reference)
-        └── dynamic_dataset_workflow.md      # 数据集动态 workflow (reference)
+├── history/                                 # 训练历史记录
+│   ├── README.md                            # 全部历史实验简表 + best 排行榜
+│   └── experiments/                         # 单个实验记录 (一文件一实验或一主题)
+│       ├── 00_training_history.md           # ⭐ master 历史汇总 (TL;DR 排行榜)
+│       ├── training_reproduction_log.md     # kai0 复现日志
+│       ├── task_a_*_results.md              # Task A 各组结果
+│       ├── task_p_*_results.md              # Task P 全解冻对照
+│       ├── xvla_conditioning_methods_results.md
+│       ├── conditioning_vs_action_representation_ablation.md
+│       ├── training_cli_notes.md            # CLI 用法 (reference)
+│       ├── wandb_monitoring.md              # W&B 监控 (reference)
+│       └── dynamic_dataset_workflow.md      # 数据集动态 workflow (reference)
+└── analysis/                                # 跨实验对比 + 反直觉归因 (新增 2026-05-26)
+    ├── README.md                            # 索引 + 与其他目录的边界
+    └── data_scale_vs_quality_vis_v2_full_vs_pure_200.md   # 数据量增大反而 MAE 变差归因
 ```
 
 ---
@@ -44,6 +47,7 @@ docs/training/
 | **启动新实验** / 看下次该跑什么 | `future_plans/README.md` |
 | **看某个实验跑得怎么样** / 复盘 | `history/README.md` |
 | **看历史最好 MAE / 排行榜** | `history/experiments/00_training_history.md` |
+| **跨实验对比 / 反直觉归因 / "为什么 X 比 Y 差"** | `analysis/README.md` |
 | **CLI 怎么写 / wandb 怎么看 / 数据集 workflow** | `history/experiments/training_cli_notes.md` / `wandb_monitoring.md` / `dynamic_dataset_workflow.md` |
 
 ### Step 2: 进入对应子目录, 读它的 README

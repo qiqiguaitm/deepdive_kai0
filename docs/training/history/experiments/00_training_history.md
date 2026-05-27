@@ -26,7 +26,7 @@
 > - **`task_a_new_smooth_800_new_norm_results.md`** — uc03 单机, 811 ep vis_clean_v2 + mixed_1_clean init, MAE@1=0.0089, 但 @50=0.0636 long-horizon 差 (无 mirror augmentation)
 > - **`pi05_flatten_fold_vis_v2_full`** (2026-05-25 新) — Beijing 8 H20 单节点, **vis_v2_full (1409 ep / 1.93M frames / 16 v2 dates 04-23 → 05-22) + pi05_base init**, 50k step (x94g2 → 24h timeout → qnq5j resume from 34k → completed 49999). Eval MAE@1=0.0131 / @50=0.1138 (vis_v2_val50 前 50 ep). 单源训练, 健康收敛 (无 datasets_yaml/balanced sampling 引起的 "predict-zero" collapse)
 > - **`training_paradigm_comparison.md`** — single-stage vs two-stage 训练范式对比 (pi05_base+7900ep 一次性 vs mixed_1+1800ep 两阶段, 决策树)
-> - **`docs/security/2026-05-16_rvn_miner_incident.md`** — Ravencoin 挖矿木马入侵事件报告 (uc01/02/03, SSH 密码爆破 + 横向移动, 已处置)
+> - **`docs/deployment/incidents/2026-05-16_uc_security_incident_and_backup.md`** — Ravencoin 挖矿木马入侵事件报告 (uc01/02/03, SSH 密码爆破 + 横向移动, 已处置)
 > - **`task_p_unfreeze_20k_v2_results.md`** — uc02 v2 数据集对比 (Task_P/v2_aligned 84 ep + action=state + 30fps interp + seed=123, best 0.0070, -64% vs orig)
 > - `kai0_mixed_1_results.md` — Task A 迁移 init 来源
 > - `training_plans.md` — kai0_mixed_1 / kai0_full 训练 recipe
@@ -82,6 +82,7 @@
 | Task A | **task_a_new_pure_200_new_norm** 🏆⭐⭐ NEW SOTA | Task A | **A_new_pure_200 (200 ep `-new` 精选)** + **mixed_1_clean** init, js02 单机 8 GPU, batch=120, **resume 22k→49999** | 50k | **49999** | **0.0065** ⭐ | **0.0072** | **0.0075** | **0.0079** |
 | Task A | **task_a_new_pure_1800_new_norm_base_mixed1** 🔥 (两阶段) | Task A | A_new_pure2_1800 (1800 ep `-new` + mirror) + **mixed_1** init (= pi05_base + 6000 ep stage 1), uc02 单机 8 GPU, batch=128 | 50k | **49999** | **0.0088** | **0.0153** | **0.0203** | **0.0258** |
 | Task A | **task_a_new_smooth_800_new_norm** 🔥 (vis_clean) | Task A | A_new_smooth_800 (**811 ep vis_base_clean_v2 + X1 cleanup**, no mirror) + mixed_1_clean init, uc03 单机 8 GPU, batch=128 | 50k | **49999** | **0.0089** | 0.0221 | 0.0404 | 0.0636 |
+| Task A | **pi05_flatten_fold_vis_v2_full** 🔥 (新 vis_v2_full) | Task A | **vis_v2_full (1409 ep / 1.93M frames / 16 v2 dates 04-23~05-22)** + **pi05_base** init, Beijing 8 H20 单节点, batch=128 (started cnbj x94g2, 24h timeout → resume cnbj qnq5j to 50k). Eval on vis_v2_val50 前 50 ep | 50k | **49999** | **0.0131** | **0.0386** | **0.0714** | **0.1138** |
 
 ¹ E3 (combo) 在 step ~8k 因 GPU 1 NUMA SIGSEGV 中断，best 在 step 12000 之前；step 10000=0.0284, step 12000=0.0277。
 ² v2 训练超过 nominal 15k 步，step 16000 实测最佳 (0.0382)；master plan 中 0.0411@14000 是 canonical 数。
@@ -124,7 +125,7 @@ uc03 同期 `task_a_new_smooth_800_new_norm` (vis_clean 811 ep + mixed_1_clean i
 1. pi05_base 起点 MAE=0.0534 (vs mixed_1 起点 0.0161, 高 3.3x), 但**最终精度反而低 21%** — pi05_base 干净起点天花板更高
 2. **数据规模 + 干净起点 > 数据质量单一维度**: 推翻 B 实验 (mix_b6000_p1200) "数据质量 > 数据量" 的结论
 3. long-horizon (@50) 显著改善 (0.0337 vs B 0.0728, **-54%**) — chunk planner 受益于干净起点
-4. 集群训练: HSDP `[3,8]` SPMD partitioner 105+ 分钟死锁 → 切到全 FSDP `[1,24]` 8 分钟编译成功 (详见 `docs/deployment/training_servers_knowledge_base.md` Section 13)
+4. 集群训练: HSDP `[3,8]` SPMD partitioner 105+ 分钟死锁 → 切到全 FSDP `[1,24]` 8 分钟编译成功 (详见 `docs/deployment/training_ops/overview.md` Section 13)
 
 完整曲线 + B 对照见 `task_a_new_mixed_pure2_1800_6000_results.md`。
 
