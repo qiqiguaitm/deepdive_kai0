@@ -1,8 +1,8 @@
 # uc01/02/03 集群当前数据共享方式分析
 
-> 2026-05-28 现场实测重写 (推翻 2026-05-27 早版本基于过期文档的推导).
+> 2026-05-28 现场实测重写; 同日数据集迁移后刷新 §3 (数据从 `dataset/` 迁到 `kai0/data/Task_A/`, 对齐 gf0/gf3)。
 >
-> **结论速览**: uc 集群当前是 **单 NFS 平面 (uc01 export, 走管理网 eth0) + 单机本地 ckpt (symlink trick 绕 NFS)** 两层架构。文档历史描述的"RDMA NFS B 平面 (`/data/cluster_ckpt` 192.168.1.0/24)"**实测已废弃 / 未启用**。所有共享 (代码 / venv / 数据集 / 集群训练 ckpt) 都走唯一 NFS 平面。
+> **结论速览**: uc 集群当前是 **单 NFS 平面 (uc01 export, 走管理网 eth0) + 单机本地 ckpt (symlink trick 绕 NFS)** 两层架构。文档历史描述的"RDMA NFS B 平面 (`/data/cluster_ckpt` 192.168.1.0/24)"**实测已废弃 / 未启用**。所有共享 (代码 / venv / 数据集 / 集群训练 ckpt) 都走唯一 NFS 平面。**2026-05-28 起数据集统一在 `kai0/data/Task_A/` (kai0_base/dagger/advantage + vis_base + self_built), 与 gf0/gf3 同规范; hourly cron `sync_tos_kai0.sh` 增量同步 TOS → vis_base (见 §3.3)。**
 
 ---
 
@@ -63,62 +63,54 @@ uc03: 192.168.{1,2,3,4}.4
 
 ---
 
-## 3. TOS 同步数据集 (主问题) ⭐
+## 3. 数据集位置 (2026-05-28 已迁到 kai0/data, 对齐 gf0/gf3) ⭐
 
-### 3.1 实际路径
+### 3.1 实际路径 (kai0/data/Task_A/, NFS 共享)
+
+```
+/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/   # ⭐ 与 gf0/gf3 同规范
+├── kai0_base/ kai0_dagger/ kai0_advantage/   # HF 官方 (3055/3457/3055) 真实目录
+├── vis_base/                  # 原始自采 base, 仅 -v2 (19 日期), build 源 + TOS 同步目标
+├── vis_dagger/ vis_autonomy/ vis_inference/  # uc 特有: 原始自采 (gf0/gf3 无)
+└── self_built/                # 构建集: A_new_100_5_16_5_18(+val), A_new_pure_200(+val),
+                               #   vis_v2_merged(自包含真实)+vis_v2_merged_val, val_kai0_official, eval_val/, xvla_exp1_hard_merged
+```
+
+> **历史**: 2026-05-28 前 uc 数据在独立的 `dataset/` 树 (`dataset/KAI0`、`dataset/Kai0_official`、`dataset/Task_A` 分散), 与 gf0/gf3 的 `kai0/data/` 不一致。已全部迁入 `kai0/data/Task_A/` 并对齐命名 + retarget 22647 条跨数据集软链 (dangling=0) + 删冗余 `hf_kai0`(47G)。
+
+### 3.2 残留 dataset/ (未纳入, 保留)
 
 ```
 /data/shared/ubuntu/workspace/dataset/
-├── KAI0/                                          509 GB ⭐ TOS 主同步入口
-│   ├── from_tos_file.py                           单文件下载脚本 (TOS SDK, AK/SK 硬编码)
-│   ├── to_tos.py / to_tos_file.py                 上传脚本
-│   ├── Task_A/                                    与 tos://transfer-shanghai/KAI0/Task_A/ 一一对应
-│   │   ├── base/{2026-04-23, ..., 2026-05-22-v2}/      28 个 date 子集
-│   │   ├── autonomy/, dagger/, inference/
-│   ├── Task_E, Task_H, Task_HP, Task_P, Task_PP, Task_PS/
-│   ├── task_a_mix_b6000_p1200_mixed_1_step49999.tar    12.4 GB ckpt (TOS 中转)
-│   └── task_p_v2_aligned_step19999.tar                 12.4 GB ckpt (TOS 中转)
-├── Kai0_official/                                 129 GB (HF 官方 base/dagger/advantage)
-├── hf_kai0/                                        47 GB
-├── kai_official_relay/                             88 GB (跨用户中转: base + dagger)
-├── Task_A/{self_built, vis_v2_merged, vis_v2_merged_val}    11 GB
-├── exp1_eval_val/                                  27 MB
-└── val_kai0_official/                             437 MB
+├── KAI0/
+│   ├── from_tos_file.py / to_tos.py / to_tos_file.py   TOS 传输 helper (AK/SK 硬编码)
+│   ├── Task_A/base/{README.md, analysis}               (6 个非-v2 日期 + kai0_official_base 已删)
+│   ├── Task_E/H/HP/P/PP/PS/                             其它任务 (未迁)
+│   └── task_a_mix_*.tar / task_p_*.tar                  ckpt 中转 tar
+└── Kai0_official/                                       仅剩 HF metadata (base/dagger/advantage 已迁 kai0_*)
 ```
 
-### 3.2 关键事实 (与文档历史描述不同)
+### 3.3 TOS → vis_base 自动同步 (hourly cron) ⭐ (2026-05-28 重写)
 
-| 项 | 现实 | 旧文档说 |
-|---|---|---|
-| TOS pull 目标根 | `/data/shared/ubuntu/workspace/dataset/KAI0/` (NFS 共享) | `/data/shared/dataset/...` 或 `~/workspace/deepdive_kai0/kai0/data/Task_A/...` (二者均错, 前者空, 后者只有 `ssl_phase0/`) |
-| 拉取范围 | **只在 uc01 拉一次**, uc02/03 经 NFS 自动可见 | `for u in uc01 uc02 uc03; do ssh $u tosutil cp...` 各拉一份 (错, 浪费 3× TOS 带宽) |
-| 跨机一致性验证 | uc01 `from_tos_file.py` inode = 6037; uc02 同文件 inode = 6037 ✓ NFS 共享 | — |
-| 同步脚本位置 | `/data/shared/ubuntu/workspace/dataset/KAI0/{from_tos_file.py, to_tos.py, to_tos_file.py}` (canonical, AK/SK 硬编码) | — (文档未指明) |
+uc01 cron `0 * * * * /home/ubuntu/scripts/sync_tos_kai0.sh`:
+- **目标改为新路径**: `tos://transfer-shanghai/KAI0/Task_A/base/<date>-v2/` → `kai0/data/Task_A/vis_base/<date>-v2/`
+- 与 gf0 的 `train_scripts/kai/data/sync_vis_base_from_tos.sh` 同逻辑: `tosutil cp -r -u`(size/crc 增量, 从不删本地), **只 -v2 日期**, **`-exclude='*top_head_depth*'`** 排除 depth, flock 防重叠。
+- **旧脚本已废弃**: 原 `sync_tos_kai0.sh` 把整个 `tos://.../KAI0/` 全量拉到 `dataset/KAI0/`(含 138G `Task_A_kai_official.tar`、depth、所有 task), 与迁移对冲、反复重拉 138G tar — 已重写。
+- 只在 uc01 拉, uc02/03 经 NFS 自动可见。
 
-### 3.3 拉取 / 上传命令模板 (canonical)
-
+**手动拉/传 (canonical helper, 仍在 `dataset/KAI0/`)**:
 ```bash
-# 拉单个文件 (例: 拉 pi05_base.tar 到 KAI0 根)
-ssh uc01 "cd /data/shared/ubuntu/workspace/dataset/KAI0 && \
-  python from_tos_file.py \
-    --object_key KAI0/checkpoints/pi05_base.tar \
-    --file ./pi05_base.tar"
-
-# 拉整目录 (推荐用 tosutil, 比 python 单文件并发更高)
-ssh uc01 "cd /data/shared/ubuntu/workspace/dataset/KAI0/Task_A && \
-  tosutil cp -r tos://transfer-shanghai/KAI0/Task_A/base/2026-05-22-v2/ ./base/"
-
-# 上传 (用 to_tos.py 文件夹模式, 或 to_tos_file.py 单文件模式)
-ssh uc01 "cd /data/shared/ubuntu/workspace/dataset/KAI0 && \
-  python to_tos.py --folder ./Task_A/base/2026-05-22-v2 \
-                   --tos_prefix KAI0/Task_A/base/2026-05-22-v2"
+# 拉某日期到 vis_base
+ssh uc01 "cd .../kai0/data/Task_A/vis_base && /home/ubuntu/tosutil cp -r -u \
+  tos://transfer-shanghai/KAI0/Task_A/base/<date>-v2/ ./ -exclude='*top_head_depth*'"
+# 上传 (to_tos.py 文件夹模式)
+ssh uc01 "cd .../dataset/KAI0 && python to_tos.py --folder <dir> --tos_prefix KAI0/Task_A/..."
 ```
-
-> ⚠️ TOS AK/SK 硬编码在 `from_tos_file.py:11-12` / `to_tos.py:14-15`, 不读 env var (尽管脚本里有 `os.getenv('TOS_ACCESS_KEY')` 注释行)。要切凭据需改源码。
+> ⚠️ TOS AK/SK 硬编码在 `from_tos_file.py` / `to_tos.py` / `~/.tosutilconfig`, 不读 env。
 
 ### 3.4 性能 (实测 GPU 99% util)
 
-文档 `submission/uc_cluster_jobs.md §12.5` 实测 ~115 GB 训练数据集放 NFS 时 GPU 99% util — NFS 在数据集消费场景下不是瓶颈。当前 783 GB `dataset/` 全部放 NFS, 训练表现一致。
+数据放 NFS 实测 GPU 99% util — NFS 在数据集消费场景下不是瓶颈 (`submission/uc_cluster_jobs.md §12.5`)。
 
 ---
 
@@ -203,9 +195,10 @@ uc02/uc03 /etc/fstab: 192.168.1.2:/data/cluster_ckpt /cluster_ckpt nfs ...
 │   └── 改 uc01 即可 → NFS 平面自动同步
 │       路径: /data/shared/ubuntu/workspace/{deepdive_kai0/, base_init_ckpts/, X-VLA-env/}
 │
-├── TOS 同步的训练数据集
-│   └── 只在 uc01 上 tosutil/python 拉 → NFS 自动可见
-│       路径: /data/shared/ubuntu/workspace/dataset/KAI0/...
+├── TOS 同步的训练数据集 (2026-05-28 起在 kai0/data)
+│   └── hourly cron sync_tos_kai0.sh: TOS Task_A/base/<date>-v2 → vis_base (exclude depth)
+│       路径: /data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/{vis_base, kai0_*, self_built/}
+│       只在 uc01 拉 → NFS 自动可见 uc02/03
 │
 ├── 3-host HSDP/FSDP 集群训练 ckpt (Orbax cross-host barrier)
 │   └── 写 NFS 共享路径
@@ -232,7 +225,7 @@ uc02/uc03 /etc/fstab: 192.168.1.2:/data/cluster_ckpt /cluster_ckpt nfs ...
 
 3. **千万不要写 ckpt 到 `kai0/checkpoints/<config>/<exp>` 真实路径** — 那是 NFS 路径, 会占共享空间 + 拖慢其他机 I/O。一律走 symlink trick (§4) 或直接写 `/data/shared/ubuntu/local_ckpts/...`。
 
-4. **`config.py` 改完要 scp 同步 3 机** — 虽然 `config.py` 在 NFS 上理论上自动同步, 但 worker 进程是从本机 python import, NFS 缓存可能延迟; 实测 `submission/uc_cluster_jobs.md §12.7` 仍要显式 scp + grep 验证。
+4. **代码/`config.py` 由 git main 管理 (1-min pull cron)** — uc01 cron `* * * * * /home/ubuntu/scripts/sync_kai0.sh <repo> <log>` 每分钟 `git fetch + reset --hard origin/main` 镜像 GitHub(pull-only)。所以**改 config 必须在 gf0 commit+push**, uc ~1 分钟内自动拿到; 不要直接在 uc 改代码(会被 reset 覆盖)。数据 (gitignore) 不受 reset 影响。
 
 5. **uc01 是 SPOF** — NFS server + 数据集源都在 uc01。uc01 down 同时影响 uc02/03 的 NFS read。重启 uc01 前先停 uc02/03 上的训练。
 
