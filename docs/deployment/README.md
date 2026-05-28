@@ -28,7 +28,7 @@ docs/deployment/
 
 | 你的目的 | 去 | 关键入口 |
 |---|---|---|
-| 看跨本体战略 / Task A roadmap / 与官方 fork 差异 | [`strategy/`](strategy/README.md) | cross_embodiment_strategy.md |
+| 看跨本体战略 / Task A roadmap / 与官方 fork 差异 / DAgger 主轨 / AWBC 升级 / RLT 精修轨 | [`strategy/`](strategy/README.md) | cross_embodiment_strategy.md / dagger_implementation_plan.md / awbc_implementation_plan.md / rlt_implementation_plan.md |
 | 提训练任务 / 集群知识库 / 数据 sync | [`training_ops/`](training_ops/README.md) | overview.md → submission/ |
 | ckpt 部署真机 / 推理时延优化 / sim01 / RTC | [`inference/`](inference/README.md) | realtime_vla/ / sim01_deployment.md |
 | 录数据 / 遥操作 / replay 看数据 | [`data_collection/`](data_collection/README.md) | teleoperation_guide.md |

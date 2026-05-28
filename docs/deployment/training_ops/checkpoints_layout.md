@@ -17,7 +17,39 @@
 
 (`/home/tim/workspace` 自身已经是 → `/data1/tim/workspace` 的 symlink, 所以工程内的 `kai0/...` 路径全部最终落到 `/data1` 上, 不占系统盘.)
 
-每条 ckpt 直接在 `/data1/DATA_IMP/checkpoints/` 下作为**真实目录**存在, 不要再走 `KAI0/ckpt_downloads/` 这种二级中转 — 历史上有过, 已 2026-04-27 合并掉.
+每条 ckpt 直接在 `/data1/DATA_IMP/checkpoints/<bucket>/` 下作为**真实目录**存在, 不要再走 `KAI0/ckpt_downloads/` 这种二级中转 — 历史上有过, 已 2026-04-27 合并掉.
+
+### 1.1 三类 bucket (2026-05-25 起)
+
+`/data1/DATA_IMP/checkpoints/` 顶层按"部署栈"分 3 个 bucket:
+
+| bucket | 用途 | 启动入口 |
+|---|---|---|
+| `ckpt_v0/` | 走 JAX orbax 直载, RTC / chunk overlay 仅靠 JAX serve | `start_autonomy.sh` / `start_autonomy_from_ckpt.sh` / `start_policy_node.sh` |
+| `ckpt_v1/` | 已转换为 V1 Triton pickle (`optimize/results/<name>_v1_p200.pkl` 存在); 走 20Hz V1 serve + SHM transport | `start_autonomy_v1.sh` / `start_autonomy_from_ckpt_v1.sh` / `start_policy_node_v1.sh` + `start_serve_v1.sh` |
+| `ckpt_others/` | 跨 embodiment / 实验性栈 (XVLA 等), 走专属 launch | `start_xvla_autonomy.sh` 等 |
+
+**双栈 ckpt** (同时有 JAX + V1 部署需求): 在 `ckpt_v0/<name>/` 和 `ckpt_v1/<name>/` 下**各放一份物理实体** (不用 symlink). 两份独立 12 GB orbax, 两个 bucket 入口完全自治, 删一边不影响另一边。
+
+```bash
+# 双栈落法示例 (新 ckpt 同时支持 JAX + V1 部署):
+# 1. 拉到 ckpt_v1/ (V1 转换需要 orbax 实体, 在这先生成 .pkl)
+mkdir -p /data1/DATA_IMP/checkpoints/ckpt_v1/<name>
+rsync ... ckpt_v1/<name>/
+
+# 2. 复制一份到 ckpt_v0/ (JAX 入口的物理实体)
+cp -r /data1/DATA_IMP/checkpoints/ckpt_v1/<name> /data1/DATA_IMP/checkpoints/ckpt_v0/<name>
+```
+
+启动命令两个 bucket 各自读自己 bucket 内的实体:
+```bash
+# JAX (ckpt_v0 实体):
+./start_scripts/start_autonomy_from_ckpt.sh /data1/DATA_IMP/checkpoints/ckpt_v0/<name>
+# V1 Triton (ckpt_v1 实体, basename 与 optimize/results/<basename>_v1_p200.pkl 自动配对):
+./start_scripts/start_autonomy_from_ckpt_v1.sh /data1/DATA_IMP/checkpoints/ckpt_v1/<name>
+```
+
+> 双栈实体已就位 (2026-05-25): `pi05_flatten_fold_vis_v2_full_step49999`, `task_a_base_delta_step49999`, `task_a_mix_b6000_p1200_mixed_1_step49999`, `task_a_new_pure_200_step49999` — 每份 12 GB × 2 bucket = 24 GB / ckpt.
 
 ---
 
@@ -36,9 +68,9 @@
 
 例:
 ```
-/data1/DATA_IMP/checkpoints/mixed_gf0_best_at_4k/
-/data1/DATA_IMP/checkpoints/mixed_gf0_step12999_final/
-/data1/DATA_IMP/checkpoints/visrobot01_only_best_step6000/
+/data1/DATA_IMP/checkpoints/ckpt_v0/mixed_gf0_best_at_4k/
+/data1/DATA_IMP/checkpoints/ckpt_v0/mixed_gf0_step12999_final/
+/data1/DATA_IMP/checkpoints/ckpt_v0/visrobot01_only_best_step6000/
 ```
 
 启动命令里 `checkpoint_dir:=` **直接指向这一层**, 例如 `checkpoint_dir:=kai0/checkpoints/mixed_gf0_best_at_4k`.
@@ -56,8 +88,8 @@
 
 例:
 ```
-/data1/DATA_IMP/checkpoints/pi05_flatten_fold_mix_vis600/mix_vis600_v1/38000/
-/data1/DATA_IMP/checkpoints/pi05_pick_place_box_kai0_unfreeze_20k/p_unfreeze_20k_v1/4000/
+/data1/DATA_IMP/checkpoints/ckpt_v0/pi05_flatten_fold_mix_vis600/mix_vis600_v1/38000/
+/data1/DATA_IMP/checkpoints/ckpt_v0/pi05_pick_place_box_kai0_unfreeze_20k/p_unfreeze_20k_v1/4000/
 ```
 
 `checkpoint_dir:=` 指向**到 step 那一层**.
