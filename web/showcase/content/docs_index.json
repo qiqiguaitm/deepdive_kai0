@@ -1,62 +1,174 @@
 {
   "groups": [
     {
-      "id": "deployment",
-      "name_zh": "部署与硬件",
-      "name_en": "Deployment & Hardware",
+      "id": "overview",
+      "name_zh": "总览",
+      "name_en": "Overview",
       "docs": [
-        { "file": "sim01_deployment.md",                 "title_zh": "sim01 部署文档",                    "title_en": "sim01 deployment guide" },
-        { "file": "usb_camera_layout.md",                "title_zh": "USB 相机拓扑",                      "title_en": "USB camera topology" },
-        { "file": "realsense_anti_flicker_2026-04-27.md","title_zh": "RealSense 抗闪烁",                  "title_en": "RealSense anti-flicker" },
-        { "file": "ipc_inference_deployment_review.md",  "title_zh": "IPC 部署 review",                   "title_en": "IPC deployment review" },
-        { "file": "task_a_master_plan.md",               "title_zh": "Task A 主规划",                     "title_en": "Task A master plan" }
+        { "file": "project_complete_guide.md",                                  "title_zh": "项目完整指南",                          "title_en": "Project complete guide" },
+        { "file": "deployment/README.md",                                       "title_zh": "部署文档总索引",                        "title_en": "Deployment docs index" },
+        { "file": "training/README.md",                                         "title_zh": "训练文档总索引",                        "title_en": "Training docs index" }
+      ]
+    },
+    {
+      "id": "strategy",
+      "name_zh": "战略与上游对照",
+      "name_en": "Strategy & Upstream Diff",
+      "docs": [
+        { "file": "deployment/strategy/README.md",                              "title_zh": "战略目录索引",                          "title_en": "Strategy index" },
+        { "file": "deployment/strategy/cross_embodiment_strategy.md",           "title_zh": "跨本体战略",                            "title_en": "Cross-embodiment strategy" },
+        { "file": "deployment/strategy/task_a_master_plan.md",                  "title_zh": "Task A 主规划",                         "title_en": "Task A master plan" },
+        { "file": "deployment/strategy/official_diff_and_risk_analysis.md",     "title_zh": "官方 fork diff 与风险分析",             "title_en": "Official fork diff & risk analysis" }
       ]
     },
     {
       "id": "inference",
-      "name_zh": "推理与可视化",
-      "name_en": "Inference & Visualization",
+      "name_zh": "推理与真机部署",
+      "name_en": "Inference & Deployment",
       "docs": [
-        { "file": "multimodal_inference_protocol.md",     "title_zh": "多模态推理协议",                "title_en": "Multimodal inference protocol" },
-        { "file": "rtc_implementation.md",                "title_zh": "RTC 实现",                      "title_en": "RTC implementation" },
-        { "file": "inference_visualization.md",           "title_zh": "Rerun 推理可视化",              "title_en": "Rerun inference visualization" },
-        { "file": "inference_visualization_mesh.md",      "title_zh": "Mesh 化场景升级",               "title_en": "Mesh scene upgrade" },
-        { "file": "rerun_mesh_transparency_lesson.md",    "title_zh": "Mesh 透明度调试笔记",           "title_en": "Mesh transparency lesson" },
-        { "file": "pi05_inference_backend_benchmark_plan.md", "title_zh": "PyTorch 后端 benchmark",   "title_en": "PyTorch backend benchmark" },
-        { "file": "realtime_vla_optimization_analysis.md","title_zh": "实时 VLA 优化分析",            "title_en": "Real-time VLA optimization" },
-        { "file": "ros2_image_inference_validation_review.md", "title_zh": "ROS2 图像推理校验",      "title_en": "ROS2 image inference validation" },
-        { "file": "official_diff_and_risk_analysis.md",   "title_zh": "官方 diff 与风险分析",          "title_en": "Official diff & risk analysis" }
+        { "file": "deployment/inference/README.md",                             "title_zh": "推理目录索引",                          "title_en": "Inference index" },
+        { "file": "deployment/inference/sim01_deployment.md",                   "title_zh": "sim01 部署完整步骤",                    "title_en": "sim01 deployment guide" },
+        { "file": "deployment/inference/ipc_inference_deployment_review.md",    "title_zh": "IPC 推理架构 review",                   "title_en": "IPC inference review" },
+        { "file": "deployment/inference/ros2_image_inference_validation_review.md", "title_zh": "ROS2 图像推理校验",                "title_en": "ROS2 image inference validation" },
+        { "file": "deployment/inference/rtc_implementation.md",                 "title_zh": "RTC 实时分块实现",                      "title_en": "RTC implementation" },
+        { "file": "deployment/inference/build_web_venv.md",                     "title_zh": "Web 推理服务 venv",                     "title_en": "Web inference venv" },
+        { "file": "deployment/multimodal_inference_protocol.md",                "title_zh": "多模态推理协议 (深度+EE pose)",         "title_en": "Multimodal inference protocol" },
+        { "file": "deployment/pi05_inference_backend_benchmark_plan.md",        "title_zh": "π0.5 PyTorch 后端 benchmark 计划",       "title_en": "Pi0.5 PyTorch backend benchmark" }
       ]
     },
     {
-      "id": "data",
-      "name_zh": "数据与采集",
-      "name_en": "Data & Collection",
+      "id": "realtime_vla",
+      "name_zh": "实时 VLA 优化",
+      "name_en": "Realtime VLA Optimization",
       "docs": [
-        { "file": "teleoperation_guide.md",  "title_zh": "遥操作 + DAgger 指南",  "title_en": "Teleop + DAgger guide" },
-        { "file": "data_manager_plan.md",    "title_zh": "数据采集 UI 规划",       "title_en": "Data manager UI plan" },
-        { "file": "build_web_venv.md",       "title_zh": "采集后端 venv 构建",     "title_en": "Collection backend venv" },
-        { "file": "replay_and_stacks_usage.md","title_zh": "Replay 与三栈使用",   "title_en": "Replay & stack usage" },
-        { "file": "tos_access_guide.md",     "title_zh": "TOS 访问指南",          "title_en": "TOS access guide" }
+        { "file": "deployment/inference/realtime_vla/README.md",                "title_zh": "实时 VLA 系列索引",                      "title_en": "Realtime VLA index" },
+        { "file": "deployment/inference/realtime_vla/strategy.md",              "title_zh": "战略与优化排序",                         "title_en": "Strategy & ordering" },
+        { "file": "deployment/inference/realtime_vla/roadmap.md",               "title_zh": "5 阶段实施路线",                         "title_en": "5-stage roadmap" },
+        { "file": "deployment/inference/realtime_vla/v1_triton_log.md",         "title_zh": "V1 Triton 实施日志 (P50 76→32 ms)",      "title_en": "V1 Triton implementation log" },
+        { "file": "deployment/inference/realtime_vla/layer_b_plan.md",          "title_zh": "Layer B 系统级优化计划",                 "title_en": "Layer B system-level plan" },
+        { "file": "deployment/inference/realtime_vla/ee_stability_layer1.md",   "title_zh": "EE 稳定性 Layer 1",                      "title_en": "EE stability layer 1" }
       ]
     },
     {
-      "id": "training",
-      "name_zh": "训练与模型",
-      "name_en": "Training & Models",
+      "id": "data_collection",
+      "name_zh": "数据采集与遥操作",
+      "name_en": "Data Collection & Teleop",
       "docs": [
-        { "file": "training_servers_knowledge_base.md", "title_zh": "训练服务器知识库",     "title_en": "Training servers KB" },
-        { "file": "js_servers_probe.md",                "title_zh": "js 服务器接入调研",    "title_en": "js servers probe" },
-        { "file": "checkpoints_layout.md",              "title_zh": "Checkpoint 落盘规范",  "title_en": "Checkpoint layout spec" },
-        { "file": "analysis_kai0_xvla.md",              "title_zh": "kai0 vs X-VLA 分析",   "title_en": "kai0 vs X-VLA analysis" }
+        { "file": "deployment/data_collection/README.md",                       "title_zh": "数据采集目录索引",                      "title_en": "Data collection index" },
+        { "file": "deployment/data_collection/teleoperation_guide.md",          "title_zh": "遥操作 + DAgger 指南",                   "title_en": "Teleop + DAgger guide" },
+        { "file": "deployment/data_collection/data_manager_plan.md",            "title_zh": "数据采集 UI 规划",                       "title_en": "Data manager UI plan" },
+        { "file": "deployment/data_collection/replay_and_stacks_usage.md",      "title_zh": "Replay 与三栈使用",                     "title_en": "Replay & 3-stack usage" }
       ]
     },
     {
-      "id": "debug",
-      "name_zh": "调试日志",
-      "name_en": "Debug Logs",
+      "id": "visualization",
+      "name_zh": "可视化",
+      "name_en": "Visualization",
       "docs": [
-        { "file": "task_a_real_robot_grasp_corner_debug_log.md", "title_zh": "Task A 真机抓角调试", "title_en": "Task A grasp-corner debug" }
+        { "file": "deployment/visualization/README.md",                         "title_zh": "可视化目录索引",                         "title_en": "Visualization index" },
+        { "file": "deployment/visualization/inference_visualization.md",        "title_zh": "Rerun 推理可视化",                       "title_en": "Rerun inference visualization" },
+        { "file": "deployment/visualization/inference_visualization_mesh.md",   "title_zh": "Mesh 化场景升级",                        "title_en": "Mesh scene upgrade" },
+        { "file": "deployment/visualization/rerun_mesh_transparency_lesson.md", "title_zh": "Mesh 透明度调试笔记",                    "title_en": "Mesh transparency lesson" }
+      ]
+    },
+    {
+      "id": "training_ops",
+      "name_zh": "训练运维",
+      "name_en": "Training Ops",
+      "docs": [
+        { "file": "deployment/training_ops/README.md",                          "title_zh": "训练运维索引",                          "title_en": "Training ops index" },
+        { "file": "deployment/training_ops/overview.md",                        "title_zh": "训练集群总览",                          "title_en": "Cluster overview" },
+        { "file": "deployment/training_ops/storage_and_env.md",                 "title_zh": "存储与环境约定",                        "title_en": "Storage & env conventions" },
+        { "file": "deployment/training_ops/ssh_and_credentials.md",             "title_zh": "SSH 与凭证拓扑",                        "title_en": "SSH & credentials topology" },
+        { "file": "deployment/training_ops/data_sync_tos.md",                   "title_zh": "数据/Ckpt TOS 同步",                    "title_en": "Data / ckpt TOS sync" },
+        { "file": "deployment/training_ops/checkpoints_layout.md",              "title_zh": "Checkpoint 落盘规范",                   "title_en": "Checkpoint layout spec" },
+        { "file": "deployment/tos_access_guide.md",                             "title_zh": "TOS 访问指南",                          "title_en": "TOS access guide" }
+      ]
+    },
+    {
+      "id": "submission",
+      "name_zh": "任务提交",
+      "name_en": "Job Submission",
+      "docs": [
+        { "file": "deployment/training_ops/submission/README.md",               "title_zh": "提交目录索引",                          "title_en": "Submission index" },
+        { "file": "deployment/training_ops/submission/volc_ml_platform.md",     "title_zh": "Volc ML 平台 (YAML + SDK)",             "title_en": "Volc ML platform" },
+        { "file": "deployment/training_ops/submission/gf0_control_plane.md",    "title_zh": "gf0 控制平面 (mlp CLI)",                "title_en": "gf0 control plane" },
+        { "file": "deployment/training_ops/submission/uc_cluster_jobs.md",      "title_zh": "uc 集群 HSDP/FSDP 任务",                "title_en": "uc cluster HSDP/FSDP jobs" }
+      ]
+    },
+    {
+      "id": "hardware",
+      "name_zh": "硬件排障",
+      "name_en": "Hardware Troubleshooting",
+      "docs": [
+        { "file": "deployment/piper_arm_id_and_mode_review.md",                 "title_zh": "Piper 臂 ID 与模式 review",              "title_en": "Piper arm ID & mode review" },
+        { "file": "deployment/piper_arm_teleop_troubleshooting.md",             "title_zh": "Piper 遥操排障",                         "title_en": "Piper teleop troubleshooting" },
+        { "file": "deployment/incidents/usb_camera_layout.md",                  "title_zh": "USB 相机拓扑",                           "title_en": "USB camera topology" }
+      ]
+    },
+    {
+      "id": "incidents",
+      "name_zh": "事件复盘",
+      "name_en": "Incident Postmortems",
+      "docs": [
+        { "file": "deployment/incidents/README.md",                             "title_zh": "事件目录索引",                          "title_en": "Incidents index" },
+        { "file": "deployment/incidents/2026-04-27_realsense_anti_flicker.md",  "title_zh": "2026-04-27 RealSense 抗闪烁",            "title_en": "2026-04-27 RealSense anti-flicker" },
+        { "file": "deployment/incidents/2026-05-16_uc_security_incident_and_backup.md", "title_zh": "2026-05-16 uc 安全事件与备份",   "title_en": "2026-05-16 uc security incident" },
+        { "file": "deployment/incidents/task_a_real_robot_grasp_corner_debug_log.md",   "title_zh": "Task A 真机抓角调试",            "title_en": "Task A grasp-corner debug log" }
+      ]
+    },
+    {
+      "id": "training_plans",
+      "name_zh": "训练计划",
+      "name_en": "Training Plans",
+      "docs": [
+        { "file": "training/future_plans/README.md",                            "title_zh": "未来计划索引",                          "title_en": "Future plans index" },
+        { "file": "training/future_plans/plans/training_plans.md",              "title_zh": "训练计划总表",                          "title_en": "Training plans master" },
+        { "file": "training/future_plans/plans/reproduction_plan.md",           "title_zh": "复现计划",                              "title_en": "Reproduction plan" },
+        { "file": "training/future_plans/plans/parallel_execution_plan.md",     "title_zh": "并行执行计划",                          "title_en": "Parallel execution plan" },
+        { "file": "training/future_plans/plans/multinode_distributed_training_plan.md", "title_zh": "多机分布式训练",                "title_en": "Multinode distributed training" },
+        { "file": "training/future_plans/plans/stage_classifier_plan.md",       "title_zh": "Stage 分类器",                          "title_en": "Stage classifier" },
+        { "file": "training/future_plans/plans/advantage_pipeline_and_visual_subgoal.md", "title_zh": "Advantage 管线与视觉子目标",  "title_en": "Advantage pipeline & visual subgoal" },
+        { "file": "training/future_plans/plans/awbc_v2_training_plan.md",       "title_zh": "AWBC v2 训练计划",                      "title_en": "AWBC v2 training plan" },
+        { "file": "training/future_plans/plans/awbc_pi07style_experiment.md",   "title_zh": "AWBC π0.7-style 实验",                  "title_en": "AWBC pi0.7-style experiment" },
+        { "file": "training/future_plans/plans/gf0_normal_training_plan.md",    "title_zh": "gf0 常规训练计划",                      "title_en": "gf0 normal training plan" },
+        { "file": "training/future_plans/plans/gf1_training_plan.md",           "title_zh": "gf1 训练计划",                          "title_en": "gf1 training plan" },
+        { "file": "training/future_plans/plans/gf2_advantage_awbc_plan.md",     "title_zh": "gf2 Advantage AWBC 计划",               "title_en": "gf2 advantage AWBC plan" },
+        { "file": "training/future_plans/plans/task_e_master_plan.md",          "title_zh": "Task E 主规划",                         "title_en": "Task E master plan" },
+        { "file": "training/future_plans/plans/pytorch_native_vis_v2_full.md",  "title_zh": "PyTorch native vis_v2_full",             "title_en": "PyTorch native vis_v2_full" },
+        { "file": "training/future_plans/plans/ssl_phase_pretrain_pipeline.md", "title_zh": "SSL 阶段预训练管线",                    "title_en": "SSL phase pretrain pipeline" },
+        { "file": "training/future_plans/plans/xvla_track_x_curriculum.md",     "title_zh": "X-VLA Track X 课程",                    "title_en": "X-VLA Track X curriculum" }
+      ]
+    },
+    {
+      "id": "training_history",
+      "name_zh": "训练历史",
+      "name_en": "Training History",
+      "docs": [
+        { "file": "training/history/README.md",                                 "title_zh": "历史实验索引",                          "title_en": "History index" },
+        { "file": "training/history/experiments/00_training_history.md",        "title_zh": "训练历史 master (排行榜)",              "title_en": "Training history master" },
+        { "file": "training/history/experiments/training_reproduction_log.md",  "title_zh": "kai0 复现日志",                          "title_en": "kai0 reproduction log" },
+        { "file": "training/history/experiments/training_paradigm_comparison.md","title_zh": "训练范式对比",                         "title_en": "Training paradigm comparison" },
+        { "file": "training/history/experiments/training_cli_notes.md",         "title_zh": "训练 CLI 用法",                          "title_en": "Training CLI notes" },
+        { "file": "training/history/experiments/wandb_monitoring.md",           "title_zh": "W&B 监控",                              "title_en": "W&B monitoring" },
+        { "file": "training/history/experiments/dynamic_dataset_workflow.md",   "title_zh": "动态数据集 workflow",                   "title_en": "Dynamic dataset workflow" },
+        { "file": "training/history/experiments/dataset_diagnostic_report.md",  "title_zh": "数据集诊断报告",                        "title_en": "Dataset diagnostic report" },
+        { "file": "training/history/experiments/kai0_task_a_opensource_analysis.md", "title_zh": "kai0 Task A 开源分析",             "title_en": "kai0 Task A opensource analysis" },
+        { "file": "training/history/experiments/conditioning_vs_action_representation_ablation.md", "title_zh": "Conditioning vs Action repr 消融", "title_en": "Conditioning vs action representation ablation" },
+        { "file": "training/history/experiments/xvla_conditioning_methods_results.md", "title_zh": "X-VLA conditioning 方法对比",     "title_en": "X-VLA conditioning methods" },
+        { "file": "training/history/experiments/kai0_mixed_1_results.md",       "title_zh": "kai0 mixed_1 结果",                      "title_en": "kai0 mixed_1 results" },
+        { "file": "training/history/experiments/gf0_awbc_baseline_v2_results.md", "title_zh": "gf0 AWBC baseline v2",                "title_en": "gf0 AWBC baseline v2" },
+        { "file": "training/history/experiments/mixed_visrobot01_1500_experiment.md", "title_zh": "mixed visrobot01 1500 实验",       "title_en": "mixed visrobot01 1500 experiment" },
+        { "file": "training/history/experiments/norm_stats_ablation_apr28_450.md", "title_zh": "norm_stats 消融 (apr28_450)",         "title_en": "norm_stats ablation apr28_450" },
+        { "file": "training/history/experiments/task_a_visrobot01_mixed_600.md","title_zh": "Task A visrobot01 mixed 600",            "title_en": "Task A visrobot01 mixed 600" },
+        { "file": "training/history/experiments/task_a_pure_1200_new_norm_results.md", "title_zh": "Task A pure 1200 new_norm",       "title_en": "Task A pure 1200 new_norm" },
+        { "file": "training/history/experiments/task_a_new_pure_200_new_norm_results.md", "title_zh": "Task A new_pure 200 new_norm", "title_en": "Task A new_pure 200 new_norm" },
+        { "file": "training/history/experiments/task_a_new_pure_1800_new_norm_base_mixed1_results.md", "title_zh": "Task A new_pure 1800 base mixed1", "title_en": "Task A new_pure 1800 base mixed1" },
+        { "file": "training/history/experiments/task_a_new_pure2_1800_new_norm_js_results.md", "title_zh": "Task A new_pure2 1800 js",  "title_en": "Task A new_pure2 1800 js" },
+        { "file": "training/history/experiments/task_a_new_mixed_pure2_1800_6000_results.md", "title_zh": "Task A new_mixed_pure2 6000","title_en": "Task A new_mixed_pure2 6000" },
+        { "file": "training/history/experiments/task_a_new_smooth_800_new_norm_results.md", "title_zh": "Task A new_smooth 800",        "title_en": "Task A new_smooth 800" },
+        { "file": "training/history/experiments/task_p_unfreeze_20k_v2_results.md", "title_zh": "Task P unfreeze 20k v2",              "title_en": "Task P unfreeze 20k v2" },
+        { "file": "training/history/experiments/task_p_unfreeze_8k_20k_analysis.md", "title_zh": "Task P unfreeze 8k→20k 分析",        "title_en": "Task P unfreeze 8k→20k analysis" }
       ]
     }
   ]

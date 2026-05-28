@@ -87,27 +87,48 @@ async def get_docs_index():
 
 
 # ── Doc serving (markdown raw text) ──
-# Resolves docs/<subdir>/<name>.md where subdir ∈ {deployment, training, security}.
-# Sanitized name → no path traversal possible.
-_DOC_NAME_RE = re.compile(r"^[a-zA-Z0-9_\-]+\.md$")
-_DOC_SUBDIRS = ("deployment", "training", "security")
+# Resolves arbitrary relative paths under docs/ with strict per-segment sanitization
+# (no path traversal possible). Falls back to recursive search for bare filenames so
+# legacy `/api/doc/foo.md` calls keep working after docs were moved into subdirs.
+_SEG_DIR_RE = re.compile(r"^[a-zA-Z0-9_\-]+$")
+_SEG_FILE_RE = re.compile(r"^[a-zA-Z0-9_\-\.]+\.md$")
+_MAX_DEPTH = 5
+
+
+def _resolve_doc_path(rel: str) -> Optional[Path]:
+    rel = rel.strip().strip("/")
+    if not rel:
+        return None
+    parts = rel.split("/")
+    if len(parts) > _MAX_DEPTH or any(p in ("", ".", "..") for p in parts):
+        return None
+    if not all(_SEG_DIR_RE.match(p) for p in parts[:-1]):
+        return None
+    if not _SEG_FILE_RE.match(parts[-1]):
+        return None
+    docs_root = _docs_root.resolve()
+    candidate = (docs_root / rel).resolve()
+    try:
+        candidate.relative_to(docs_root)
+    except ValueError:
+        return None
+    return candidate if candidate.is_file() else None
 
 
 def _resolve_doc(name: str) -> Optional[Path]:
-    if not _DOC_NAME_RE.match(name):
-        return None
-    for sub in _DOC_SUBDIRS:
-        candidate = _docs_root / sub / name
-        if candidate.is_file():
-            return candidate
-    # Root-level doc (e.g. project_complete_guide.md)
-    candidate = _docs_root / name
-    if candidate.is_file():
-        return candidate
+    # 1) Treat `name` as a relative path under docs/ (current scheme).
+    p = _resolve_doc_path(name)
+    if p is not None:
+        return p
+    # 2) Backward compat: bare filename → recursive search (deterministic via sort).
+    if "/" not in name and _SEG_FILE_RE.match(name):
+        for hit in sorted(_docs_root.rglob(name)):
+            if hit.is_file():
+                return hit
     return None
 
 
-@app.get("/api/doc/{name}", response_class=PlainTextResponse)
+@app.get("/api/doc/{name:path}", response_class=PlainTextResponse)
 async def get_doc(name: str):
     path = _resolve_doc(name)
     if path is None:

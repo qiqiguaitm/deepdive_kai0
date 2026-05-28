@@ -41,7 +41,7 @@
       "completed_date": "2026-03-28",
       "summary_zh": "Ubuntu 24.04 + 双 RTX 5090 的工控/推理一体机，统一 Python 3.12 venv 同时承载 JAX 推理、ROS2 Jazzy、cv_bridge、CAN 与 RealSense 驱动，实现零网络延迟的本地推理闭环。",
       "summary_en": "Single workstation hosting JAX inference, ROS2 Jazzy, CAN, and RealSense drivers in one Python 3.12 venv, eliminating the IPC/GPU split and achieving 66 ms steady-state inference latency on RTX 5090.",
-      "docs": ["sim01_deployment.md", "task_a_master_plan.md"]
+      "docs": ["deployment/inference/sim01_deployment.md", "deployment/strategy/task_a_master_plan.md"]
     },
     {
       "id": "usb-camera-topology",
@@ -52,7 +52,7 @@
       "completed_date": null,
       "summary_zh": "三路 RealSense (1×D435 + 2×D405) 按 USB 控制器分流，避免 D435 在第三相机启流时被 hub re-enumerate 掉线。",
       "summary_en": "Split three RealSense cameras (1×D435 + 2×D405) across separate USB controllers so the top D435 no longer disconnects when the third stream starts.",
-      "docs": ["usb_camera_layout.md", "sim01_deployment.md"]
+      "docs": ["deployment/incidents/usb_camera_layout.md", "deployment/inference/sim01_deployment.md"]
     },
     {
       "id": "realsense-anti-flicker",
@@ -63,7 +63,7 @@
       "completed_date": "2026-04-27",
       "summary_zh": "D435 设 power_line_frequency=50Hz 抑制 rolling-shutter 横纹；D405 关 AE 并锁 20 ms 曝光跨越 PWM 周期，统一新旧数据视觉分布。",
       "summary_en": "Set D435 PLF=50 Hz to kill rolling-shutter banding and lock D405 exposure to 20 ms with AE off so PWM flicker is averaged out, unifying the visual distribution of pre/post-fix datasets.",
-      "docs": ["realsense_anti_flicker_2026-04-27.md"]
+      "docs": ["deployment/incidents/2026-04-27_realsense_anti_flicker.md"]
     },
     {
       "id": "can-symbolic-naming",
@@ -74,7 +74,7 @@
       "completed_date": null,
       "summary_zh": "4 个 USB-CAN 适配器按 USB bus-info 校准映射为 can_left/right_mas/slave 符号名，交互式校准脚本一次性绑定臂角色，launch 文件可硬编码符号名。",
       "summary_en": "Four USB-CAN adapters are mapped from USB bus-info to symbolic names (can_left/right_mas/slave) via an interactive calibration tool, so ROS2 launch files can reference stable interface names.",
-      "docs": ["teleoperation_guide.md", "sim01_deployment.md"]
+      "docs": ["deployment/data_collection/teleoperation_guide.md", "deployment/inference/sim01_deployment.md"]
     },
     {
       "id": "gpu-allocation-dual5090",
@@ -85,7 +85,7 @@
       "completed_date": null,
       "summary_zh": "策略推理节点固定 GPU0，Rerun 可视化 + Open3D TSDF 固定 GPU1，通过 launch additional_env 显式声明，杜绝同卡 JAX 上下文段错误。",
       "summary_en": "Policy inference pinned to GPU0 and Rerun mesh viz pinned to GPU1 via launch additional_env, eliminating same-card JAX context segfaults that plagued early viz integration.",
-      "docs": ["inference_visualization_mesh.md", "sim01_deployment.md"]
+      "docs": ["deployment/visualization/inference_visualization_mesh.md", "deployment/inference/sim01_deployment.md"]
     },
     {
       "id": "pi05-jax-inference",
@@ -96,7 +96,7 @@
       "completed_date": "2026-03-28",
       "summary_zh": "基于 openpi 的 WebSocket 推理服务，π0.5 flow-matching 模型 50 步 chunk 输出 14 维关节动作，稳态 66 ms / 15 Hz，XLA 持久缓存让冷启动从 13 s 降到 2.7 s。",
       "summary_en": "WebSocket inference server hosting Pi0.5 flow-matching model with 50-step chunks of 14-DOF joint actions, 66 ms steady-state on RTX 5090 and 2.7 s cold start via persistent XLA cache.",
-      "docs": ["sim01_deployment.md", "analysis_kai0_xvla.md", "official_diff_and_risk_analysis.md"]
+      "docs": ["deployment/inference/sim01_deployment.md", "deployment/strategy/cross_embodiment_strategy.md", "deployment/strategy/official_diff_and_risk_analysis.md"]
     },
     {
       "id": "ros2-native-policy-node",
@@ -107,7 +107,7 @@
       "completed_date": null,
       "summary_zh": "policy_inference_node.py 支持 ros2/websocket/both 三种模式，JAX 模型可直接在节点内加载消除 WebSocket 中间层，三模式输出统计分布一致 (差 0.0017 rad)。",
       "summary_en": "policy_inference_node.py supports ros2 / websocket / both modes; native ROS2 mode loads JAX in-process to remove the WebSocket hop, with all three modes producing statistically identical action distributions (Δ ≤ 0.0017 rad).",
-      "docs": ["sim01_deployment.md", "ipc_inference_deployment_review.md"]
+      "docs": ["deployment/inference/sim01_deployment.md", "deployment/inference/ipc_inference_deployment_review.md"]
     },
     {
       "id": "rtc-real-time-chunking",
@@ -118,7 +118,7 @@
       "completed_date": null,
       "summary_zh": "Pi0RTC 在去噪迭代内对延迟尾窗 [d, exec_h) 用前一 chunk 引导采样，叠加运行时 StreamActionBuffer 线性平滑，7 个 ros2 param 可热改，rtc_apply.sh 提供 off/on/tight 等预设。",
       "summary_en": "Pi0RTC injects guidance from the previous chunk in the latency tail window [d, exec_h) during denoising, layered with StreamActionBuffer linear smoothing; seven runtime ROS2 params plus an rtc_apply.sh preset switcher (off/on/tight/long).",
-      "docs": ["rtc_implementation.md"]
+      "docs": ["deployment/inference/rtc_implementation.md"]
     },
     {
       "id": "multimodal-depth-ee-pose",
@@ -129,7 +129,7 @@
       "completed_date": "2026-05-18",
       "summary_zh": "WebSocket 协议扩展支持 D435 深度输入、双臂 7 维 EE pose 输入/输出，EE-mode 在节点内通过 PiperIK 解算为关节后下发，joint/ee 双模运行时切换，新增 4 个 /policy/actions_ee_* 发布器。",
       "summary_en": "Extended WebSocket protocol now accepts D435 depth and dual-arm 7-DOF EE pose inputs and supports Cartesian (16-dim) action output, with in-node PiperIK converting to joints before hardware; runtime-switchable joint vs ee_pose execution modes.",
-      "docs": ["multimodal_inference_protocol.md"]
+      "docs": ["deployment/multimodal_inference_protocol.md"]
     },
     {
       "id": "piper-ik-fk",
@@ -140,7 +140,7 @@
       "completed_date": "2026-05-18",
       "summary_zh": "calib/piper_ik.py 基于 URDF gripper_base 提供 FK + ikpy IK，带 round-trip 容差校验和失败时 hold-last-good 策略，与 piper_fk.py 的 link6 FK (用于 Rerun 可视化) 分用。",
       "summary_en": "calib/piper_ik.py provides URDF gripper_base FK and seeded ikpy IK with round-trip tolerance check and hold-last-good fallback, kept separate from piper_fk.py's link6 FK used by Rerun visualization.",
-      "docs": ["multimodal_inference_protocol.md"]
+      "docs": ["deployment/multimodal_inference_protocol.md"]
     },
     {
       "id": "rerun-3d-visualization",
@@ -151,7 +151,7 @@
       "completed_date": "2026-04-04",
       "summary_zh": "实时 3D 场景显示双臂 URDF mesh + 50 步预测末端轨迹 + 三路相机 + 14 路关节时序；键盘 Enter/Space 或 ROS2 topic 切换 OBSERVE/EXECUTE，推理始终跑只在发布端门控。",
       "summary_en": "Live 3D scene with dual-arm URDF meshes, 50-step predicted EE trails, three camera views, and 14 joint timeseries; keyboard Enter/Space or ROS2 topic toggles OBSERVE/EXECUTE while inference keeps running.",
-      "docs": ["inference_visualization.md", "rerun_mesh_transparency_lesson.md"]
+      "docs": ["deployment/visualization/inference_visualization.md", "deployment/visualization/rerun_mesh_transparency_lesson.md"]
     },
     {
       "id": "rerun-mesh-scene",
@@ -162,7 +162,7 @@
       "completed_date": "2026-04-05",
       "summary_zh": "静态背景用 Open3D GPU TSDF 一次成型常驻，动态前景按相机做 screen-space 三角化每 5 Hz 更新，workspace bbox 互斥切分，接近 Isaac Sim viewport 观感。",
       "summary_en": "Static background built once via Open3D GPU TSDF; dynamic foreground triangulated per-camera in screen space at 5 Hz, split by a workspace AABB — approaching Isaac Sim viewport visual quality.",
-      "docs": ["inference_visualization_mesh.md", "rerun_mesh_transparency_lesson.md"]
+      "docs": ["deployment/visualization/inference_visualization_mesh.md", "deployment/visualization/rerun_mesh_transparency_lesson.md"]
     },
     {
       "id": "action-safety-clamp",
@@ -173,7 +173,7 @@
       "completed_date": null,
       "summary_zh": "新增 action_safety.py 模块，基于 Piper URDF 限位对推理 action 做关节位置 clamp + 按 publish_rate 换算的速度 clamp，左右臂独立，5 个推理脚本统一集成，可通过 CLI 关闭回归官方行为。",
       "summary_en": "New action_safety.py module clamps inference actions to URDF joint position limits and per-step velocity bounds (left/right arms independent), integrated into all five inference scripts with a CLI flag to disable for parity testing.",
-      "docs": ["official_diff_and_risk_analysis.md", "ros2_image_inference_validation_review.md"]
+      "docs": ["deployment/strategy/official_diff_and_risk_analysis.md", "deployment/inference/ros2_image_inference_validation_review.md"]
     },
     {
       "id": "image-pipeline-parity",
@@ -184,7 +184,7 @@
       "completed_date": null,
       "summary_zh": "BGR→JPEG→BGR→RGB→resize_with_pad(224)→CHW 全链路与官方 kai0 逐字符等价，统一 640×480 RGB 输入，JPEG round-trip 模拟训练时 mp4 压缩 artifact。",
       "summary_en": "End-to-end image pipeline (BGR→JPEG→BGR→RGB→resize_with_pad→CHW) verified byte-identical to upstream kai0 with unified 640×480 RGB inputs, including the JPEG round-trip that simulates training-time mp4 codec artifacts.",
-      "docs": ["ros2_image_inference_validation_review.md", "official_diff_and_risk_analysis.md"]
+      "docs": ["deployment/inference/ros2_image_inference_validation_review.md", "deployment/strategy/official_diff_and_risk_analysis.md"]
     },
     {
       "id": "pi05-pytorch-benchmark",
@@ -195,7 +195,7 @@
       "completed_date": "2026-05-19",
       "summary_zh": "5-backend 对比 (eager / compile-default / cuda-graph / reduce-overhead / max-autotune)，5090 上 max-autotune P50=43.5 ms 抖动 0.3 ms，V1 Triton 复用进一步降到 P50=32 ms (8× vs eager)。",
       "summary_en": "Five-backend sweep on RTX 5090 (eager → max-autotune) plus V1 Triton kernel reuse: best path reaches P50=32 ms with 0.3 ms jitter, 8× over the eager baseline.",
-      "docs": ["pi05_inference_backend_benchmark_plan.md", "realtime_vla_optimization_analysis.md"]
+      "docs": ["deployment/pi05_inference_backend_benchmark_plan.md", "deployment/inference/realtime_vla/v1_triton_log.md"]
     },
     {
       "id": "model-variants",
@@ -206,7 +206,7 @@
       "completed_date": null,
       "summary_zh": "支持 π0 / π0.5 / π0_fast / π0_rtc 多个 JAX 模型变体 + PyTorch 复现(含 AdvantageEstimator)，全部基于 PaliGemma vision + Gemma action expert，flow matching 训练目标。",
       "summary_en": "Supports π0 / π0.5 / π0_fast / π0_rtc JAX variants and a PyTorch reimplementation (with AdvantageEstimator), all sharing the PaliGemma vision + Gemma action expert backbone trained with flow matching.",
-      "docs": ["analysis_kai0_xvla.md", "rtc_implementation.md", "pi05_inference_backend_benchmark_plan.md"]
+      "docs": ["deployment/strategy/cross_embodiment_strategy.md", "deployment/inference/rtc_implementation.md", "deployment/pi05_inference_backend_benchmark_plan.md"]
     },
     {
       "id": "teleop-master-slave",
@@ -217,7 +217,7 @@
       "completed_date": null,
       "summary_zh": "4 路 CAN (2 master + 2 slave) + 3 路 RealSense 的完整遥操栈，start_teleop.sh 一键起 master 拖拽示教模式，slave 200 Hz 跟随。",
       "summary_en": "Full teleop stack with 4 CAN buses (2 master + 2 slave) and 3 RealSense cameras; start_teleop.sh launches master arms in drag-teach mode with slaves following at 200 Hz.",
-      "docs": ["teleoperation_guide.md", "replay_and_stacks_usage.md"]
+      "docs": ["deployment/data_collection/teleoperation_guide.md", "deployment/data_collection/replay_and_stacks_usage.md"]
     },
     {
       "id": "data-collect-web-ui",
@@ -228,7 +228,7 @@
       "completed_date": null,
       "summary_zh": "React + FastAPI + rclpy bridge 单页 dashboard，采集员/管理员双模式，三相机预览 + 14 维关节 + 录制控制 + 任务/Prompt 模板 + 独立磁盘扫描统计模块。",
       "summary_en": "Single-page React + FastAPI + rclpy dashboard with collector/admin modes, three camera previews, 14-DOF joint readouts, recording controls, task/prompt templates, and an independent disk-scanning statistics service.",
-      "docs": ["data_manager_plan.md", "build_web_venv.md"]
+      "docs": ["deployment/data_collection/data_manager_plan.md", "deployment/inference/build_web_venv.md"]
     },
     {
       "id": "autonomy-recording",
@@ -239,7 +239,7 @@
       "completed_date": null,
       "summary_zh": "policy 真机执行时同步落盘 14 维 state/action parquet + 三相机 mp4，数据写入 Task_<X>/autonomy/<date>-v2/ 与 TOS 同步，作为 DAgger 与回放对照源。",
       "summary_en": "Real-robot policy runs are recorded into Task_<X>/autonomy/<date>-v2/ with 14-DOF parquet + three camera mp4s, then synced to TOS as a baseline for DAgger augmentation and replay verification.",
-      "docs": ["replay_and_stacks_usage.md", "multimodal_inference_protocol.md"]
+      "docs": ["deployment/data_collection/replay_and_stacks_usage.md", "deployment/multimodal_inference_protocol.md"]
     },
     {
       "id": "dagger-collection",
@@ -250,7 +250,7 @@
       "completed_date": "2026-05-20",
       "summary_zh": "策略自主推理时操作员按键接管 master 臂示范，自动对齐 master 到 slave 位再切示教模式，纠错段落 LeRobot v2.1 直接落到 dagger/ 子集，与官方 kai0_dagger 同构。",
       "summary_en": "Operator presses a key to take over the master arm during policy rollout; masters auto-align to slave pose before switching to teach mode, and the correction segment is saved into the dagger/ subset in LeRobot v2.1 — structurally identical to upstream kai0_dagger.",
-      "docs": ["teleoperation_guide.md", "task_a_master_plan.md", "analysis_kai0_xvla.md"]
+      "docs": ["deployment/data_collection/teleoperation_guide.md", "deployment/strategy/task_a_master_plan.md", "deployment/strategy/cross_embodiment_strategy.md"]
     },
     {
       "id": "lerobot-v2-format",
@@ -261,7 +261,7 @@
       "completed_date": null,
       "summary_zh": "采集统一落 LeRobot v2.1: parquet (14-dim state/action) + 3 路 mp4 + meta/{episodes,tasks,info}.jsonl + episodes_stats.jsonl，目录按 Task/<subset>/<YYYY-MM-DD>-v2/ 分桶。",
       "summary_en": "All collection lands in LeRobot v2.1 (14-DOF parquet + 3 camera mp4 + episodes/tasks/info/stats jsonl), bucketed by Task/<subset>/<YYYY-MM-DD>-v2/ with v2 suffix unifying raw and post-processed sources.",
-      "docs": ["data_manager_plan.md", "tos_access_guide.md", "training_servers_knowledge_base.md"]
+      "docs": ["deployment/data_collection/data_manager_plan.md", "deployment/tos_access_guide.md", "deployment/training_ops/overview.md"]
     },
     {
       "id": "tos-data-pipeline",
@@ -272,7 +272,7 @@
       "completed_date": null,
       "summary_zh": "TOS 对象存储作为大文件中转层 (tosutil / AWS CLI / Python SDK 三种通路)，部署机↔训练集群单文件 ~85 MB/s，16 并发聚合 300-400 MB/s，支持增量 sync 与 multi-part 断点续传。",
       "summary_en": "Object storage acts as the cross-host transfer layer (tosutil / AWS CLI / Python SDK), reaching ~85 MB/s single file and 300-400 MB/s aggregate at 16-way concurrency with incremental sync and resumable multi-part uploads.",
-      "docs": ["tos_access_guide.md", "checkpoints_layout.md"]
+      "docs": ["deployment/tos_access_guide.md", "deployment/training_ops/checkpoints_layout.md", "deployment/training_ops/data_sync_tos.md"]
     },
     {
       "id": "replay-stack-slim",
@@ -283,7 +283,7 @@
       "completed_date": "2026-04-30",
       "summary_zh": "autonomy / replay-only / data_collect 三栈通过 /tmp/kai0_deployment_mode marker 互斥，replay-only 启动 ~1 s 内存 50 MB，Web UI / CLI / curl 三种触发入口，带 preflight 安全校验。",
       "summary_en": "Three exclusive launch profiles (autonomy / replay-only / data_collect) coordinated by a deployment-mode marker file; slim replay starts in ~1 s using 50 MB RAM, with three trigger entries (Web UI / CLI / curl) and a preflight safety check.",
-      "docs": ["replay_and_stacks_usage.md"]
+      "docs": ["deployment/data_collection/replay_and_stacks_usage.md"]
     },
     {
       "id": "checkpoints-layout",
@@ -294,7 +294,7 @@
       "completed_date": "2026-04-27",
       "summary_zh": "所有真机推理用 ckpt 统一落到本地 NVMe 单点目录，扁平/run-style 两种拓扑 + 必备四件套 (params/metadata/norm_stats/config) checklist，避免分散与 norm_stats 不一致。",
       "summary_en": "All deployment checkpoints live under one local NVMe root with two topologies (flat / run-style) and a four-item checklist (params / metadata / norm_stats / config), eliminating norm_stats mismatch crashes.",
-      "docs": ["checkpoints_layout.md"]
+      "docs": ["deployment/training_ops/checkpoints_layout.md"]
     },
     {
       "id": "dynamic-dataset-training",
@@ -305,7 +305,7 @@
       "completed_date": null,
       "summary_zh": "外部 watcher 监控新采集 episode，满足触发条件后 pkill→rebuild→gen stats→重算 norm→--resume 续训，不改 openpi 源码即可吸收持续采集的数据。",
       "summary_en": "An external watcher monitors newly collected episodes and, when thresholds are met, kills training, rebuilds the mixed dataset, regenerates stats / norm_stats, and resumes from the latest checkpoint without touching upstream openpi.",
-      "docs": ["task_a_master_plan.md"]
+      "docs": ["deployment/strategy/task_a_master_plan.md"]
     },
     {
       "id": "gf-uc-js-clusters",
@@ -316,7 +316,7 @@
       "completed_date": "2026-05-12",
       "summary_zh": "8 台 A100/A800 训练机分三组 (gf 集群 vePFS 共享、uc 集群独立存储 + RoCEv2 多机、js 集群 JuiceFS 半共享 + 200 Gb/s IB)，涵盖单机、3-host HSDP/FSDP 24 GPU 与 4 机潜在多机训练能力。",
       "summary_en": "Eight-node training fleet across three clusters (gf with shared vePFS, uc with independent storage + RoCEv2 multi-host, js with shared JuiceFS + 200 Gb/s IB), supporting single-node, 3-host 24-GPU HSDP/FSDP, and future 4-host runs.",
-      "docs": ["training_servers_knowledge_base.md", "js_servers_probe.md"]
+      "docs": ["deployment/training_ops/overview.md", "deployment/training_ops/submission/uc_cluster_jobs.md", "deployment/training_ops/submission/gf0_control_plane.md"]
     },
     {
       "id": "sidecar-config",
@@ -327,7 +327,7 @@
       "completed_date": null,
       "summary_zh": "ckpt 旁挂 train_config.json 记 base_config_name + override_asset_id (未来扩 framework)，部署机端无需为每个新 ckpt 在 config.py 注册 TrainConfig 即可上线。",
       "summary_en": "Each checkpoint carries a sidecar train_config.json (base_config_name + override_asset_id, plus a future framework field) so the deployment machine can deploy new checkpoints without registering a new TrainConfig per experiment.",
-      "docs": ["checkpoints_layout.md", "realtime_vla_optimization_analysis.md"]
+      "docs": ["deployment/training_ops/checkpoints_layout.md", "deployment/inference/build_web_venv.md"]
     },
     {
       "id": "norm-stats-management",
@@ -338,7 +338,7 @@
       "completed_date": null,
       "summary_zh": "明确两种 asset_id 解析路径 (显式 vs repo_id 绝对)，上架 checklist 强制 md5 与训练源对齐，避免反归一化乱跑硬件。",
       "summary_en": "Documents the two asset_id resolution paths (explicit vs absolute repo_id) and enforces an md5 alignment checklist against the training-time stats, eliminating the silent denormalization drift that previously caused jerky arms.",
-      "docs": ["checkpoints_layout.md", "task_a_real_robot_grasp_corner_debug_log.md"]
+      "docs": ["deployment/training_ops/checkpoints_layout.md", "deployment/incidents/task_a_real_robot_grasp_corner_debug_log.md"]
     },
     {
       "id": "start-scripts-launchers",
@@ -349,7 +349,7 @@
       "completed_date": null,
       "summary_zh": "start_autonomy / start_replay_stack / start_data_collect / start_teleop / start_policy_node 等脚本一键拉起对应栈，自动写部署 mode marker，支持新增 --execution-mode 等多模态 CLI。",
       "summary_en": "One-shot scripts (start_autonomy / start_replay_stack / start_data_collect / start_teleop / start_policy_node) bring up the corresponding stack, write the deployment-mode marker, and accept the new --execution-mode / --enable-* multimodal flags.",
-      "docs": ["replay_and_stacks_usage.md", "multimodal_inference_protocol.md", "sim01_deployment.md"]
+      "docs": ["deployment/data_collection/replay_and_stacks_usage.md", "deployment/multimodal_inference_protocol.md", "deployment/inference/sim01_deployment.md"]
     },
     {
       "id": "toggle-execute",
@@ -360,7 +360,7 @@
       "completed_date": null,
       "summary_zh": "推理始终运行，仅在发布端门控：键盘 Enter/Space 或 ROS2 topic /policy/execute 切换 OBSERVE/EXECUTE，切到观测模式时电机保持使能、轨迹仍预测。",
       "summary_en": "Inference always runs; only the publisher is gated. Operators toggle OBSERVE/EXECUTE via keyboard or a ROS2 Bool topic, leaving motors enabled and predicted trajectories streaming in observe mode.",
-      "docs": ["inference_visualization.md"]
+      "docs": ["deployment/visualization/inference_visualization.md"]
     },
     {
       "id": "rtc-apply-presets",
@@ -371,7 +371,7 @@
       "completed_date": null,
       "summary_zh": "一条命令在 off / on / rtc_tight / rtc5 / rtc_long / rtc_paper 等预设间切换，封装 7 个 ros2 param，便于真机 A/B 对照与论文数值复现。",
       "summary_en": "Single-command switcher between RTC presets (off / on / rtc_tight / rtc5 / rtc_long / rtc_paper) wrapping seven ROS2 params, designed for hardware A/B sweeps and paper-number reproduction.",
-      "docs": ["rtc_implementation.md", "task_a_real_robot_grasp_corner_debug_log.md"]
+      "docs": ["deployment/inference/rtc_implementation.md", "deployment/incidents/task_a_real_robot_grasp_corner_debug_log.md"]
     },
     {
       "id": "data-manager-backend-venv",
@@ -382,7 +382,7 @@
       "completed_date": null,
       "summary_zh": "FastAPI + rclpy 后端固定 Python 3.12 venv (ROS2 Jazzy ABI)，提供 sudo / 无 sudo 两条搭建路径与 RclpyBridge 健康检查，UI 红灯/绿灯指示 ROS2/CAN/相机状态。",
       "summary_en": "FastAPI + rclpy backend pinned to Python 3.12 (matching ROS2 Jazzy ABI) with both sudo and no-sudo build paths and an RclpyBridge health check that drives the UI's ROS2 / CAN / camera status lights.",
-      "docs": ["build_web_venv.md", "data_manager_plan.md"]
+      "docs": ["deployment/inference/build_web_venv.md", "deployment/data_collection/data_manager_plan.md"]
     }
   ]
 }

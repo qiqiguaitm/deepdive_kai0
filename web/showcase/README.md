@@ -39,9 +39,9 @@ web/showcase/
 │   ├── timeline.js        里程碑时间轴
 │   └── docs.js            文档浏览器 + marked.js 渲染
 ├── content/
-│   ├── features.json      33 个能力卡片（5 分类，每条带 zh+en）
+│   ├── features.json      32 个能力卡片（5 分类，每条带 zh+en）
 │   ├── milestones.json    12 条里程碑（zh+en）
-│   └── docs_index.json    docs/deployment 分组与中文标题
+│   └── docs_index.json    docs/{deployment,training,*} 12 分组与中文标题
 ├── logs/                  运行日志
 └── README.md
 ```
@@ -53,9 +53,9 @@ web/showcase/
 | Tab | 内容 |
 |---|---|
 | **概览** | 项目简介 + 4 个统计数字 + 技术栈 + ASCII 架构图 + 时间轴 |
-| **能力矩阵** | 33 个能力卡片，按 5 类 (Hardware / Inference / Data / Training / Tooling) 过滤 |
+| **能力矩阵** | 32 个能力卡片，按 5 类 (Hardware / Inference / Data / Training / Tooling) 过滤 |
 | **端到端管线** | 数据采集 → 模型训练 → 真机部署 三栏并排 |
-| **文档** | 24 份 `docs/deployment/*.md` 按主题分组，右侧 markdown 渲染 |
+| **文档** | `docs/` 全树 (deployment + training, ~88 份 markdown) 按 12 个主题分组，右侧 markdown 渲染 |
 
 ---
 
@@ -70,7 +70,7 @@ web/showcase/
 - `summary_zh` + `summary_en`
 - `status`（`DONE` / `IN-PROGRESS` / `PLANNED`）
 - `completed_date`（YYYY-MM-DD 或 null）
-- `docs`（数组，文件名带 `.md`，会被 `/api/doc/{name}` 解析）
+- `docs`（数组，路径相对 `docs/`，如 `deployment/inference/sim01_deployment.md`；会被 `/api/doc/{path}` 解析。也兼容裸文件名 → 递归查找）
 
 ---
 
@@ -83,10 +83,10 @@ web/showcase/
 | `GET /api/features` | 返回 features.json |
 | `GET /api/milestones` | 返回 milestones.json |
 | `GET /api/docs/index` | 返回 docs_index.json |
-| `GET /api/doc/{name}` | 返回 `docs/{deployment,training,security,}/{name}` 原文 |
+| `GET /api/doc/{path}` | 返回 `docs/{path}` 原文（如 `deployment/inference/sim01_deployment.md`）；裸文件名则递归查找 |
 | `GET /api/readme?lang=zh\|en` | 项目根 README |
 
-文件名解析受 `^[a-zA-Z0-9_\-]+\.md$` 限制，无路径遍历风险。
+路径解析受三重防护：(1) 每段正则 `^[a-zA-Z0-9_\-]+$`，文件名 `^[a-zA-Z0-9_\-\.]+\.md$`；(2) 显式拒绝 `..` / `.` / 空段；(3) `Path.resolve().relative_to(docs_root)` 兜底。最大目录深度 5。
 
 ---
 
