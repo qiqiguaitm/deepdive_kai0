@@ -132,77 +132,17 @@ alias vlog='ssh gf0"mlp job logs --follow --instance-name worker-0 --id"'  # vlo
 
 > 提交脚本统一放在 `/vePFS/tim/workspace/deepdive_kai0/train_scripts/kai/volc/submit_yaml.py` (gf0 vePFS), 已 git 化随代码同步。
 
-> SDK 5.0.27 自带 `KeyError: '.models'` 反序列化 bug, 必须 monkey-patch (见 §5.6 提交脚本)。**或绕过 SDK 直接用 `volcengine.base.Service` 调用 OpenAPI** — 此方式无 bug 且代码更简:
+> 实现已绕过 SDK 5.0.27 `KeyError: '.models'` 反序列化 bug(直接 OpenAPI POST)。submit_yaml.py 解析 YAML → 调火山 `CreateJob`,按 `ResourceQueueName` 自动填 queue id / region / zone / vepfs / 默认镜像(下表)。
 
-```python
-#!/usr/bin/env python3
-"""LOCAL submit to Robot-North-H20 via volcengine Service API (no SDK deserializer bug)."""
-import os, json, yaml
-from volcengine.ApiInfo import ApiInfo
-from volcengine.Credentials import Credentials
-from volcengine.ServiceInfo import ServiceInfo
-from volcengine.base.Service import Service
+**Queue → region/zone/vepfs/默认镜像 映射** (submit_yaml.py 内置, 供查阅):
 
-# Queue → region/zone mapping. image_cr 是默认 kai0 训练镜像;
-# YAML 里可显式 ImageUrl 覆盖 (例如 grasp/h2r smoke 镜像)
-QUEUES = {
-    "Robot-North-H20": {"id": "q-20260516104642-khch9", "region": "cn-beijing",  "zone": "cn-beijing-e",
-                        "vepfs_id": "vepfs-cnbj875793a96d6b",
-                        "vepfs_mount": "/vePFS-North-E/vis_robot",     # 配合 SubPath=/vis_robot
-                        "vepfs_subpath": "/vis_robot",                 # IAM 限定
-                        "image_cr": "dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1"},  # kai0 训练镜像
-    "robot-task":      {"id": "q-20251204185107-fvnpx",  "region": "cn-shanghai", "zone": "cn-shanghai-a",
-                        "vepfs_id": "vepfs-cnsh075262e1f815", "vepfs_mount": "/vePFS",
-                        "vepfs_subpath": "",
-                        "image_cr": "visincept-cn-shanghai.cr.volces.com/grasp/h2r:1.0"},
-}
-# 额外镜像备选 (按需手动写入 YAML 的 ImageUrl):
-#   visincept-cn-beijing.cr.volces.com/grasp/h2r:1.0    — grasp h2r smoke / vis_robot
-#   visincept-cn-shanghai.cr.volces.com/grasp/h2r:1.0   — grasp h2r smoke / cnsh
+| Queue | id | region / zone | vepfs (mount, SubPath) | 默认镜像 image_cr |
+|---|---|---|---|---|
+| **Robot-North-H20** | `q-20260516104642-khch9` | cn-beijing / cn-beijing-e | `vepfs-cnbj875793a96d6b` (`/vePFS-North-E/vis_robot`, SubPath `/vis_robot`) | `dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1` |
+| **robot-task** | `q-20251204185107-fvnpx` | cn-shanghai / cn-shanghai-a | `vepfs-cnsh075262e1f815` (`/vePFS`) | `visincept-cn-shanghai.cr.volces.com/grasp/h2r:1.0` |
+| **Robot-East-H20** | `q-20260516104437-2ml4v` | cn-shanghai (gf0 所在华东 H20) | — | — |
 
-def submit(yaml_path):
-    cfg = yaml.safe_load(open(yaml_path))
-    q = QUEUES[cfg["ResourceQueueName"]]
-    si = ServiceInfo('open.volcengineapi.com', {'Accept': 'application/json'},
-                     Credentials(os.environ['VOLC_AK'], os.environ['VOLC_SK'],
-                                 'ml_platform', q["region"]), 10, 30)
-    api = {'CreateJob': ApiInfo('POST', '/', {'Action': 'CreateJob', 'Version': '2024-07-01'}, {}, {})}
-    svc = Service(si, api)
-    body = {
-        "Name": cfg["TaskName"],
-        "Description": cfg.get("Description", ""),
-        "ResourceConfig": {
-            "ResourceQueueId": q["id"],
-            "MaxRuntimeSeconds": int(cfg.get("ActiveDeadlineSeconds", 86400)),
-            "Roles": [{"Name": r["RoleName"], "Replicas": int(r["RoleReplicas"]),
-                       "Resource": {"InstanceTypeId": r["Flavor"], "ZoneId": q["zone"]}}
-                      for r in cfg["TaskRoleSpecs"]],
-        },
-        "RuntimeConfig": {
-            "Framework": cfg.get("Framework", "Custom"),
-            "Image": {"Url": cfg.get("ImageUrl", q["image_cr"]), "Type": "Prebuild"},
-            "Command": cfg["Entrypoint"],
-            "Envs": [{"Name": e["Name"], "Value": str(e["Value"]),
-                      "IsPrivate": bool(e.get("IsPrivate", False))} for e in cfg.get("Envs", [])],
-        },
-        "StorageConfig": {
-            "Storages": [{"Type": "Vepfs", "MountPath": q["vepfs_mount"],
-                          "Config": {"Vepfs": {"Id": q["vepfs_id"], "SubPath": ""}}}],
-        },
-    }
-    if cfg.get("CacheType"):
-        body["StorageConfig"]["CacheType"] = cfg["CacheType"]
-    raw = svc.json('CreateJob', {}, json.dumps(body).encode())
-    d = json.loads(raw) if isinstance(raw, str) else raw
-    print(json.dumps(d, ensure_ascii=False, indent=2)[:1500])
-    if 'Result' in d and d['Result'].get('Id'):
-        print(f"\n✅ task_id: {d['Result']['Id']}")
-    return d
-
-if __name__ == "__main__":
-    import sys
-    submit(sys.argv[1])
-```
+> 备选镜像 (手动写 YAML `ImageUrl`): `visincept-cn-{beijing,shanghai}.cr.volces.com/grasp/h2r:1.0` (grasp h2r smoke)。
 
 使用方式 (在 gf0 上):
 ```bash
@@ -220,28 +160,7 @@ alias vsubmit='ssh gf0 "cd /vePFS/tim/workspace/deepdive_kai0 && python train_sc
 
 #### 5.6.c.5 经 gf0 状态查询 (Python, 无 SDK bug)
 
-```python
-from volcengine.ApiInfo import ApiInfo
-from volcengine.Credentials import Credentials
-from volcengine.ServiceInfo import ServiceInfo
-from volcengine.base.Service import Service
-import json, os
-
-def get_svc(region):
-    si = ServiceInfo('open.volcengineapi.com', {'Accept': 'application/json'},
-                     Credentials(os.environ['VOLC_AK'], os.environ['VOLC_SK'], 'ml_platform', region), 5, 5)
-    return Service(si, {
-        'ListResourceQueues': ApiInfo('POST', '/', {'Action': 'ListResourceQueues', 'Version': '2024-07-01'}, {}, {}),
-        'ListJobs':           ApiInfo('POST', '/', {'Action': 'ListJobs',           'Version': '2024-07-01'}, {}, {}),
-        'GetJob':             ApiInfo('POST', '/', {'Action': 'GetJob',             'Version': '2024-07-01'}, {}, {}),
-    })
-
-# 查 Robot-North-H20 当前 running
-svc = get_svc('cn-beijing')
-r = svc.json('ListJobs', {}, json.dumps({"ResourceQueueId": "q-20260516104642-khch9", "PageSize": 30, "State": "Running"}).encode())
-for j in json.loads(r)['Result'].get('List', []):
-    print(j['Name'], j['Status']['State'], j['CreateTime'])
-```
+脚本(已抽离): **`train_scripts/kai/volc/volc_job_status.py`** — `get_svc(region)` 用 `volcengine.base.Service` 直调 `ListResourceQueues`/`ListJobs`/`GetJob`(绕开 SDK bug)。需 `VOLC_AK`/`VOLC_SK`。`python volc_job_status.py` 默认查 Robot-North-H20 running。
 
 #### 5.6.c.6 数据 / Ckpt 跨网同步策略 ⭐ (gf 服务器是跳板, 与队列 1:1 对应)
 
@@ -335,23 +254,7 @@ ssh gf3 "tail -F /vePFS-North-E/vis_robot/logs/<exp_name>_*.log"
 ssh gf0 "tail -F /vePFS/tim/workspace/deepdive_kai0/logs/<exp_name>_*.log"
 ```
 
-**job 状态 dashboard** (gf0 + cron, 可选): 在 gf0 上跑 5 分钟轮询的脚本, 把 running/queueing 任务汇总写到 vePFS, 本地可定期 scp 拉。
-
-```bash
-# /vePFS/tim/workspace/deepdive_kai0/train_scripts/kai/volc/dashboard.sh (gf0)
-#!/usr/bin/env bash
-OUT=/vePFS/tim/workspace/deepdive_kai0/logs/volc_dashboard.txt
-while true; do
-  date > "$OUT"
-  echo "=== Running ==="                                                       >> "$OUT"
-  mlp job list --state Running --page-size 30                                  >> "$OUT"
-  echo                                                                         >> "$OUT"
-  echo "=== Queueing ==="                                                      >> "$OUT"
-  mlp job list --state Queueing --page-size 30                                 >> "$OUT"
-  sleep 300
-done
-```
-本地一键看:
+**job 状态 dashboard** (gf0 + cron, 可选): 脚本(已抽离): **`train_scripts/kai/volc/dashboard.sh`** — gf0 上 nohup 跑, 5min 轮询 Running/Queueing 写 `logs/volc_dashboard.txt`。本地一键看:
 ```bash
 ssh gf0 "cat /vePFS/tim/workspace/deepdive_kai0/logs/volc_dashboard.txt"
 # 或 alias vdash='ssh gf0 cat /vePFS/.../volc_dashboard.txt'

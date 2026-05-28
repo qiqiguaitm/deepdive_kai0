@@ -58,31 +58,7 @@ ssh gf0 'ssh uc02 "pkill -SIGTERM -f train.py.*smooth_800; sleep 5; pkill -9 -f 
 
 #### 5.6.d.3 跨集群 dashboard (gf0 集中视图)
 
-`/vePFS/tim/workspace/deepdive_kai0/train_scripts/dashboard_all.sh` (gf0 上):
-```bash
-#!/usr/bin/env bash
-# 5min 轮询: 火山 jobs + uc01/02/03 training procs + GPU util
-OUT=/vePFS/tim/workspace/deepdive_kai0/logs/all_resources.txt
-while true; do
-  {
-    date '+=== %Y-%m-%d %H:%M:%S ==='
-    echo
-    echo '┌─────────── 火山 ML Platform ───────────'
-    echo '│ Running:'; mlp job list --state Running --page-size 20 | head -20
-    echo '│ Queueing:'; mlp job list --state Queueing --page-size 10 | head -8
-    echo
-    for h in uc01 uc02 uc03; do
-      echo "┌─────────── $h ───────────"
-      ssh -o ConnectTimeout=5 $h "
-        echo '│ GPU:'; nvidia-smi --query-gpu=index,utilization.gpu,memory.used --format=csv,noheader | head -10
-        echo '│ Training procs:'
-        ps aux | grep -E 'python.*train\.py' | grep -v grep | awk '{print \"│  PID=\"\$2\" cmd=\"\$11\" \"\$12\" \"\$13}'
-      " 2>&1 | grep -v 'Warning\|setlocale'
-    done
-  } > "$OUT.tmp" && mv "$OUT.tmp" "$OUT"
-  sleep 300
-done
-```
+脚本(已抽离为真实文件): **`train_scripts/dashboard_all.sh`** — 5min 轮询火山 jobs + uc01/02/03 训练进程/GPU util, 写 `logs/all_resources.txt`。
 
 启动:
 ```bash
@@ -268,92 +244,14 @@ uc02/uc03 /etc/fstab: 192.168.1.2:/data/cluster_ckpt /cluster_ckpt nfs vers=4,ha
 
 **带宽**: write ~219 MB/s, read ~2 GB/s (单 stream NFSv4 over TCP)，跨 host 直传走 RoCE NIC eth1。
 
-### 12.6 集群训练启动脚本模板 (`/tmp/run_cluster_3host.sh`)
+### 12.6 集群训练启动脚本模板
 
-```bash
-#!/bin/bash
-set -euo pipefail
+脚本(已抽离为真实文件): **`train_scripts/kai/launch/run_cluster_3host.sh`** — uc01(master/proc0)拉起 uc02/uc03 worker, 经 RDMA eth1 协调的 3-host 24-GPU 启动模板。改 `CONFIG`/`EXP_NAME` 后 `bash run_cluster_3host.sh`。
 
-CONFIG="<your_config_name>"
-EXP_NAME="<exp_name>"
-COORD_ADDR="192.168.1.2:15830"
-LOG_DIR=/home/tim/workspace/deepdive_kai0/logs
-TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
-mkdir -p $LOG_DIR
-
-NCCL_OPTS='
-unset NCCL_IB_DISABLE NCCL_NET_TYPE NCCL_NET_GDR_LEVEL NCCL_NET_GDR_READ
-export NCCL_IB_HCA=mlx5_0,mlx5_1,mlx5_2,mlx5_3
-export NCCL_IB_GID_INDEX=3
-export NCCL_IB_TIMEOUT=23
-export NCCL_IB_RETRY_CNT=7
-export NCCL_IB_QPS_PER_CONNECTION=4
-export NCCL_P2P_LEVEL=NVL
-export NCCL_SOCKET_IFNAME=eth1
-unset NCCL_MAX_NCHANNELS NCCL_MIN_NCHANNELS NCCL_BUFFSIZE
-export NCCL_DEBUG=INFO
-'
-
-TRAIN_CMD="cd /home/tim/workspace/deepdive_kai0/kai0 && .venv/bin/python -u scripts/train.py $CONFIG --exp_name=$EXP_NAME --seed=123 --overwrite --no-wandb-enabled"
-
-launch_worker() {
-  local TGT=$1 PROC=$2 TAG=$3
-  ssh -o StrictHostKeyChecking=no $TGT "
-unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY
-export PATH=/home/tim/miniconda3/bin:/home/tim/.local/bin:\$PATH
-export PYTHONUNBUFFERED=1
-export KAI0_DATA_ROOT=/home/tim/workspace/deepdive_kai0/kai0
-export KAI0_LOCAL_ROOT=/home/tim/local_ckpts
-export OPENPI_DATA_HOME=/home/tim/workspace/openpi_cache
-export JAX_COORDINATOR_ADDRESS=$COORD_ADDR
-export JAX_NUM_PROCESSES=3
-export JAX_PROCESS_INDEX=$PROC
-export JAX_ENABLE_EMPTY_ARRAYS=true
-export JAX_COMPILATION_CACHE_MIN_ENTRY_SIZE_BYTES=-1
-export JAX_COMPILATION_CACHE_MIN_COMPILE_TIME_SECS=1
-unset XLA_FLAGS
-export XLA_PYTHON_CLIENT_MEM_FRACTION=0.85
-$NCCL_OPTS
-export WANDB_MODE=offline
-mkdir -p $LOG_DIR
-nohup bash -c '$TRAIN_CMD' > $LOG_DIR/run_${TAG}_${TIMESTAMP}.log 2>&1 &
-echo \"[${TAG} proc${PROC}] pid=\$!\"
-disown
-"
-}
-
-launch_worker "tim@192.168.1.3" 1 "uc02"
-launch_worker "tim@192.168.1.4" 2 "uc03"
-sleep 5
-
-# uc01 master (local exec — 复制相同 env)
-unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY
-export PATH=/home/tim/miniconda3/bin:/home/tim/.local/bin:$PATH
-export PYTHONUNBUFFERED=1
-export KAI0_DATA_ROOT=/home/tim/workspace/deepdive_kai0/kai0
-export KAI0_LOCAL_ROOT=/home/tim/local_ckpts
-export OPENPI_DATA_HOME=/home/tim/workspace/openpi_cache
-export JAX_COORDINATOR_ADDRESS=$COORD_ADDR
-export JAX_NUM_PROCESSES=3 JAX_PROCESS_INDEX=0
-export JAX_ENABLE_EMPTY_ARRAYS=true
-export JAX_COMPILATION_CACHE_MIN_ENTRY_SIZE_BYTES=-1
-export JAX_COMPILATION_CACHE_MIN_COMPILE_TIME_SECS=1
-unset XLA_FLAGS
-export XLA_PYTHON_CLIENT_MEM_FRACTION=0.85
-unset NCCL_IB_DISABLE NCCL_NET_TYPE NCCL_NET_GDR_LEVEL NCCL_NET_GDR_READ
-export NCCL_IB_HCA=mlx5_0,mlx5_1,mlx5_2,mlx5_3
-export NCCL_IB_GID_INDEX=3
-export NCCL_IB_TIMEOUT=23 NCCL_IB_RETRY_CNT=7 NCCL_IB_QPS_PER_CONNECTION=4
-export NCCL_P2P_LEVEL=NVL
-export NCCL_SOCKET_IFNAME=eth1
-unset NCCL_MAX_NCHANNELS NCCL_MIN_NCHANNELS NCCL_BUFFSIZE
-export NCCL_DEBUG=INFO
-export WANDB_MODE=offline
-cd /home/tim/workspace/deepdive_kai0/kai0
-nohup .venv/bin/python -u scripts/train.py $CONFIG --exp_name=$EXP_NAME --seed=123 --overwrite --no-wandb-enabled > $LOG_DIR/run_uc01_${TIMESTAMP}.log 2>&1 &
-echo "[uc01 proc0] pid=$!"
-disown
-```
+关键点(脚本内已固化, 详见上文 §12.2 NCCL / §12.3 JAX 配置):
+- NCCL: `NCCL_IB_HCA=mlx5_0..3` + `NCCL_IB_GID_INDEX=3` + RDMA/GDR(不要设 `NCCL_IB_DISABLE`)。
+- JAX: `JAX_COORDINATOR_ADDRESS=192.168.1.2:15830`(uc01 eth1)+ `JAX_NUM_PROCESSES=3` + 各机 `JAX_PROCESS_INDEX`。
+- env: `KAI0_DATA_ROOT`、`OPENPI_DATA_HOME`、`unset XLA_FLAGS`、`XLA_PYTHON_CLIENT_MEM_FRACTION=0.85`、`WANDB_MODE=offline`。
 
 ### 12.7 配置同步 (必做)
 
