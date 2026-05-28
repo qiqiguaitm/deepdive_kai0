@@ -33,7 +33,8 @@ from scipy.optimize import least_squares
 from scipy.spatial.transform import Rotation
 
 sys.path.insert(0, os.path.dirname(__file__))
-from board_def import get_board
+from board_def import (BoardSpec, add_board_cli_args, dict_id_from_name,
+                       get_board)
 
 
 def load_arm_data(session_dir: str) -> list[dict]:
@@ -332,6 +333,7 @@ def joint_refine(
     T_board_baseL_init: np.ndarray,
     T_board_baseR_init: np.ndarray,
     T_board_camF_init: np.ndarray,
+    spec: BoardSpec | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Joint optimization of arm transforms to minimize reprojection error.
 
@@ -340,7 +342,7 @@ def joint_refine(
 
     Cost: charuco corner reprojection error across all arm poses.
     """
-    board = get_board()
+    board = get_board(spec)
     obj_pts_all = board.getChessboardCorners()
 
     x0 = np.concatenate([
@@ -412,6 +414,7 @@ def cross_calibrate_head(
     T_link6_camL: np.ndarray,
     T_link6_camR: np.ndarray,
     T_board_camF_init: np.ndarray,
+    spec: BoardSpec | None = None,
 ) -> tuple[np.ndarray, float]:
     """Refine head camera extrinsic using arm-derived board observations.
 
@@ -423,7 +426,7 @@ def cross_calibrate_head(
       board → (arm chain) → base → (world) → head_cam
     using all arm poses as virtual observations for the head camera.
     """
-    board = get_board()
+    board = get_board(spec)
     obj_pts_all = board.getChessboardCorners()
 
     head_cam_matrix = head_data['camera_matrix']
@@ -594,6 +597,60 @@ def _read_session_hardware(session_dir: str) -> dict:
     return {}
 
 
+def _read_session_board(pose_file_path: str) -> dict | None:
+    """从 session 的 pose_list.json 读 board 字段, 旧 session 返回 None。"""
+    if not os.path.exists(pose_file_path):
+        return None
+    with open(pose_file_path) as f:
+        data = json.load(f)
+    if isinstance(data, dict):
+        return data.get('board')
+    return None
+
+
+def _resolve_spec(args, session_dir: str) -> BoardSpec:
+    """Spec 优先级: CLI > session(left/right/head)['board'] > default(7x5)。
+
+    Picks first non-None board across left/right/head subdir pose_list.json
+    files; warns if they disagree.
+    """
+    if getattr(args, 'board_config', None) or any(
+            getattr(args, k, None) is not None for k in
+            ('board_cols', 'board_rows', 'board_square_mm', 'board_marker_mm', 'board_dict')):
+        return BoardSpec.from_cli(args)
+
+    boards = []
+    for sub in ('left', 'right', None):
+        pose_file = (os.path.join(session_dir, sub, 'pose_list.json') if sub
+                     else os.path.join(session_dir, 'pose_list.json'))
+        b = _read_session_board(pose_file)
+        if b is not None:
+            boards.append((sub or 'head', b))
+
+    if not boards:
+        spec = BoardSpec.default()
+        print(f"  [WARN] no 'board' field found in any session pose_list.json — "
+              f"falling back to default {spec}")
+        return spec
+
+    # Check consistency
+    first_label, first_b = boards[0]
+    for label, b in boards[1:]:
+        for key in ('cols', 'rows', 'square_mm', 'marker_mm', 'dict'):
+            if b.get(key) != first_b.get(key):
+                print(f"  [WARN] board.{key} mismatch: {first_label}={first_b.get(key)} "
+                      f"vs {label}={b.get(key)} — using {first_label}")
+                break
+
+    return BoardSpec(
+        cols=int(first_b['cols']), rows=int(first_b['rows']),
+        square_mm=float(first_b['square_mm']),
+        marker_mm=float(first_b['marker_mm']),
+        dict_id=dict_id_from_name(str(first_b['dict'])),
+        legacy_pattern=bool(first_b.get('legacy_pattern', False)),
+    )
+
+
 def save_yaml(output_path: str, results: dict):
     """保存 calibration.yaml"""
     def ndarray_to_list(obj):
@@ -614,15 +671,19 @@ def main():
     parser = argparse.ArgumentParser(description='标定求解')
     parser.add_argument('--session', required=True, help='标定会话目录 (含 left/, right/, head.npz)')
     parser.add_argument('--output', default=None, help='输出文件 (默认: session_dir/calibration.yml)')
+    add_board_cli_args(parser)
     args = parser.parse_args()
 
     session_dir = args.session
     if args.output is None:
         args.output = os.path.join(session_dir, 'calibration.yml')
 
+    spec = _resolve_spec(args, session_dir)
+
     print("=" * 60)
     print("标定求解")
     print("=" * 60)
+    print(f"  board: {spec}")
 
     # 1. 加载数据
     print("\n--- Loading data ---")
@@ -703,7 +764,9 @@ def main():
     results = {
         'metadata': {
             'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'board': {'dict': 'DICT_5X5_100', 'size': [7, 5], 'square_mm': 38.0, 'marker_mm': 28.0},
+            'board': {'dict': spec.dict_name, 'size': [spec.cols, spec.rows],
+                      'square_mm': spec.square_mm, 'marker_mm': spec.marker_mm,
+                      'legacy_pattern': spec.legacy_pattern},
             'method': 'DANIILIDIS',
             'reprojection_error_px': {
                 'left_mean': float(np.mean(errs_L)),

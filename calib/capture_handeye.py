@@ -28,8 +28,19 @@ import numpy as np
 import pyrealsense2 as rs
 
 sys.path.insert(0, os.path.dirname(__file__))
-from board_def import detect_charuco, get_board, N_CORNERS, N_MARKERS
+from board_def import (BoardSpec, add_board_cli_args, detect_charuco,
+                       dict_id_from_name, get_board)
+from intrinsics_io import get_intrinsics, k_dist_from_entry
 from piper_fk import PiperFK
+
+# Map capture_handeye's phase/arm naming → intrinsics.yaml role naming.
+# capture_handeye uses 'left'/'right' for --arm and 'head' phase; intrinsics
+# YAML uses 'hand_left'/'hand_right'/'top_head'.
+ARM_TO_INTRINSICS_ROLE = {
+    'left': 'hand_left',
+    'right': 'hand_right',
+    'head': 'top_head',
+}
 
 sys.path.insert(0, '/home/tim/workspace/piper_sdk')
 from piper_sdk import C_PiperInterface
@@ -112,7 +123,14 @@ JOINT_LIMITS_RAD[:, 1] += _PAD
 class RealsenseCamera:
     """pyrealsense2 直连封装"""
 
-    def __init__(self, serial: str, width=640, height=480, fps=30):
+    def __init__(self, serial: str, width=640, height=480, fps=30,
+                 camera_role: str | None = None):
+        """
+        Args:
+            camera_role: intrinsics.yaml 里的 role 名 ('top_head'/'hand_left'/
+                'hand_right'). 传入时会用标定内参替换出厂内参; 找不到 entry
+                会警告 + fallback factory.
+        """
         self.serial = serial
         self.pipeline = rs.pipeline()
         config = rs.config()
@@ -123,20 +141,54 @@ class RealsenseCamera:
         # 等自动曝光稳定
         for _ in range(30):
             self.pipeline.wait_for_frames(timeout_ms=3000)
-        # 读 color 内参
+        # 读 color 内参 (factory)
         color_stream = profile.get_stream(rs.stream.color).as_video_stream_profile()
         intr = color_stream.get_intrinsics()
-        self.camera_matrix = np.array([
+        factory_K = np.array([
             [intr.fx, 0, intr.ppx],
             [0, intr.fy, intr.ppy],
             [0, 0, 1],
         ], dtype=np.float64)
-        self.dist_coeffs = np.array(intr.coeffs, dtype=np.float64)
+        factory_dist = np.array(intr.coeffs, dtype=np.float64)
+
+        # Override with calibrated intrinsics from config/intrinsics.yaml if available.
+        self.intrinsics_source = 'factory'
+        if camera_role is not None:
+            entry = get_intrinsics(camera_role)
+            if entry is None:
+                print(f"  [WARN] no calibrated intrinsics for role {camera_role!r} in "
+                      f"config/intrinsics.yaml — using factory intrinsics (fx={intr.fx:.2f})")
+            else:
+                K_cal, dist_cal = k_dist_from_entry(entry)
+                # Sanity check: resolution must match (different resolutions have
+                # different intrinsics; can't reuse a 1280x720 calibration on 640x480).
+                cal_res = entry.get('resolution', [width, height])
+                if list(cal_res) != [width, height]:
+                    print(f"  [WARN] calibrated intrinsics resolution {cal_res} != "
+                          f"current stream {[width, height]}; falling back to factory")
+                else:
+                    self.camera_matrix = K_cal
+                    self.dist_coeffs = dist_cal
+                    self.intrinsics_source = 'calibrated'
+                    err_mean = entry.get('reprojection_error_px', {}).get('mean')
+                    err_str = (f"  reproj_mean={err_mean:.3f}px"
+                               if isinstance(err_mean, (int, float)) else "")
+                    print(f"  [intrinsics] using CALIBRATED for role={camera_role!r}: "
+                          f"fx={K_cal[0,0]:.2f} fy={K_cal[1,1]:.2f} "
+                          f"cx={K_cal[0,2]:.2f} cy={K_cal[1,2]:.2f}{err_str}")
+
+        if self.intrinsics_source == 'factory':
+            self.camera_matrix = factory_K
+            self.dist_coeffs = factory_dist
+
         self.intrinsics_dict = {
-            'fx': intr.fx, 'fy': intr.fy,
-            'cx': intr.ppx, 'cy': intr.ppy,
-            'dist': list(intr.coeffs),
+            'fx': float(self.camera_matrix[0, 0]),
+            'fy': float(self.camera_matrix[1, 1]),
+            'cx': float(self.camera_matrix[0, 2]),
+            'cy': float(self.camera_matrix[1, 2]),
+            'dist': [float(x) for x in self.dist_coeffs.reshape(-1)],
             'width': intr.width, 'height': intr.height,
+            'source': self.intrinsics_source,
         }
         # 读 depth 内参 (点云投影用, 与 color 内参不同)
         depth_stream = profile.get_stream(rs.stream.depth).as_video_stream_profile()
@@ -282,11 +334,13 @@ def check_quality(
     prev_corners: np.ndarray | None = None,
     prev_ids: np.ndarray | None = None,
     is_head: bool = False,
+    spec: BoardSpec | None = None,
 ) -> dict:
     """检查当前帧的标定可用性。
 
     Args:
         is_head: True 时使用头顶相机的宽松面积阈值 (D435 @80cm 板面仅占 ~4%)
+        spec: board spec; defaults to BoardSpec.default() (7x5/38mm/28mm)
 
     Returns:
         dict with keys: corners, ids, rvec, tvec, n_corners, n_markers,
@@ -296,7 +350,7 @@ def check_quality(
     h, w = gray.shape[:2]
 
     corners, ids, rvec, tvec, reproj_err, n_markers = detect_charuco(
-        image, camera_matrix, dist_coeffs
+        image, camera_matrix, dist_coeffs, spec
     )
 
     n_corners = len(corners) if corners is not None else 0
@@ -334,9 +388,12 @@ def check_quality(
     }
     usable = all(checks.values())
 
+    eff_spec = spec or BoardSpec.default()
     return {
         'corners': corners, 'ids': ids, 'rvec': rvec, 'tvec': tvec,
         'n_corners': n_corners, 'n_markers': n_markers,
+        'n_corners_max': eff_spec.n_corners,
+        'n_markers_max': eff_spec.n_markers,
         'reproj_err': reproj_err, 'board_ratio': board_ratio,
         'sharpness': sharpness, 'motion_px': motion_px,
         'checks': checks, 'usable': usable,
@@ -371,9 +428,11 @@ def draw_quality_overlay(image: np.ndarray, quality: dict, pose_idx: int, total:
     y += 40
 
     # 检查项
+    n_corners_max = quality.get('n_corners_max', 24)
+    n_markers_max = quality.get('n_markers_max', 17)
     items = [
-        ('corners', f"Corners: {quality['n_corners']}/{N_CORNERS}"),
-        (None, f"Markers: {quality['n_markers']}/{N_MARKERS}"),
+        ('corners', f"Corners: {quality['n_corners']}/{n_corners_max}"),
+        (None, f"Markers: {quality['n_markers']}/{n_markers_max}"),
         ('reproj_err', f"Reproj err: {quality['reproj_err']:.2f}px" if quality['reproj_err'] else "Reproj err: N/A"),
         ('board_ratio', f"Board area: {quality['board_ratio']:.0%}"),
         ('sharpness', f"Sharpness: {quality['sharpness']:.0f}"),
@@ -417,15 +476,22 @@ def run_preview(args):
 
     serial = args.camera_serial or CAMERA_SERIALS.get(args.arm, '')
     can_name = args.can or CAN_PORTS.get(args.arm, '')
+    spec = BoardSpec.from_cli(args)
 
     print(f"[Preview] arm={args.arm}, camera={serial}, can={can_name}")
     print(f"[Preview] session dir: {session_dir}")
+    print(f"[Preview] board: {spec}")
 
-    cam = RealsenseCamera(serial)
+    cam = RealsenseCamera(serial, camera_role=ARM_TO_INTRINSICS_ROLE.get(args.arm))
     arm = PiperArm(can_name)
-    # 被动模式，允许手动拖动
-    arm.disable()
-    print("[Preview] Arm set to passive mode (drag to position)")
+    if getattr(args, 'teleop', False):
+        # Teleop mode: external master/slave teleop_launch.py is driving slave;
+        # do NOT disable slave or it'll go limp mid-teleop.
+        print("[Preview] Teleop mode: slave stays enabled (external master/slave teleop drives it)")
+    else:
+        # 被动模式，允许手动拖动
+        arm.disable()
+        print("[Preview] Arm set to passive mode (drag to position)")
 
     pose_list = []
     target_count = args.num_poses
@@ -437,7 +503,8 @@ def run_preview(args):
 
     while len(pose_list) < target_count:
         bgr, _ = cam.grab()
-        quality = check_quality(bgr, cam.camera_matrix, cam.dist_coeffs, prev_corners, prev_ids)
+        quality = check_quality(bgr, cam.camera_matrix, cam.dist_coeffs,
+                                prev_corners, prev_ids, spec=spec)
         prev_corners = quality['corners']
         prev_ids = quality['ids']
 
@@ -480,6 +547,12 @@ def run_preview(args):
         'arm': args.arm,
         'camera_serial': serial,
         'can': can_name,
+        'board': {
+            'cols': spec.cols, 'rows': spec.rows,
+            'square_mm': spec.square_mm, 'marker_mm': spec.marker_mm,
+            'dict': spec.dict_name,
+            'legacy_pattern': spec.legacy_pattern,
+        },
         'poses': pose_list,
     }
     pose_file = os.path.join(session_dir, 'pose_list.json')
@@ -515,6 +588,7 @@ def run_replay(args):
         session_data = json.load(f)
 
     # 兼容新旧格式: 新格式有 'poses' key, 旧格式直接是 list
+    session_board = None
     if isinstance(session_data, list):
         pose_list = session_data
     else:
@@ -526,11 +600,30 @@ def run_replay(args):
             args.camera_serial = session_data['camera_serial']
         if not args.can and session_data.get('can'):
             args.can = session_data['can']
+        session_board = session_data.get('board')
 
     serial = args.camera_serial or CAMERA_SERIALS.get(args.arm, '')
     can_name = args.can or CAN_PORTS.get(args.arm, '')
 
+    # Board spec priority: CLI (--board-config/--board-*) > session_data['board'] > default
+    if getattr(args, 'board_config', None) or any(
+            getattr(args, k, None) is not None for k in
+            ('board_cols', 'board_rows', 'board_square_mm', 'board_marker_mm', 'board_dict')):
+        spec = BoardSpec.from_cli(args)
+    elif session_board:
+        spec = BoardSpec(
+            cols=int(session_board['cols']), rows=int(session_board['rows']),
+            square_mm=float(session_board['square_mm']),
+            marker_mm=float(session_board['marker_mm']),
+            dict_id=dict_id_from_name(str(session_board['dict'])),
+            legacy_pattern=bool(session_board.get('legacy_pattern', False)),
+        )
+    else:
+        spec = BoardSpec.default()
+        print(f"  [WARN] session has no 'board' field (old format) — using default {spec}")
+
     print(f"[Replay] arm={args.arm}, camera={serial}, can={can_name}")
+    print(f"[Replay] board: {spec}")
     print(f"[Replay] {len(pose_list)} poses to capture")
 
     # 关节极限预检查 — 跳过超限姿态, 不中止
@@ -556,7 +649,7 @@ def run_replay(args):
         return
     print()
 
-    cam = RealsenseCamera(serial)
+    cam = RealsenseCamera(serial, camera_role=ARM_TO_INTRINSICS_ROLE.get(args.arm))
     arm = PiperArm(can_name)
     fk = PiperFK()
 
@@ -610,7 +703,7 @@ def run_replay(args):
         for attempt in range(REPLAY_DETECT_RETRIES):
             bgr, depth = cam.grab_avg(REPLAY_AVG_FRAMES)
             corners, ids, rvec, tvec, reproj_err, _ = detect_charuco(
-                bgr, cam.camera_matrix, cam.dist_coeffs
+                bgr, cam.camera_matrix, cam.dist_coeffs, spec
             )
             if corners is not None and rvec is not None:
                 break
@@ -680,9 +773,11 @@ def run_head(args):
     os.makedirs(session_dir, exist_ok=True)
 
     serial = args.camera_serial or CAMERA_SERIALS['head']
+    spec = BoardSpec.from_cli(args)
     print(f"[Head] camera={serial}")
+    print(f"[Head] board: {spec}")
 
-    cam = RealsenseCamera(serial)
+    cam = RealsenseCamera(serial, camera_role=ARM_TO_INTRINSICS_ROLE['head'])
     prev_corners = None
     prev_ids = None
 
@@ -693,7 +788,7 @@ def run_head(args):
     while True:
         bgr, depth = cam.grab()
         quality = check_quality(bgr, cam.camera_matrix, cam.dist_coeffs, prev_corners, prev_ids,
-                                is_head=True)
+                                is_head=True, spec=spec)
         prev_corners = quality['corners']
         prev_ids = quality['ids']
 
@@ -708,7 +803,7 @@ def run_head(args):
             # 多帧平均降噪，然后对平均图像重新检测 (确保 rvec/tvec 与图像一致)
             bgr_avg, depth = cam.grab_avg(REPLAY_AVG_FRAMES)
             corners, ids, rvec, tvec, reproj_err, _ = detect_charuco(
-                bgr_avg, cam.camera_matrix, cam.dist_coeffs
+                bgr_avg, cam.camera_matrix, cam.dist_coeffs, spec
             )
             if rvec is None:
                 print("  Detection failed on averaged image, try again")
@@ -746,6 +841,12 @@ def run_head(args):
             'arm': 'head',
             'camera_serial': serial,
             'can': '',
+            'board': {
+                'cols': spec.cols, 'rows': spec.rows,
+                'square_mm': spec.square_mm, 'marker_mm': spec.marker_mm,
+                'dict': spec.dict_name,
+                'legacy_pattern': spec.legacy_pattern,
+            },
             'poses': [],
         }
         pose_file = os.path.join(session_dir, 'pose_list.json')
@@ -765,6 +866,10 @@ def main():
     parser.add_argument('--camera-serial', type=str, help='RealSense 序列号 (默认按 arm 自动选择)')
     parser.add_argument('--session', type=str, required=True, help='数据保存目录名')
     parser.add_argument('--num-poses', type=int, default=20, help='目标姿态数 (preview)')
+    parser.add_argument('--teleop', action='store_true',
+                        help='preview 时不 disable slave (由外部 master/slave 遥操驱动); '
+                             '只对 --phase preview 生效')
+    add_board_cli_args(parser)
     args = parser.parse_args()
 
     if args.phase in ('preview', 'replay') and args.arm is None:
