@@ -116,26 +116,18 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.45 ui-
 .topbar .spacer { flex: 1; }
 .topbar .estop { background: var(--rec); color: white; border: none; font-weight: 700; }
 
-/* Main grid */
+/* Main grid: 3 independent columns. The middle column is its own flex stack so
+ * its inter-panel gaps don't get inflated when the left (episode list) or right
+ * (stats) columns are taller. align-items: start keeps each column anchored to
+ * the top instead of stretching to match the tallest column. */
 .main {
   display: grid; gap: 12px; padding: 12px;
   grid-template-columns: 280px 1fr 320px;
-  grid-template-areas:
-    "list cams stats"
-    "list arms stats"
-    "list ctrl stats"
-    "list replay stats";
   align-items: start;
 }
+.middle-stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
 .panel h3 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
-
-.area-list { grid-area: list; }
-.area-cams { grid-area: cams; }
-.area-arms { grid-area: arms; }
-.area-ctrl { grid-area: ctrl; }
-.area-replay { grid-area: replay; }
-.area-stats { grid-area: stats; }
 
 /* Cameras */
 .cam-grid { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 8px; }

@@ -93,22 +93,24 @@ export function App() {
             setRefreshKey(k => k + 1);
           }}
         />
-        <CameraGrid cameras={status?.cameras || {}} />
-        <ArmsPanel />
-        <Controls
-          rec={status?.recorder ?? null}
-          status={status}
-          connected={connected}
-          templateId={tplId}
-          operator={operator}
-          onChanged={() => setRefreshKey(k => k + 1)}
-        />
-        <ReplayPanel
-          ep={selectedEp}
-          role={role}
-          onCloned={(k) => { setTaskKey(k); setSelectedEp(null); }}
-          onDeleted={() => { setSelectedEp(null); setRefreshKey(k => k + 1); }}
-        />
+        <div className="middle-stack">
+          <CameraGrid cameras={status?.cameras || {}} />
+          <ArmsPanel />
+          <Controls
+            rec={status?.recorder ?? null}
+            status={status}
+            connected={connected}
+            templateId={tplId}
+            operator={operator}
+            onChanged={() => setRefreshKey(k => k + 1)}
+          />
+          <ReplayPanel
+            ep={selectedEp}
+            role={role}
+            onCloned={(k) => { setTaskKey(k); setSelectedEp(null); }}
+            onDeleted={() => { setSelectedEp(null); setRefreshKey(k => k + 1); }}
+          />
+        </div>
         <StatsCard role={role} refreshKey={refreshKey} />
       </div>
       {showTplMgr && (

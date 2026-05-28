@@ -233,7 +233,10 @@ class StatsService:
         sql = "SELECT * FROM episodes WHERE 1=1"
         args: list = []
         if task_id:
-            sql += " AND task_id=?"; args.append(task_id)
+            # task_id in DB is compound (e.g. "Task_A_2026-04-25-v2" via
+            # path_to_compound). LIKE %x% so user typing "Task_A" matches all
+            # dated subsets — exact match would always be 0 hits.
+            sql += " AND task_id LIKE ?"; args.append(f"%{task_id}%")
         if subset:
             sql += " AND subset=?"; args.append(subset)
         if operator:
