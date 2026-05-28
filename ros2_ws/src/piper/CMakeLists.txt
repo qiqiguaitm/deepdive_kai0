@@ -13,6 +13,7 @@ install(PROGRAMS
   scripts/multi_camera_node.py
   scripts/video_publisher_node.py
   scripts/joint_state_loopback_node.py
+  scripts/autonomy_recorder_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

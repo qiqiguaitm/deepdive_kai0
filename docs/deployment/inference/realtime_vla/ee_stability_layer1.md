@@ -152,9 +152,11 @@ drift_R 异常 +77mm 是 single right-arm excursion in front segment (last-30s d
 - ep33 测过含 gripper EMA 的版本: R gripper cmd 90% 帧落在 [0.01, 0.03] mid-range, 最长 half-grasp run 103.7s
 - Skip gripper from EMA 是 conceptually correct, 即使最终 vis_v2_full 半夹问题不是 EMA 引起 (是 ckpt-level — 见 §5)
 
-**Backward compat**:
-- launch arg `publish_smooth_alpha:=<0..1]` (default 0.5)
-- 传 `publish_smooth_alpha:=1.0` 关闭 EMA, 回退原行为
+**Backward compat** (2026-05-28 修正):
+- node + launch 默认 `publish_smooth_alpha=1.0` = **OFF** → JAX / `start_autonomy.sh` 旧路径 bit-identical (α=1.0 时 `_publish_action` EMA 段整段跳过)
+- V1 路径 `start_autonomy_v1.sh` 显式 opt-in `publish_smooth_alpha:=0.7` (从 0.5 retune, 配 publish=80 时滞后仅 5.4ms; 频域实测见 §3.4 — EMA 是微调, RTC 才是主杠杆)
+- 旧实现 bug: 默认曾设 0.5, 泄漏到旧 JAX 路径 (悄悄加 EMA, 非向后兼容); 已改成"默认关 + V1 显式开", 与 RTC 参数 (latency_k 等) 的处理对齐
+- 显式传 `publish_smooth_alpha:=<0..1]` 可覆盖; 1.0 = 关
 
 ### 3.3 ✅ RTC 综合重调 (start_autonomy_v1.sh defaults)
 
@@ -198,6 +200,40 @@ drift_R 异常 +77mm 是 single right-arm excursion in front segment (last-30s d
 - ⚠ idle drift 略增 (12.7mm/100s → ~15mm, 仍 < 30mm 可接受阈值)
 
 **Backward compat**: launch args (`latency_k:=`, `rtc_execute_horizon:=` 等) 仍可显式 override 回旧值; `start_autonomy.sh` / JAX path 不受影响 (用 node-level legacy default).
+
+### 3.4 RTC × EMA 频域平衡实测 (2026-05-28)
+
+**动机**: 调 EMA α 前先回答"抖动到底在哪个频段?" — 决定该动 RTC (低频) 还是 EMA (高频), 避免往空气里使劲。
+
+**方法**: autonomy parquet (30Hz, Nyquist 15Hz) 的 `action` (发布 cmd) 与 `observation.state` (真机回读), 逐臂关节 (排除 grip 6/13) 去线性趋势后 Welch PSD; 按三层平滑的作用频段分桶 + 1Hz Butterworth 高通取抖动 RMS。
+- 频段映射: **<1Hz → RTC** (漂移/反向/任务运动) | **1-5Hz → min_jerk/min_smooth** (chunk 接缝) | **>5Hz → EMA** (逐帧 ε 噪声)
+- 数据: `Task_A/autonomy/2026-05-28-v2/` ep0 (task) + ep2 (idle), 均 α=0.7 + k=6/exec=12。脚本 `/tmp/jitter_idle.py` (Welch + 高通 + 累积能量图)。
+
+**实测** (cmd 能量占比 % + >1Hz 高通抖动 RMS):
+
+| 场景 | <1Hz | 1-5Hz | >5Hz | jitter>1Hz | jiggle |
+|---|---:|---:|---:|---:|---:|
+| task ep0 cmd | 99.4% | 0.2% | 0.02% | 6.88 mrad | 211 mrad |
+| idle ep2 cmd | 79.0% | 8.9% | **6.56%** | 0.265 mrad | 1.00 mrad |
+| idle ep2 **state (真机)** | 87.6% | 6.8% | **1.67%** | 0.151 mrad | 0.91 mrad |
+
+**发现**:
+1. **task 99% 能量 <1Hz = 任务运动本身**, 不是抖动; 这里无高频问题。
+2. **idle 才看得到抖动**: 主体仍 <1Hz (79-88% = 慢漂移/wander → RTC 带), 但 **>5Hz 非空** (cmd 6.56%) — 逐帧 ε 噪声确实存在 (task-only 数据会误判成"空")。
+3. **Piper PD 已滤掉大半高频**: cmd >5Hz 6.56% → 真机 state 仅 1.67% (4× 衰减); cmd jitter 0.265 → state 0.151 mrad。
+4. **绝对幅值微乎其微**: idle state jiggle 0.91 mrad ≈ **0.05°**, 肉眼/机械难感知。
+
+**平衡判定** (数据驱动):
+
+| 旋钮 | 作用频段 | 真机(state)该带能量 | 角色 |
+|---|---|---:|---|
+| **RTC** (k/exec/guidance) | <1Hz | idle 88% / task 99.5% | **主杠杆** — 一切都在这 |
+| **EMA** (α) | >5Hz | idle 1.67% / task 0.03% | 微调 — PD 已帮它滤过 |
+
+- **α=0.7 平衡, 不必再压**。EMA 在 idle 确实清理一点真实高频 ε, 但 Piper PD 已滤大半, α=0.5↔0.7 真机差别 <0.15 mrad (感知不到); 选 0.7 保留 task 响应锐度。
+- **要进一步减抖, 杠杆在 RTC** (<1Hz 漂移占绝对主导) 或训练侧 idle filter (§7.2), **不是 EMA** — 继续降 α 是往空气使劲 + 加滞后。
+
+> caveat: idle ep2 仅 22s, 低频分辨率有限; 但定性结论 (高频极小 + PD 已滤 + 主体 <1Hz) 稳健。需要更精细的 idle 漂移谱时录 2-3min 纯 idle 重测。
 
 ---
 

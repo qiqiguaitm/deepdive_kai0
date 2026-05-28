@@ -127,6 +127,14 @@ def generate_launch_description():
     enable_rerun_arg = DeclareLaunchArgument('enable_rerun',
         default_value='true',
         description='Enable Rerun 3D visualization of trajectories')
+    # When false: cameras + arms + (rerun-if-enabled) come up, but
+    # policy_inference_node is NOT spawned. dagger_launch sets this to 'false'
+    # so the dagger_manager web UI can fork a separate session_launch.py
+    # later with the user-chosen ckpt — defers the ~22s JAX load until after
+    # the operator has the dashboard open.
+    enable_policy_arg = DeclareLaunchArgument('enable_policy',
+        default_value='true',
+        description='Spawn policy_inference_node (true) or skip it (false)')
     calib_arg = DeclareLaunchArgument('calibration_config',
         default_value=_DEFAULT_CALIB,
         description='Calibration YAML path (for FK visualization in Rerun)')
@@ -161,11 +169,11 @@ def generate_launch_description():
     rtc_smooth_method_arg = DeclareLaunchArgument('rtc_smooth_method',
         default_value='min_jerk',
         description='RTC chunk-overlap weight curve: min_jerk (default, quintic smoothstep, LiPo arXiv:2506.05165) | linear (legacy)')
-    # Layer 1.1E — publish-time EMA smoothing on cmd timeline (default 0.5 mild LP).
-    # Validated 2026-05-25 vis_v2_full real-machine: state-side jiggle -65%, jerk -29%.
+    # Layer 1.1E — publish-time EMA smoothing on cmd timeline. Default 1.0 = OFF
+    # (JAX/legacy path bit-identical); start_autonomy_v1.sh opts in (0.7).
     publish_smooth_alpha_arg = DeclareLaunchArgument('publish_smooth_alpha',
-        default_value='0.5',
-        description='EMA factor (0,1] at publish time: cmd[t]=α·cmd+(1-α)·last_pub. 0.5=default mild, 0.3=heavy LP, 1.0=off. Orthogonal to rtc_smooth_method.')
+        default_value='1.0',
+        description='EMA factor (0,1] at publish time: cmd[t]=α·cmd+(1-α)·last_pub. 1.0=off (default), 0.7=mild LP (V1 path), 0.3=heavy LP. Orthogonal to rtc_smooth_method.')
     # ── Replan / smoothing knobs (exposed so V1 path can override without
     #    touching node defaults). Defaults match the policy_inference_node.py
     #    declare_parameter() values (JAX legacy sizing); start_autonomy_v1.sh
@@ -212,6 +220,24 @@ def generate_launch_description():
     transport_arg = DeclareLaunchArgument('transport',
         default_value='ws',
         description='V1 path: ws (default, backward compat) | shm (POSIX shm, low-latency)')
+    # ── LeRobot dataset recorder ──
+    # Writes Task_X/autonomy/<date>/{data,videos,meta}/ in the same format as
+    # teleop output → start_autonomy.sh --replay --episode <N> consumes it
+    # without changes. Auto-starts when first /master/joint_* arrives; auto-
+    # finalizes on Ctrl+C. task_name / record_prompt are optional overrides;
+    # empty values fall back to inference from checkpoint_dir.
+    record_enable_arg = DeclareLaunchArgument('record_enable',
+        default_value='true',
+        description='Save autonomy run as LeRobot v2.1 dataset under Task_X/autonomy/')
+    record_task_arg = DeclareLaunchArgument('record_task',
+        default_value='',
+        description='Task name (Task_A/B/C/...); empty = infer from checkpoint_dir')
+    record_prompt_arg = DeclareLaunchArgument('record_prompt',
+        default_value='',
+        description='Prompt for tasks.jsonl; empty = read checkpoint train_config.json')
+    record_subset_arg = DeclareLaunchArgument('record_subset',
+        default_value='autonomy',
+        description='Dataset subset (parallel to base/dagger)')
 
     # ── Piper 左臂 (mode=1 控制从臂, auto_enable 上电) ──
     # mode=1: subscribe to /master/joint_left and drive the slave arm hardware
@@ -371,13 +397,34 @@ def generate_launch_description():
     multi_cam_delayed = TimerAction(period=3.0, actions=[multi_cam])
     piper_left_delayed = TimerAction(period=3.0, actions=[piper_left])
     piper_right_delayed = TimerAction(period=3.0, actions=[piper_right])
-    # Policy node waits for cameras to stabilize
-    policy_delayed = TimerAction(period=17.0, actions=[policy_node])
+    # Policy node waits for cameras to stabilize. enable_policy gates the
+    # whole TimerAction — when false, policy_node never spawns.
+    policy_delayed = TimerAction(
+        period=17.0,
+        actions=[policy_node],
+        condition=IfCondition(LaunchConfiguration('enable_policy')),
+    )
+
+    # ── LeRobot dataset recorder (after policy so first /master/joint_* fires once) ──
+    recorder_node = Node(
+        package='piper', executable='autonomy_recorder_node.py',
+        name='autonomy_recorder', output='screen',
+        condition=IfCondition(LaunchConfiguration('record_enable')),
+        parameters=[{
+            'task_name': LaunchConfiguration('record_task'),
+            'prompt': LaunchConfiguration('record_prompt'),
+            'subset': LaunchConfiguration('record_subset'),
+            'checkpoint_dir': LaunchConfiguration('checkpoint_dir'),
+            'operator': 'auto',
+            'record_enable': LaunchConfiguration('record_enable'),
+        }],
+    )
+    recorder_delayed = TimerAction(period=20.0, actions=[recorder_node])
 
     return LaunchDescription([
         set_ld, set_py, set_path, set_cache, set_mem_frac,
         mode_arg, gpu_arg, config_arg, ckpt_arg, host_arg, port_arg, prompt_arg,
-        execute_mode_arg, enable_rerun_arg, calib_arg,
+        execute_mode_arg, enable_rerun_arg, enable_policy_arg, calib_arg,
         fg_enable_arg, bg_enable_arg,
         enable_rtc_arg, rtc_execute_horizon_arg,
         rtc_max_guidance_weight_arg, rtc_smooth_method_arg,
@@ -385,9 +432,11 @@ def generate_launch_description():
         inference_rate_arg, latency_k_arg, min_smooth_steps_arg,
         cam_fps_arg, enable_head_depth_arg, enable_left_depth_arg, enable_right_depth_arg,
         fast_obs_pipeline_arg, pipelined_obs_arg, transport_arg,
+        record_enable_arg, record_task_arg, record_prompt_arg, record_subset_arg,
         cleanup,
         piper_left_delayed, piper_right_delayed,
         multi_cam_delayed,
         rerun_delayed,
         policy_delayed,
+        recorder_delayed,
     ])

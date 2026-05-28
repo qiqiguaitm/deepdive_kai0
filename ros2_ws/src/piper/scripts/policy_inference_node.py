@@ -427,13 +427,13 @@ class PolicyInferenceNode(Node):
         # after task → 0 drift in idle scenes). Set to 'linear' to fall back to legacy.
         self.declare_parameter('rtc_smooth_method', 'min_jerk')
         # Layer 1.1E — publish-time EMA smoothing on cmd timeline (orthogonal to
-        # 1.1B which smooths chunk boundaries). Default 0.5 (mild LP). Validated
-        # 2026-05-25 on vis_v2_full real-machine (ep29 vs ep28 1B-only baseline):
-        # state-side jiggle -65%, jerk95_state -29%, last-30s freeze tighter
-        # (jerk_state -51%); subjective "明显更稳". α∈(0,1]: cmd[t] := α*cmd +
-        # (1-α)*last_published. Phase lag ≈ (1-α)/α timestep (α=0.5 → 12.5ms,
-        # negligible). α=1.0 = off (legacy behavior).
-        self.declare_parameter('publish_smooth_alpha', 0.5)
+        # 1.1B which smooths chunk boundaries). Default 1.0 = OFF (legacy/JAX path
+        # bit-identical). The V1 path opts in via start_autonomy_v1.sh
+        # (publish_smooth_alpha:=0.7). α∈(0,1]: cmd[t] := α*cmd + (1-α)*last_published.
+        # Phase lag ≈ (1-α)/α timestep (α=0.7 @80Hz → 5.4ms; α=0.5 → 12.5ms; all
+        # ≪ Piper PD ~100ms). Validated 2026-05-25 on vis_v2_full (α=0.5: state
+        # jiggle -65%, jerk95_state -29%); α retuned to 0.7 pending re-validation.
+        self.declare_parameter('publish_smooth_alpha', 1.0)
         # NOTE: mask_prefix_delay is declared upstream in pi0_rtc.py:244 but
         # not exposed here — forwarding a Python bool through jit triggers
         # TracerBoolConversionError at pi0_rtc.py:323. Left as function default

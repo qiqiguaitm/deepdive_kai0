@@ -156,6 +156,7 @@ env $PROFILE_ENV nohup "$REPO/start_scripts/kai/start_autonomy.sh" \
     "min_smooth_steps:=8" \
     "rtc_execute_horizon:=12" \
     "publish_rate:=80" \
+    "publish_smooth_alpha:=0.7" \
     "cam_fps:=30" \
     "enable_head_depth:=false" \
     "fast_obs_pipeline:=true" \
