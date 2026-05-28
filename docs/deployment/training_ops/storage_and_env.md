@@ -14,9 +14,11 @@
 |---|---|---|
 | gf0 | `/vePFS/tim/workspace/deepdive_kai0/` (= `/home/tim/workspace/deepdive_kai0` 软链) | gpfs cnsh 跨机共享 |
 | gf3 | `/vePFS-North-E/vis_robot/workspace/deepdive_kai0/` | gpfs cnbj, 与同队列其它节点共享 |
-| uc01 | `/home/ubuntu/workspace/deepdive_kai0/` → `/data/shared/ubuntu/workspace/deepdive_kai0/` (2026-05-18 后) | 本机 4TB ext4 |
-| uc02 | 同 uc01 (各自独立, 不共享) | 同 uc01 |
-| uc03 | 同 uc01 (各自独立) | 同 uc01 + 本机 `/nix` 3.5T NVMe |
+| uc01 | `/home/ubuntu/workspace/deepdive_kai0/` → `/data/shared/ubuntu/workspace/deepdive_kai0/` | uc01 本机 `/dev/vdb` 4 TB ext4 (NFS server) |
+| uc02 | 同 uc01 路径 — 经 NFS 共享 uc01 内容 ⭐ | NFS mount `10.60.135.47:/data/shared/ubuntu/workspace`, NFSv4.1 over eth0 |
+| uc03 | 同 uc02 — 经 NFS 共享 uc01 内容 ⭐ | 同 uc02; 另有本机 `/nix` 3.5T NVMe (闲置, 未参与 kai0) |
+
+> ⭐ **2026-05-18 重装后**: uc01 `/etc/exports` 把 `/data/shared/ubuntu/workspace` export 给 `10.60.0.0/16`, uc02/03 mount 同路径. 代码/venv/数据集/集群训练 ckpt **均经 NFS 共享**, 不再各自独立 (lsyncd 已停). 单机训练 ckpt 仍走 NFS-内 symlink → 各机本地盘 (§2.2)。
 
 ### 2.2 Checkpoint 本地存储规范 ⭐ (2026-05-04 重要更新)
 
@@ -24,12 +26,18 @@
 
 **统一路径**: 每台机器都使用 `/home/tim/local_ckpts/` 作为 ckpt 根目录 (其中是 symlink 还是 real dir 因机器而异)。
 
-| Server | `/home/tim/local_ckpts/` 实现 | 物理后端 | 容量 | 持久性 |
+| Server | ckpt 根 | 物理后端 | 容量 (实测) | 持久性 |
 |---|---|---|---|---|
-| gf0 | symlink → `/vePFS/tim/gf0_local_ckpts/` | /vePFS (50T 共享 FS) | 看 /vePFS 余量 | ✓ 持久 |
-| uc01 | 真实 dir | /dev/vda2 (492G ext4) | ~290G 可用 | ✓ 持久 |
-| uc02 | 真实 dir | /dev/vda2 (492G ext4) | ~410G 可用 | ✓ 持久 |
-| uc03 | 真实 dir | /dev/vda2 (492G ext4) | (待测) | ✓ 持久 |
+| gf0 | `/home/tim/local_ckpts/` → `/vePFS/tim/gf0_local_ckpts/` (symlink) | /vePFS (50T 共享 FS) | 看 /vePFS 余量 | ✓ 持久 |
+| uc01 | `/data/shared/ubuntu/local_ckpts/` (NFS 上的 symlink 字符串解析到本机) ⭐ | **`/dev/vdb` ext4 (4 TB)** ← 整个 `/data` 都是这块盘, 不是 `/dev/vda2` | uc01: 1.7 T avail (Use 56%) | ✓ 持久 |
+| uc02 | 同 uc01 (各机本地 `/dev/vdb`) | 同 | (本机 `df /data` 自查) | ✓ 持久 |
+| uc03 | 同 uc01 | 同 | (本机自查) | ✓ 持久 |
+
+> ⭐ **uc 单机 ckpt 实际是"NFS 上的 symlink + 各机本地解析"** (2026-05-28 实测):
+> - NFS 上: `/data/shared/ubuntu/workspace/deepdive_kai0/kai0/checkpoints -> /data/shared/ubuntu/local_ckpts` (symlink 字符串)
+> - NFS export 范围 only `workspace/`, 不含 `ubuntu/local_ckpts/`
+> - 各 host resolve 到自己本机 `/dev/vdb` 上的 `/data/shared/ubuntu/local_ckpts/` (真实 dir, 互不冲突)
+> - 详见 `uc_cluster_data_sharing_analysis.md §4`. 历史 `/home/tim/local_ckpts/` 路径已是兼容别名, 当前 launcher 写入路径是 `<KAI0_DATA_ROOT>/checkpoints/...`, 经 NFS symlink 落本机盘。
 
 **为何不放 `/dev/shm` (RAM)**:
 - 重启数据丢失, 训练 ckpt 不能容忍
@@ -65,14 +73,14 @@ ln -sfn "$LOCAL_DIR" "$WORKSPACE_DIR"
 
 `ln -sfn` (`-n` = no-deref existing symlink) 确保 idempotent, 重复 launcher 启动不出错。
 
-**lsyncd 兼容性 (uc01/uc02)**:
-- uc01/uc02 之间有 lsyncd 双向 mirror `/data/shared/` 目录
-- `/home/tim/local_ckpts` 在 `/dev/vda2` 不在 lsyncd scope, 不会被同步 ✓
-- 而 `/home/tim/workspace` 是 symlink → `/data/shared/...` 在 lsyncd 范围, 千万 **不要直接写 ckpt 到** `<kai0>/checkpoints/<config>/<exp>` 真实目录 (旧 bug 多次因此损坏)
+**lsyncd 已废弃 (2026-05-18 重装后)**:
+- 历史: uc01/uc02 之间曾有 lsyncd 双向 mirror `/data/shared/` 目录
+- 现状 (2026-05-18 重装后): 改为 **uc01 NFS export `/data/shared/ubuntu/workspace`** 给 uc02/03, lsyncd 不再启用
+- 仍然需要警惕的事: 千万 **不要直接写 ckpt 到** `<kai0>/checkpoints/<config>/<exp>` 真实目录 — 那是 NFS 路径会占共享空间。一律走 symlink trick (`checkpoints/` 已预置 symlink 到 `local_ckpts/`)
 
 **keep_period 设置**:
 - 100k step 训练: `keep_period=10000` (保留 10 个) 比 `2_000` (保留 50 个) 减少 5× 占用
-- 50k step: `keep_period=10000` (保留 5 个) 大约 165GB; 默认 `2_000` 时 825GB 可能撑爆 /dev/vda2
+- 50k step: `keep_period=10000` (保留 5 个) 大约 165GB; 默认 `2_000` 时 825GB 可能撑爆数据盘 (uc 用 `/dev/vdb` 4T, 余量见 §2.2 表; gf0 看 /vePFS 配额)
 
 **已知 ckpt 路径**:
 
@@ -83,6 +91,13 @@ ln -sfn "$LOCAL_DIR" "$WORKSPACE_DIR"
 | gf0 实验3 | `/vePFS/tim/gf0_local_ckpts/pi05_flatten_fold_mix_b6000_p1200_init_pi05_base_100k/task_a_mix_base6000_pure1200_new_norm_base_pi0.5_100000` | gf0 |
 
 ### 2.3 数据集 / Checkpoint 目录约定 (传统 view)
+
+> ⭐ **数据集存放规范 (2026-05-28 明确)**: **所有用户/脚本构建的数据集一律放 `kai0/data/Task_A/self_built/<name>/`**, 不要直接放 `Task_A/` 根目录下。
+> - build 脚本 (`train_scripts/kai/data/build_*.py`) 的 `DST` 必须指向 `.../data/Task_A/self_built/<name>`。
+> - config.py 中训练 config 的 `repo_id` 也指向 `self_built/<name>`。
+> - 例外: 原始采集 (`vis_base/`, `vis_base_real/`) + HF 官方 (`kai0_base/`, `kai0_dagger/`) + val 集 (`vis_v2_merged_val/`) 可放 `Task_A/` 根, 因它们不是"构建"产物。
+> - 历史遗留 (违反此规范, 已迁移): `vis_v2_full`, `A_0423_0527` 原直接放 `Task_A/` 根, 2026-05-28 起规范要求迁入 `self_built/`。
+
 
 ```
 deepdive_kai0/
@@ -98,13 +113,17 @@ deepdive_kai0/
 │   │   └── pi05_flatten_fold_*/<exp_name>/  # 各训练 exp 的 ckpts
 │   └── data/                          # 数据集软链入口
 │       └── Task_A/
-│           ├── vis_base/              # → 真实/模拟采集数据集
+│           ├── vis_base/              # → 真实/模拟采集数据集 (按 date)
+│           ├── vis_base_real/         # → 真实采集原始数据 (build 源, 按 date)
 │           ├── kai0_base/             # → HF 官方 kai0 base
 │           ├── kai0_dagger/           # → HF 官方 kai0 dagger
 │           ├── kai0_advantage/        # → HF 官方 advantage (uc01/uc02 only)
-│           └── self_built/            # 用户构建的混合数据集
+│           ├── vis_v2_merged_val/     # cross-val (30 ep, build 出的 hold-out)
+│           └── self_built/            # ⭐ 所有用户构建数据集一律放这里
 │               ├── A_pure_1200/{base,val}/
 │               ├── A_new_pure_1200/{base,val}/
+│               ├── A_new_pure_200/
+│               ├── A_0423_0527/       # 13 dates 排校准漂移 (build_A_0423_0527.py)
 │               ├── mix_apr28_450/{base,val}/
 │               └── ...
 ├── train_scripts/                     # 训练 launcher / 数据脚本
@@ -146,12 +165,27 @@ deepdive_kai0/
 
 > **跨 region 同步**: gf3 (cn-beijing) 不能直连 gf0/uc01/sim01 (cn-shanghai), 一切通过 TOS `tos://transfer-shanghai/...` 中转 (跨 region 走 TOS 后端骨干)。pi05_base.tar (12.3G) + 数据子集 ~17G 总同步 ≈ 4-6 分钟。
 
-#### uc01 / uc02 / uc03 (独立 4TB ext4)
+#### uc01 / uc02 / uc03 (NFS 共享 — uc01 export 给 uc02/03, 2026-05-28 修订) ⭐
+
 ```
-/data/shared/dataset/KAI0/Task_<X>/base/         # 自建 (rsync from /vePFS)
-/data/shared/dataset/Kai0_official/Task_A/      # HF 官方 base/dagger/advantage
-~/workspace/deepdive_kai0/kai0/data/Task_<X>/   # symlinks 指向上述路径
+/data/shared/ubuntu/workspace/dataset/           # NFS 共享, 实测 783 GB ⭐
+├── KAI0/                                        509 GB, TOS 同步主入口
+│   ├── from_tos_file.py / to_tos.py             同步脚本 (AK/SK 硬编码)
+│   ├── Task_A/{base, autonomy, dagger, inference}/<date-v2>/
+│   ├── Task_E, Task_H, Task_HP, Task_P, Task_PP, Task_PS/
+│   └── *.tar                                    临时 ckpt 中转
+├── Kai0_official/                               129 GB (HF 官方 base/dagger/advantage)
+├── hf_kai0/                                      47 GB
+├── kai_official_relay/                           88 GB
+├── Task_A/{self_built, vis_v2_merged, vis_v2_merged_val}
+└── ...
 ```
+
+> **变更要点 (2026-05-28 实测推翻历史描述)**:
+> - 旧文档说 `/data/shared/dataset/KAI0/...` — **错**, 当前 `/data/shared/dataset/` 基本空 (仅 `_probe_gf3.txt`)
+> - 旧文档说 `~/workspace/deepdive_kai0/kai0/data/Task_<X>/` 有 symlink 指向数据集 — **错**, 当前 `kai0/data/` 只有 `ssl_phase0/` 和 `.cache/`
+> - 实际数据走 **NFS 共享** `/data/shared/ubuntu/workspace/dataset/...`, 只在 uc01 拉一次, uc02/03 经 NFSv4.1 自动可见 (跨机 inode 一致, 实测)
+> - 详细对照见 `uc_cluster_data_sharing_analysis.md §3` 与 `data_sync_tos.md §6.2`
 
 #### 日期 leaf 命名约定: `YYYY-MM-DD-v2` (2026-05-11 起)
 
@@ -184,9 +218,11 @@ deepdive_kai0/
 |---|---|---|
 | gf0 | `/vePFS/tim/workspace/deepdive_kai0/kai0/.venv` → `/home/tim/.kai0_venv` (本地 symlink) | 3.11 |
 | gf3 | `/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/.venv` (**self-contained on vePFS**, 跨节点共享) | 3.12.13 |
-| uc01 | `/home/tim/workspace/deepdive_kai0/kai0/.venv` (uv 管理, 真实 dir) | 3.12 |
-| uc02 | 同 uc01 (本地独立) | 3.12 |
-| uc03 | 同 uc01 (本地独立) | 3.12 |
+| uc01 | `/data/shared/ubuntu/workspace/deepdive_kai0/kai0/.venv` (真实 dir on NFS server) ⭐ | 3.12 |
+| uc02 | 同 uc01 路径, 经 NFS 共享 (跨机 inode 一致, 实测 inode=65539) ⭐ | 3.12 |
+| uc03 | 同 uc02 — 经 NFS 共享 ⭐ | 3.12 |
+
+> ⭐ **uc venv 是 NFS 共享而非本地独立** (2026-05-28 实测): `uv add` / `uv sync` 只需在 uc01 上跑**一次**, uc02/03 立即可用。**但 uv-managed Python interpreter** (`~/.local/share/uv/python/cpython-3.12.x/`) 是各机本地 — 因 `.venv/bin/python` 是 symlink 指向绝对路径 `~/.local/share/uv/python/...`, 各机必须先各跑过一次 `uv python install 3.12` 才能解析这个 symlink。
 
 > **注意 (gf0 / gf3 区别)**:
 > - **gf0**: vePFS 上的 `.venv` 是 symlink, 真实 venv 在本机 `/home/tim/.kai0_venv` (不跨机)

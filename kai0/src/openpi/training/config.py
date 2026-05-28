@@ -1456,6 +1456,78 @@ _CONFIGS = [
         inline_eval_every=4,
     ),
 
+    # ===================================================================================
+    # A_mirror200_pi05_pytorch (2026-05-27, plan §1 in A_mirror200_pi05_pytorch.md)
+    # pure_200 dataset (200 ep + hflip mirror) trained via PyTorch native, 与 JAX SOTA
+    # (`task_a_new_pure_200_new_norm`, MAE@1=0.0065) 1:1 对照, 隔离 "PyTorch vs JAX 框架" 变量.
+    # 8× GPU FSDP, batch 128, 50k step, lr 1.5e-5 → 1.5e-6.
+    # ===================================================================================
+    TrainConfig(
+        name="pi05_pytorch_a_new_pure_200",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_new_pure_200",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS/tim/workspace/openpi_cache/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        pytorch_weight_path="/vePFS/tim/workspace/openpi_cache/modelscope_cache/lerobot/pi05_base",
+        pytorch_training_precision="bfloat16",
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6,
+        ),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_new_pure_200_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
+
+    # ===================================================================================
+    # A_0423_0527 dual init JAX (2026-05-27, plan: A_0423_0527_excl_calibration_drift.md)
+    # Dataset = 4-23~5-27 EXCEPT 5-16/18/19/20/21 (校准漂移期, v7 发现).
+    # 13 dates / ~1059 ep (排 Class C 107 + End-snap 5 截尾).
+    # 用 build_A_0423_0527.py 生成数据, 同 hparams 双 init 对照:
+    #   - `A_0423_0527_pi05_JAX`    (override weight_loader 用 pi05_base)
+    #   - `A_0423_0527_mixed1_JAX`  (override weight_loader 用 mixed_1_clean)
+    # 8× GPU FSDP, batch 128, 50k step, lr 1.5e-5 → 1.5e-6.
+    # 验证 v7 校准漂移假说: 排除漂移段后真机应 work (smooth-class).
+    # ===================================================================================
+    TrainConfig(
+        name="pi05_flatten_fold_A_0423_0527",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_0423_0527",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        # Default init: pi05_base (Run-A: A_0423_0527_pi05_JAX).
+        # For Run-B (mixed_1 init), override --weight-loader.params-path on CLI.
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS/tim/workspace/openpi_cache/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6,
+        ),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=16,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
+
     # pi05 vis-only training on vis_v2_full (16 v2 dates 04-23 → 05-22, 1409 ep / 1.93M frames).
     # User request 2026-05-23: train pure vis baseline (no kai mix) from pi05_base.
     # 8 GPU, batch 128, 50k step, lr 1.5e-5 → 1.5e-6. Volc Beijing/Shanghai.
