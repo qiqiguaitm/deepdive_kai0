@@ -263,21 +263,21 @@ for j in json.loads(r)['Result'].get('List', []):
 **(A) 推送数据到 robot-task (gf0/vePFS-cnsh)**:
 ```bash
 # 本地 (or uc02) → gf0 vePFS
-rsync -av /data/tim/data/Task_A/mix_dataset/ \
-  gf0:/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/mix_dataset/
+rsync -av /data/tim/data/Task_A/self_built/mix_dataset/ \
+  gf0:/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/mix_dataset/
 
 # 验证 volc 上看见
-ssh gf0 "ls /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/mix_dataset/ | head"
+ssh gf0 "ls /vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/mix_dataset/ | head"
 ```
 
 **(B) 推送数据到 Robot-North-H20 (gf3/vePFS-cnbj)**:
 ```bash
 # 本地 (or uc02) → gf3 vePFS
-rsync -av --info=progress2 /data/tim/data/Task_A/mix_dataset/ \
-  gf3:/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/mix_dataset/
+rsync -av --info=progress2 /data/tim/data/Task_A/self_built/mix_dataset/ \
+  gf3:/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/self_built/mix_dataset/
 
 # 验证 volc 上看见
-ssh gf3 "ls /vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/mix_dataset/ | head"
+ssh gf3 "ls /vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/self_built/mix_dataset/ | head"
 ```
 
 **(C) 跨 region (cnsh ↔ cnbj) 同步走 TOS**:

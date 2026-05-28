@@ -2,6 +2,31 @@
 
 > **场景**: 在 deepdive_kai0 项目里有 3 条互补的"提任务"路径, 本目录每条一份文档。
 
+## ⭐ 提交前检查清单 (Pre-Submit Checklist)
+
+> 提**任何**新训练任务前逐项确认。前 3 项是迁移 / git-pull 后新增的硬约束, 漏了会读错数据 / 跑旧 config / norm 报错。
+
+1. **数据在 `self_built` 规范位置** — 三端 (gf0/gf3/uc) 已统一为 `kai0/data/Task_A/`:
+   - 构建数据集 → `self_built/<name>/`;原始采集 base → `vis_base/`;HF 官方 → `kai0_base/kai0_dagger/kai0_advantage/`。
+   - config.py 的 `repo_id` / `repo_ids` / `inline_eval_val_root` 指向对应机器路径(gf0 `/vePFS/...`、gf3 `/vePFS-North-E/...`、uc `/data/shared/.../kai0/data/...`)。
+   - 规范详见 `../storage_and_env.md §2.3` + `train_scripts/kai/data/README.md`。
+
+2. **norm_stats 已算** ⚠️ — `train.py` **不自动算** norm_stats(只 `shutil.copy`)。提交前必须在数据所在机器跑:
+   ```bash
+   python scripts/compute_norm_states_fast.py --config-name <config>
+   ```
+   否则 Normalize transform 会用错/缺失统计(详见 `uc_cluster_jobs.md §12.8 陷阱 D`)。
+
+3. **config 已 commit + push** ⚠️ (gf3 / uc 关键) — gf3 + uc01/02/03 由 **1-min git pull cron 镜像 GitHub main (`reset --hard`)**。
+   - 改完 `config.py` 等代码 **必须在 gf0 `git commit && git push origin main`**, 等 ~1 分钟让目标机 pull 到, 再提交训练。否则目标机跑的是**旧 config**(路径/超参不一致 → 崩或读错数据)。
+   - **不要直接在 gf3/uc 改代码**(会被下次 reset 覆盖)。gf0 本地即 main 源, 改完即时生效。
+
+4. **init ckpt 在位** — `weight_loader` 指向的 base ckpt(如 `base_init_ckpts/pi05_base/params`、`checkpoints/Task_A/mixed_1/params`)在目标机存在。
+
+5. **queue 有余量 + 镜像/挂载正确** — `mlp job list` 查目标 queue 空闲 GPU(见 `gf0_control_plane.md §5.6.c.2`);`ImageUrl` 拼写正确(`cn-beijing` 别拼成 `bejing`);cn-beijing 队列 vePFS 必须配 `SubPath: /vis_robot`。
+
+6. **ckpt/log 落地路径** — 单机训练走 symlink trick 落本地盘(**别直接写 NFS/vePFS 的 `checkpoints/` 真实路径**);volc 任务写 vePFS `checkpoints/<config>/<exp>/`, 日志重定向到 vePFS `logs/`。
+
 ## 3 路径对比
 
 | 路径 | 适用场景 | 状态 |
