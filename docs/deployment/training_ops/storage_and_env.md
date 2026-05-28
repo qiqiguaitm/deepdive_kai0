@@ -97,7 +97,7 @@ ln -sfn "$LOCAL_DIR" "$WORKSPACE_DIR"
 > - config.py 中训练 config 的 `repo_id` 也指向 `self_built/<name>`。
 > - 例外: 原始采集 (`vis_base/`, 真实本地盘 build 源) + HF 官方 (`kai0_base/`, `kai0_dagger/`, `kai0_advantage/`) 可放 `Task_A/` 根, 因它们不是"构建"产物。
 > - 已迁移 (2026-05-28 完成): `vis_v2_full`, `vis_v2_merged`, `vis_v2_merged_val`, `val_kai0_official`, `A_0423_0527` 原直接放 `Task_A/` 根, 现全部移入 `self_built/`; config.py / build 脚本 / volc+xvla yaml 引用已同步更新。
-> - **gf0 与 gf3 均已按此规范对齐** (2026-05-28): 两端都 `base/dagger → kai0_base/kai0_dagger`、`vis_base_real → vis_base`、`vis_v2_* 移入 self_built/`、内部软链 retarget; config.py 对应 gf0 `/vePFS` 与 gf3 `/vePFS-North-E` 路径分别更新。uc `/data/shared` 走独立 `dataset/` 路径布局 (见 `uc_cluster_data_sharing_analysis.md`), 未纳入本次。
+> - **gf0 / gf3 / uc 三端均已按此规范对齐** (2026-05-28): 数据统一在 `kai0/data/Task_A/` 下 `kai0_base/kai0_dagger/kai0_advantage`(官方)+ `vis_base`(原始,仅-v2)+ `self_built/`(构建集);内部软链全部 retarget(dangling=0);config.py 对应各端路径(gf0 `/vePFS`、gf3 `/vePFS-North-E`、uc `/data/shared/.../kai0/data`)分别更新。uc 额外有 `vis_dagger/vis_autonomy/vis_inference`(原始自采,gf0/gf3 无)。各端 NFS/git-pull 机制详见 `uc_cluster_data_sharing_analysis.md`。
 
 
 ```
@@ -174,27 +174,27 @@ deepdive_kai0/
 
 > **跨 region 同步**: gf3 (cn-beijing) 不能直连 gf0/uc01/sim01 (cn-shanghai), 一切通过 TOS `tos://transfer-shanghai/...` 中转 (跨 region 走 TOS 后端骨干)。pi05_base.tar (12.3G) + 数据子集 ~17G 总同步 ≈ 4-6 分钟。
 
-#### uc01 / uc02 / uc03 (NFS 共享 — uc01 export 给 uc02/03, 2026-05-28 修订) ⭐
+#### uc01 / uc02 / uc03 (NFS 共享 — uc01 export 给 uc02/03; 2026-05-28 已迁到 kai0/data 对齐 gf0) ⭐
 
 ```
-/data/shared/ubuntu/workspace/dataset/           # NFS 共享, 实测 783 GB ⭐
-├── KAI0/                                        509 GB, TOS 同步主入口
-│   ├── from_tos_file.py / to_tos.py             同步脚本 (AK/SK 硬编码)
-│   ├── Task_A/{base, autonomy, dagger, inference}/<date-v2>/
-│   ├── Task_E, Task_H, Task_HP, Task_P, Task_PP, Task_PS/
-│   └── *.tar                                    临时 ckpt 中转
-├── Kai0_official/                               129 GB (HF 官方 base/dagger/advantage)
-├── hf_kai0/                                      47 GB
-├── kai_official_relay/                           88 GB
-├── Task_A/{self_built, vis_v2_merged, vis_v2_merged_val}
-└── ...
+/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/   # ⭐ 与 gf0/gf3 同规范; uc01 NFS export → uc02/03 共享
+    kai0_base/ kai0_dagger/ kai0_advantage/  # HF 官方 (3055/3457/3055) 真实目录 (原 dataset/Kai0_official/Task_A/*)
+    vis_base/                  # 原始自采 base, 仅 -v2 (19 日期), build 源 (原 dataset/KAI0/Task_A/base)
+    vis_dagger/ vis_autonomy/ vis_inference/  # uc 特有: 原始自采 dagger / autonomy(98G) / inference
+    self_built/                # 所有构建集: A_new_100_5_16_5_18(+val), A_new_100_5_16_5_19_raw, A_new_pure_200(+val),
+                               #   vis_v2_merged(自包含真实)+vis_v2_merged_val, val_kai0_official, eval_val/, xvla_exp1_hard_merged
+                               #   (xvla_exp1 视频软链→ kai0_base/kai0_dagger; A_new_100 软链→ vis_base)
+
+# 残留 (保留, 未纳入 kai0/data): dataset/KAI0/Task_A/base/{6 个非-v2 日期 + analysis + kai0_official_base}
+#   + TOS 同步脚本 from_tos_file.py/to_tos.py (在 dataset/KAI0/); dataset/Kai0_official/ 仅剩 HF metadata
 ```
 
-> **变更要点 (2026-05-28 实测推翻历史描述)**:
-> - 旧文档说 `/data/shared/dataset/KAI0/...` — **错**, 当前 `/data/shared/dataset/` 基本空 (仅 `_probe_gf3.txt`)
-> - 旧文档说 `~/workspace/deepdive_kai0/kai0/data/Task_<X>/` 有 symlink 指向数据集 — **错**, 当前 `kai0/data/` 只有 `ssl_phase0/` 和 `.cache/`
-> - 实际数据走 **NFS 共享** `/data/shared/ubuntu/workspace/dataset/...`, 只在 uc01 拉一次, uc02/03 经 NFSv4.1 自动可见 (跨机 inode 一致, 实测)
-> - 详细对照见 `uc_cluster_data_sharing_analysis.md §3` 与 `data_sync_tos.md §6.2`
+> **变更要点 (2026-05-28 迁移)**:
+> - uc 原本数据在独立的 `/data/shared/ubuntu/workspace/dataset/` 树 (KAI0/Kai0_official/Task_A 分散), 与 gf0/gf3 的 `kai0/data/` 不一致。
+> - 已**全部迁入 `kai0/data/Task_A/`** 并对齐命名: Kai0_official→kai0_*, KAI0/base→vis_base(仅-v2), KAI0/{dagger,autonomy,inference}→vis_*, 各构建集→self_built/; 退役冗余 `hf_kai0`(47G,与官方重复)。
+> - 跨数据集软链 (22647 条: xvla_exp1→kai0_*, A_new_100→vis_base, →vis_v2_merged) 已 retarget, dangling=0。
+> - config.py / launch / build / xvla 脚本中 uc `dataset/` 路径已同步改为 `kai0/data/`; uc 经 1-min git pull cron 拿到新 config。
+> - 只在 uc01 操作, uc02/03 经 NFSv4.1 自动可见 (跨机 inode 一致)。
 
 #### 日期 leaf 命名约定: `YYYY-MM-DD-v2` (2026-05-11 起)
 

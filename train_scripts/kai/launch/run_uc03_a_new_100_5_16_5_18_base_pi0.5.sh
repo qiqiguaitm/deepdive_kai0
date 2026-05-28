@@ -2,7 +2,7 @@
 # UC03 single-host (8 GPU) — 5/16-v2 (2 ep) + 5/18-v2 (100 ep) = 102 ep merged, init pi0.5
 #   Config:  pi05_flatten_fold_a_new_100_5_16_5_18_base_pi0.5
 #   Exp:     task_a_new_100_new_norm_base_pi0.5  (per user request)
-#   Data:    /data/shared/ubuntu/workspace/dataset/Task_A/self_built/A_new_100_5_16_5_18 (48 ep / 101,589 frames)
+#   Data:    /data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_new_100_5_16_5_18 (48 ep / 101,589 frames)
 #   Norm:    recomputed via compute_norm_states_fast.py for this dataset
 #   Init:    pi05_base (NFS shared base_init_ckpts)
 #   Ckpt:    uc03 local SSD (single-host, no NFS multi-host concern)

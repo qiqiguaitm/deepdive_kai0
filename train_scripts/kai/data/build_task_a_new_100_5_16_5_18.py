@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Merge raw kai0/vis 5/16-v2 + 5/18-v2 dirs into a single lerobot v2.1 dataset.
 
-Source: /data/shared/ubuntu/workspace/dataset/KAI0/Task_A/base/2026-05-{16,18}-v2/  (NFS shared)
+Source: /data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/vis_base/2026-05-{16,18}-v2/  (NFS shared)
 Splits 10 episodes from the LAST 10 of 5/18-v2 as held-out val. Output:
   TRAIN: .../self_built/A_new_100_5_16_5_18/      (92 ep)
   VAL:   .../self_built/A_new_100_5_16_5_18_val/  (10 ep)
@@ -24,10 +24,10 @@ RAW_CAM = {
     "observation.images.hand_left":  "hand_left",
     "observation.images.hand_right": "hand_right",
 }
-SRC_ROOT = Path("/data/shared/ubuntu/workspace/dataset/KAI0/Task_A/base")
+SRC_ROOT = Path("/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/vis_base")
 SRC_DIRS = [SRC_ROOT / "2026-05-16-v2", SRC_ROOT / "2026-05-18-v2"]
-DST_TRAIN = Path("/data/shared/ubuntu/workspace/dataset/Task_A/self_built/A_new_100_5_16_5_18")
-DST_VAL   = Path("/data/shared/ubuntu/workspace/dataset/Task_A/self_built/A_new_100_5_16_5_18_val")
+DST_TRAIN = Path("/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_new_100_5_16_5_18")
+DST_VAL   = Path("/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_new_100_5_16_5_18_val")
 N_VAL = 10  # last 10 episodes (from 5/18) held out for inline-eval
 
 

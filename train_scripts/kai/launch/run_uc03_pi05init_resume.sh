@@ -15,8 +15,8 @@ EXP_NAME="task_a_pure200_new_norm_base_pi0.5"
 # ---- paths (mix of NFS-shared inputs + uc03-local ckpt I/O) ----
 KAI0_ROOT="/data/shared/ubuntu/workspace/deepdive_kai0/kai0"           # NFS shared code+venv
 PY="$KAI0_ROOT/.venv/bin/python3"
-DATA_ROOT="/data/shared/ubuntu/workspace/dataset/Task_A/self_built/A_new_pure_200"
-VAL_ROOT="/data/shared/ubuntu/workspace/dataset/Task_A/self_built/A_new_pure_200_val"
+DATA_ROOT="/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_new_pure_200"
+VAL_ROOT="/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_new_pure_200_val"
 INIT_PARAMS="/data/shared/ubuntu/workspace/base_init_ckpts/pi05_base/params"
 CKPT_BASE="/data/shared/ubuntu/local_ckpts"                            # uc03 LOCAL SSD (fast)
 LOG_DIR="/data/shared/ubuntu/workspace/logs"

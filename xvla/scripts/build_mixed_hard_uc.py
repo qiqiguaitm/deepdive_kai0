@@ -2,9 +2,9 @@
 """Build mixed_hard mirror dirs on uc01 NFS for exp1.
 
 Same as build_mixed_hard.py but uses uc-local source dataset paths:
-  kai0_base   = /data/shared/ubuntu/workspace/dataset/Kai0_official/Task_A/base
-  kai0_dagger = /data/shared/ubuntu/workspace/dataset/Kai0_official/Task_A/dagger
-  vis_v2_merged = /data/shared/ubuntu/workspace/dataset/Task_A/vis_v2_merged   (rsync'd)
+  kai0_base   = /data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/kai0_base
+  kai0_dagger = /data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/kai0_dagger
+  vis_v2_merged = /data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_v2_merged
 
 Outputs go to /data/shared/ubuntu/workspace/deepdive_kai0/xvla/data/mixed_hard/
 (on uc01 NFS, visible to uc02). Same patched tasks.jsonl logic ("kai " / "vis " prefix).
@@ -18,14 +18,14 @@ from pathlib import Path
 KAI = "kai Flatten and fold the cloth."
 VIS = "vis Flatten and fold the cloth."
 
-UC_KAI_ROOT = Path("/data/shared/ubuntu/workspace/dataset/Kai0_official/Task_A")
-UC_VIS_ROOT = Path("/data/shared/ubuntu/workspace/dataset/Task_A")
+UC_KAI_ROOT = Path("/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A")
+UC_VIS_ROOT = Path("/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/self_built")
 DST_ROOT = Path("/data/shared/ubuntu/workspace/deepdive_kai0/xvla/data/mixed_hard")
 
 # (src_path, dst_name, domain_prompt)
 SOURCES = [
-    (UC_KAI_ROOT / "base",    "kai0_base",     KAI),
-    (UC_KAI_ROOT / "dagger",  "kai0_dagger",   KAI),
+    (UC_KAI_ROOT / "kai0_base",    "kai0_base",     KAI),
+    (UC_KAI_ROOT / "kai0_dagger",  "kai0_dagger",   KAI),
     (UC_VIS_ROOT / "vis_v2_merged", "vis_v2_merged", VIS),
 ]
 

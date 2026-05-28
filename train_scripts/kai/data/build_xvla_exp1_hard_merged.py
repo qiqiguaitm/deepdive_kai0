@@ -40,7 +40,7 @@ SOURCES = [
     ("kai0_dagger",   0),
     ("vis_v2_merged", 1),
 ]
-DST = Path("/data/shared/ubuntu/workspace/dataset/Task_A/self_built/xvla_exp1_hard_merged")
+DST = Path("/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/self_built/xvla_exp1_hard_merged")
 
 KAI_PROMPT = "kai Flatten and fold the cloth."
 VIS_PROMPT = "vis Flatten and fold the cloth."

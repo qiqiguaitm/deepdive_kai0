@@ -1004,7 +1004,7 @@ _CONFIGS = [
         name="xvla_exp1_hard_prompt_merged_uc",
         model=pi0_config.Pi0Config(pi05=True),
         data=LerobotAgilexDataConfig(
-            repo_id="/data/shared/ubuntu/workspace/dataset/Task_A/self_built/xvla_exp1_hard_merged",
+            repo_id="/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/self_built/xvla_exp1_hard_merged",
             default_prompt=None,
             base_config=DataConfig(prompt_from_task=True),  # uses tasks.jsonl per-task lookup
             use_delta_joint_actions=False,
@@ -1020,7 +1020,7 @@ _CONFIGS = [
         num_workers=16,
         batch_size=128,
         fsdp_devices=16,
-        inline_eval_val_root="/data/shared/ubuntu/workspace/dataset/Task_A/vis_v2_merged_val",
+        inline_eval_val_root="/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_v2_merged_val",
         inline_eval_n_frames=200,
         inline_eval_every=4,
     ),
@@ -1048,7 +1048,7 @@ _CONFIGS = [
         num_workers=64,  # uc cluster — high parallel decode
         batch_size=128,
         fsdp_devices=16,
-        inline_eval_val_root="/data/shared/ubuntu/workspace/dataset/Task_A/vis_v2_merged_val",
+        inline_eval_val_root="/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_v2_merged_val",
         inline_eval_n_frames=200,
         inline_eval_every=4,
     ),
@@ -1726,7 +1726,7 @@ _CONFIGS = [
         name="pi05_flatten_fold_a_new_100_5_16_5_18_base_pi0.5",
         model=pi0_config.Pi0Config(pi05=True),
         data=LerobotAgilexDataConfig(
-            repo_id="/data/shared/ubuntu/workspace/dataset/Task_A/self_built/A_new_100_5_16_5_18",
+            repo_id="/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_new_100_5_16_5_18",
             default_prompt="Flatten and fold the cloth.",
             use_delta_joint_actions=False,
         ),
@@ -1743,7 +1743,7 @@ _CONFIGS = [
         num_workers=64,            # uc convention
         batch_size=120,            # uc single-host 8 GPU = 15/card
         fsdp_devices=8,
-        inline_eval_val_root="/data/shared/ubuntu/workspace/dataset/Task_A/self_built/A_new_100_5_16_5_18_val",
+        inline_eval_val_root="/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_new_100_5_16_5_18_val",
         inline_eval_n_frames=200,
         inline_eval_every=4,
     ),
