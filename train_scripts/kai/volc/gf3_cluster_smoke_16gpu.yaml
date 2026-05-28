@@ -115,8 +115,8 @@ Entrypoint: |
     --batch-size 128 \
     --num-workers 16 \
     --inline-eval-every 1 \
-    --data.repo-id /vePFS-North-E/vis_robot/dataset/KAI0/Task_A/self_built/A_new_pure_200 \
-    --inline-eval-val-root /vePFS-North-E/vis_robot/dataset/KAI0/Task_A/self_built/A_new_pure_200_val \
+    --data.repo-id /vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_new_pure_200 \
+    --inline-eval-val-root /vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_new_pure_200_val \
     --weight-loader.params-path /vePFS-North-E/vis_robot/base_init_ckpts/extracted/pi05_base/params \
     --checkpoint-base-dir /vePFS-North-E/vis_robot/checkpoints \
     --no-wandb-enabled \

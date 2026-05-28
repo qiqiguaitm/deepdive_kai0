@@ -82,7 +82,7 @@ tar -cf - A_new_smooth_800/ | tosutil cp - tos://transfer-shanghai/KAI0/dataset/
 | 训练服务器 | KAI0 本地路径 (mirror) | 拉取命令 |
 |---|---|---|
 | **gf0** | `/vePFS/tim/data/KAI0/...` | `cd /vePFS/tim/data/KAI0 && tosutil cp -r tos://transfer-shanghai/KAI0/Task_A/<sub>/ ./Task_A/` |
-| **gf3** | `/vePFS-North-E/vis_robot/dataset/KAI0/...` | `cd /vePFS-North-E/vis_robot/dataset/KAI0 && tosutil cp -r tos://transfer-shanghai/KAI0/Task_A/<sub>/ ./Task_A/` |
+| **gf3** | `/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/...` | `cd /vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data && tosutil cp -r tos://transfer-shanghai/KAI0/Task_A/<sub>/ ./Task_A/` |
 | **uc01** (仅 uc01, 经 NFS 自动同步给 uc02/03) ⭐ | `/data/shared/ubuntu/workspace/dataset/KAI0/...` | `cd /data/shared/ubuntu/workspace/dataset/KAI0 && tosutil cp -r tos://transfer-shanghai/KAI0/Task_A/<sub>/ ./Task_A/` |
 
 > ⭐ **uc 集群只在 uc01 拉一次** — `/data/shared/ubuntu/workspace/` 是 uc01 export 的 NFS root (`10.60.0.0/16`, 走管理网 eth0), uc02/03 通过 NFSv4.1 自动看到同一份 (跨机 inode 一致, 2026-05-28 实测). **不要 for-loop 各机各拉一份** — 浪费 3× TOS 带宽, 还会因不同步导致训练读到不同内容。详见 `uc_cluster_data_sharing_analysis.md`。
@@ -94,7 +94,7 @@ TOS:  tos://transfer-shanghai/KAI0/Task_A/base/2026-05-22-v2/
             └── 子路径与服务器本地  ─┴── 完全一致 (但 uc 本地多一层 dataset/)
 
 gf0:  /vePFS/tim/data/KAI0/Task_A/base/2026-05-22-v2/
-gf3:  /vePFS-North-E/vis_robot/dataset/KAI0/Task_A/base/2026-05-22-v2/
+gf3:  /vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/base/2026-05-22-v2/
 uc01: /data/shared/ubuntu/workspace/dataset/KAI0/Task_A/base/2026-05-22-v2/    ← uc02/03 经 NFS 自动可见
 ```
 
@@ -113,7 +113,7 @@ cd /vePFS/tim/data/KAI0/Task_A
 tosutil cp -r tos://transfer-shanghai/KAI0/Task_A/$SUB ./
 
 # gf3 拉 (cnbj vepfs)
-ssh gf3 "cd /vePFS-North-E/vis_robot/dataset/KAI0/Task_A && \
+ssh gf3 "cd /vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A && \
   tosutil cp -r tos://transfer-shanghai/KAI0/Task_A/$SUB ./"
 
 # uc 集群只在 uc01 拉一次, uc02/03 经 NFS 自动同步 ⭐
@@ -124,7 +124,7 @@ ssh uc01 "cd /data/shared/ubuntu/workspace/dataset/KAI0/Task_A && \
 for h in gf0 gf3 uc01; do
   P=$(case $h in
     gf0)  echo /vePFS/tim/data/KAI0/Task_A/$SUB;;
-    gf3)  echo /vePFS-North-E/vis_robot/dataset/KAI0/Task_A/$SUB;;
+    gf3)  echo /vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/$SUB;;
     uc01) echo /data/shared/ubuntu/workspace/dataset/KAI0/Task_A/$SUB;;
   esac)
   echo -n "$h: "; [ "$h" = "gf0" ] && du -sh "$P" 2>/dev/null || \
@@ -177,7 +177,7 @@ tos://transfer-shanghai/
 ├── ckpt/                         早期 ckpt 中转
 ├── shared_ckpt/                  跨用户共享 ckpt (XVLA / mixed_1_clean 等)
 ├── shared_sz/                    深圳团队共享
-├── kai_official_relay/           kai0_base / kai0_dagger 官方数据中转
+├── Task_A_kai_official.tar       kai0_base+dagger+advantage 官方数据归档 (2026-05-28 起; 原散落的 kai_official_relay/ 已删除合并为此单一 tar)
 ├── from_uc01/                    uc01 → 任意机器中转 (含 gf3 venv tar)
 ├── tim/                          用户私有 (临时打包 / 中转)
 ├── migrate_js/                   js 集群停用前迁移备份

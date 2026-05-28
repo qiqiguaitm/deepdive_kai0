@@ -96,7 +96,8 @@ ln -sfn "$LOCAL_DIR" "$WORKSPACE_DIR"
 > - build 脚本 (`train_scripts/kai/data/build_*.py`) 的 `DST` 必须指向 `.../data/Task_A/self_built/<name>`。
 > - config.py 中训练 config 的 `repo_id` 也指向 `self_built/<name>`。
 > - 例外: 原始采集 (`vis_base/`, 真实本地盘 build 源) + HF 官方 (`kai0_base/`, `kai0_dagger/`, `kai0_advantage/`) 可放 `Task_A/` 根, 因它们不是"构建"产物。
-> - 已迁移 (2026-05-28 完成): `vis_v2_full`, `vis_v2_merged`, `vis_v2_merged_val`, `val_kai0_official`, `A_0423_0527` 原直接放 `Task_A/` 根, 现全部移入 `self_built/`; config.py / build 脚本 / volc+xvla yaml 中 **gf0 `/vePFS` 路径** 引用已同步更新 (gf3 `/vePFS-North-E`、uc `/data/shared` 各自路径保持不变)。
+> - 已迁移 (2026-05-28 完成): `vis_v2_full`, `vis_v2_merged`, `vis_v2_merged_val`, `val_kai0_official`, `A_0423_0527` 原直接放 `Task_A/` 根, 现全部移入 `self_built/`; config.py / build 脚本 / volc+xvla yaml 引用已同步更新。
+> - **gf0 与 gf3 均已按此规范对齐** (2026-05-28): 两端都 `base/dagger → kai0_base/kai0_dagger`、`vis_base_real → vis_base`、`vis_v2_* 移入 self_built/`、内部软链 retarget; config.py 对应 gf0 `/vePFS` 与 gf3 `/vePFS-North-E` 路径分别更新。uc `/data/shared` 走独立 `dataset/` 路径布局 (见 `uc_cluster_data_sharing_analysis.md`), 未纳入本次。
 
 
 ```
@@ -156,7 +157,13 @@ deepdive_kai0/
 
 #### gf3 (共享 vePFS 华北)
 ```
-/vePFS-North-E/vis_robot/dataset/KAI0/Task_<X>/                      # 数据集 (从 TOS 同步)
+/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/   # ⭐ 与 gf0 同规范 (2026-05-28 对齐):
+    kai0_base/ kai0_dagger/         # HF 官方 base(3055)/dagger(3457) 真实目录 (原 base/dagger 改名)
+    vis_base/                       # 原始采集 (原 vis_base_real 改名), build 源
+    self_built/                     # 所有构建数据集: vis_v2_full, vis_v2_merged, vis_v2_merged_val, vis_5day_recent, A_new_pure_200, A_new_pure_200_val
+                                    #   (vis_v2_merged 为视频底座真实文件; 其余视频软链→ self_built/vis_v2_merged 或 vis_base)
+    (gf3 无 advantage; eval_val/kai0_*_val_50 为另置的小验证集, 未被 config 引用)
+    # 注: 原 /vePFS-North-E/vis_robot/dataset/KAI0/ 这棵独立树已于 2026-05-28 合并进上面 kai0/data 并删除, 统一单一数据位置
 /vePFS-North-E/vis_robot/base_init_ckpts/extracted/pi05_base/params/ # init weights (从 TOS pi05_base.tar 解压)
 /vePFS-North-E/vis_robot/checkpoints/<config>/<exp>/                 # 训练输出
 /vePFS-North-E/vis_robot/logs/                                       # 训练日志
