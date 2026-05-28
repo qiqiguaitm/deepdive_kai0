@@ -68,21 +68,28 @@ except Exception:
   fi
 fi
 
-# 自动找 v1 pickle: <ckpt basename>_v1_p200.pkl in optimize/results/
+# 自动找 v1 pickle. 优先级:
+#   1) 新版 layout: <ckpt_dir>/v1_p200.pkl  (ckpt_v1 自包含, vis_5day_recent 起的约定)
+#   2) 旧版 layout: optimize/results/<basename>_v1_p200.pkl  (vis_v2_full / mixed_1 等)
 CKPT_BASENAME=$(basename "$CKPT_DIR")
-V1_PKL="$REPO/optimize/results/${CKPT_BASENAME}_v1_p200.pkl"
+V1_PKL="$CKPT_DIR/v1_p200.pkl"
+if [ ! -f "$V1_PKL" ]; then
+  V1_PKL="$REPO/optimize/results/${CKPT_BASENAME}_v1_p200.pkl"
+fi
 
 if [ ! -f "$V1_PKL" ]; then
-  echo "[FAIL] V1 pickle not found: $V1_PKL" >&2
+  echo "[FAIL] V1 pickle not found. 试过两个位置:" >&2
+  echo "       - $CKPT_DIR/v1_p200.pkl  (新版自包含 layout)" >&2
+  echo "       - $REPO/optimize/results/${CKPT_BASENAME}_v1_p200.pkl  (旧版 layout)" >&2
   echo "       需要先转换:" >&2
   echo "       $REPO/kai0/.venv_5090_trt/bin/python $REPO/optimize/v1_triton/convert_kai0_to_v1.py \\" >&2
-  echo "           --jax_path $CKPT_DIR \\" >&2
+  echo "           --jax_path <ckpt_v0_dir> \\" >&2
   echo "           --output $REPO/optimize/results/${CKPT_BASENAME}_v1.pkl \\" >&2
   echo "           --prompt \"\${PROMPT_FROM_TRAIN_CONFIG}\" \\" >&2
   echo "           --tokenizer_model $REPO/openpi_cache/big_vision/paligemma_tokenizer.model" >&2
   echo "       $REPO/kai0/.venv_5090_trt/bin/python $REPO/optimize/v1_triton/expand_v1_pkl_for_phase2.py \\" >&2
   echo "           --in $REPO/optimize/results/${CKPT_BASENAME}_v1.pkl \\" >&2
-  echo "           --out $V1_PKL" >&2
+  echo "           --out $CKPT_DIR/v1_p200.pkl" >&2
   exit 1
 fi
 

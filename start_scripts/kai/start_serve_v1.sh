@@ -17,7 +17,7 @@ set -eo pipefail
 
 REPO=/data1/tim/workspace/deepdive_kai0
 PKL_DEFAULT=$REPO/optimize/results/task_a_new_pure_200_v1_p200.pkl
-NORM_DEFAULT=/data1/DATA_IMP/checkpoints/task_a_new_pure_200_step49999/assets/a_new_pure_200/norm_stats.json
+NORM_DEFAULT=/data1/DATA_IMP/checkpoints/ckpt_v1/task_a_new_pure_200_step49999/assets/a_new_pure_200/norm_stats.json
 TOK_DEFAULT=$REPO/openpi_cache/big_vision/paligemma_tokenizer.model
 PORT_DEFAULT=8002
 PROMPT_DEFAULT="Flatten and fold the cloth"

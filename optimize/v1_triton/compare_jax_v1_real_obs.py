@@ -22,7 +22,7 @@ share a process cleanly):
   # 2. JAX inference (kai0 .venv)
   kai0/.venv/bin/python optimize/v1_triton/compare_jax_v1_real_obs.py jax \\
       --frame /tmp/frame.npz \\
-      --ckpt /data1/DATA_IMP/checkpoints/task_a_new_pure_200_step49999 \\
+      --ckpt /data1/DATA_IMP/checkpoints/ckpt_v1/task_a_new_pure_200_step49999 \\
       --base-config-name pi05_flatten_fold_a_new_pure_1200 \\
       --out /tmp/jax_chunk.npz
 
@@ -30,7 +30,7 @@ share a process cleanly):
   kai0/.venv_5090_trt/bin/python optimize/v1_triton/compare_jax_v1_real_obs.py v1 \\
       --frame /tmp/frame.npz \\
       --pkl /data1/tim/workspace/deepdive_kai0/optimize/results/task_a_new_pure_200_v1_p200.pkl \\
-      --norm-stats /data1/DATA_IMP/checkpoints/task_a_new_pure_200_step49999/assets/a_new_pure_200/norm_stats.json \\
+      --norm-stats /data1/DATA_IMP/checkpoints/ckpt_v1/task_a_new_pure_200_step49999/assets/a_new_pure_200/norm_stats.json \\
       --tokenizer /data1/tim/workspace/deepdive_kai0/openpi_cache/big_vision/paligemma_tokenizer.model \\
       --out /tmp/v1_chunk.npz
 

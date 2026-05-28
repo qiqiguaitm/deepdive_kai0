@@ -8,8 +8,8 @@ Adapter for V1's convert_from_jax_pi05.py:
 
 Usage:
     python convert_kai0_to_v1.py \
-        --jax_path /data1/DATA_IMP/checkpoints/task_a_mix_b6000_p1200_mixed_1_step49999 \
-        --output /data1/DATA_IMP/checkpoints/task_a_mix_b6000_p1200_mixed_1_step49999_v1.pkl \
+        --jax_path /data1/DATA_IMP/checkpoints/ckpt_v1/task_a_mix_b6000_p1200_mixed_1_step49999 \
+        --output /data1/tim/workspace/deepdive_kai0/optimize/results/task_a_mix_b6000_p1200_v1.pkl \
         --prompt "Flatten and fold the cloth" \
         --tokenizer_model /data1/tim/workspace/deepdive_kai0/openpi_cache/big_vision/paligemma_tokenizer.model
 """

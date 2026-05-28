@@ -24,7 +24,7 @@
 
 ```bash
 cd /home/tim/workspace/deepdive_kai0
-CKPT=/data1/DATA_IMP/checkpoints/task_a_mix_b6000_p1200_mixed_1_step49999
+CKPT=/data1/DATA_IMP/checkpoints/ckpt_v1/task_a_mix_b6000_p1200_mixed_1_step49999
 OUT=optimize/results/task_a_mix_b6000_p1200_v1.pkl
 
 kai0/.venv_5090_trt/bin/python optimize/v1_triton/convert_kai0_to_v1.py \

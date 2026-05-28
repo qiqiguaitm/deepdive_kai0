@@ -67,7 +67,7 @@ exec ros2 run piper policy_inference_node.py --ros-args \
   -p mode:=websocket \
   -p host:=${HOST} \
   -p port:=${PORT} \
-  -p checkpoint_dir:=/data1/DATA_IMP/checkpoints/task_a_mix_b6000_p1200_mixed_1_step49999 \
+  -p checkpoint_dir:=/data1/DATA_IMP/checkpoints/ckpt_v1/task_a_mix_b6000_p1200_mixed_1_step49999 \
   -p config_name:=pi05_flatten_fold_a_new_pure_1200 \
   -p gpu_id:=0 \
   -p img_front_topic:=/camera_f/color/image_raw \
