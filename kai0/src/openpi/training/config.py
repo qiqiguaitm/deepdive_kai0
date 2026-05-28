@@ -2038,6 +2038,13 @@ _CONFIGS = [
     #************************advantage estimator***************************
 
 
+    # ─────────────────────────────────────────────────────────────────────
+    # Inference-only entries for gf3-trained delta ckpts (2026-05-23, sim01).
+    # Paths reference gf3 vePFS; not loaded at inference (sidecar overrides
+    # asset_id, datasets_yaml as needed). Kept here so the bundle's
+    # base_config_name resolves.
+    # ─────────────────────────────────────────────────────────────────────
+
     # RoboArena & PolaRiS configs.
     *roboarena_config.get_roboarena_configs(),
     *polaris_config.get_polaris_configs(),
@@ -2076,11 +2083,18 @@ def _load_extra_config_from_env() -> None:
             " Sync src/openpi/training/config.py first."
         )
     base = _CONFIGS_DICT[base_name]
+    data_kw: dict = {}
     new_asset_id = spec.get("override_asset_id")
     if new_asset_id is not None:
-        new_data = dataclasses.replace(
-            base.data, assets=AssetsConfig(asset_id=new_asset_id)
-        )
+        data_kw["assets"] = AssetsConfig(asset_id=new_asset_id)
+    new_yaml = spec.get("override_datasets_yaml")
+    if new_yaml is not None:
+        new_yaml_path = pathlib.Path(new_yaml)
+        if not new_yaml_path.is_absolute():
+            new_yaml_path = p.parent / new_yaml_path
+        data_kw["datasets_yaml"] = str(new_yaml_path)
+    if data_kw:
+        new_data = dataclasses.replace(base.data, **data_kw)
         new_cfg = dataclasses.replace(base, data=new_data)
         _CONFIGS_DICT[base_name] = new_cfg
 
