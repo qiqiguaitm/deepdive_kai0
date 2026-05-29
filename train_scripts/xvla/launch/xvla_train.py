@@ -83,6 +83,22 @@ CONFIGS = {
         batch_size_per_gpu=8,
         vlm_lr_scale=0.1,
     ),
+    "A_0423_0527": dict(
+        # Single-dataset direct finetune from xvla-base on A_0423_0527 (cloth-fold, 1085 ep,
+        # 1.37M chunk-samples). EE6D built with FIXED converter (interleaved rot6d + binarized
+        # gripper). Mirrors X3C_vis_only_direct (direct-from-base). 30k steps ≈ 1.40 epoch at
+        # eff batch 64 — A_0423_0527 is ~32% larger than vis_v2_merged, so 30k matches/exceeds
+        # X3.C's validated 1.23-epoch exposure. save every 2k → 15 ckpts, pick best by eval.
+        datasets=[
+            dict(root=f"{DATA_ROOT}/Task_A/A_0423_0527", domain_id=20, prompt=PROMPT, weight=1.0),
+        ],
+        steps=30_000,
+        lr=5e-5,
+        warmup_steps=500,
+        freeze_steps=1000,
+        batch_size_per_gpu=8,
+        vlm_lr_scale=0.1,
+    ),
 }
 
 # ==================== TRAIN ====================
