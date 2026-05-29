@@ -25,16 +25,17 @@ from multi_domain_dataset import LeRobotEE6DDataset, MultiDomainDataset, XVLAHdf
 from lerobot.policies.xvla.modeling_xvla import XVLAPolicy
 
 # ==================== CONFIGS ====================
-DATA_ROOT = "/data/shared/ubuntu/workspace/dataset_ee6d"
+DATA_ROOT = "/data/shared/ubuntu/workspace/dataset_ee6d"  # legacy (buggy pipeline) — superseded by SB
+SB = "/data/shared/ubuntu/workspace/deepdive_kai0/xvla/data/self_built"  # X-VLA self-built EE6D (fixed pipeline)
 CKPT_INIT = "/data/shared/ubuntu/workspace/xvla_ckpts"
 PROMPT = "Flatten and fold the cloth."
 
 CONFIGS = {
     "X3B_stage_a": dict(
         datasets=[
-            dict(root=f"{DATA_ROOT}/Kai0_official/Task_A/base", domain_id=19, prompt=PROMPT, weight=1.0),
-            dict(root=f"{DATA_ROOT}/Kai0_official/Task_A/dagger", domain_id=19, prompt=PROMPT, weight=1.0),
-            dict(root=f"{DATA_ROOT}/Task_A/vis_v2_merged", domain_id=20, prompt=PROMPT, weight=7.0),
+            dict(root=f"{SB}/kai0_base", domain_id=19, prompt=PROMPT, weight=1.0),
+            dict(root=f"{SB}/kai0_dagger", domain_id=19, prompt=PROMPT, weight=1.0),
+            dict(root=f"{SB}/vis_v2_merged", domain_id=20, prompt=PROMPT, weight=7.0),
         ],
         steps=20_000,
         lr=1e-4,
@@ -45,11 +46,11 @@ CONFIGS = {
     ),
     "X3A_stage_a": dict(
         datasets=[
-            dict(root=f"{DATA_ROOT}/Kai0_official/Task_A/base", domain_id=19, prompt=PROMPT, weight=1.0, type="parquet"),
-            dict(root=f"{DATA_ROOT}/Kai0_official/Task_A/dagger", domain_id=19, prompt=PROMPT, weight=1.0, type="parquet"),
-            dict(root=f"{DATA_ROOT}/Task_A/vis_v2_merged", domain_id=20, prompt=PROMPT, weight=7.0, type="parquet"),
+            dict(root=f"{SB}/kai0_base", domain_id=19, prompt=PROMPT, weight=1.0, type="parquet"),
+            dict(root=f"{SB}/kai0_dagger", domain_id=19, prompt=PROMPT, weight=1.0, type="parquet"),
+            dict(root=f"{SB}/vis_v2_merged", domain_id=20, prompt=PROMPT, weight=7.0, type="parquet"),
             dict(root="/data/shared/ubuntu/workspace/deepdive_kai0/xvla/data/xvla_soft_fold",
-                 action_cache_dir=f"{DATA_ROOT}/xvla_soft_fold_action_cache",
+                 action_cache_dir=f"{SB}/xvla_soft_fold_action_cache",
                  domain_id=21, prompt=PROMPT, weight=2.0, type="hdf5"),
         ],
         steps=20_000,
@@ -63,7 +64,7 @@ CONFIGS = {
         # Ablation: skip Stage A continual pretrain, init from lerobot/xvla-base directly,
         # finetune on vis-only. Measures the actual contribution of Stage A multi-domain pretrain.
         datasets=[
-            dict(root=f"{DATA_ROOT}/Task_A/vis_v2_merged", domain_id=20, prompt=PROMPT, weight=1.0),
+            dict(root=f"{SB}/vis_v2_merged", domain_id=20, prompt=PROMPT, weight=1.0),
         ],
         steps=20_000,
         lr=5e-5,
@@ -74,7 +75,7 @@ CONFIGS = {
     ),
     "X3_stage_b": dict(
         datasets=[
-            dict(root=f"{DATA_ROOT}/Task_A/vis_v2_merged", domain_id=20, prompt=PROMPT, weight=1.0),
+            dict(root=f"{SB}/vis_v2_merged", domain_id=20, prompt=PROMPT, weight=1.0),
         ],
         steps=10_000,
         lr=5e-5,
