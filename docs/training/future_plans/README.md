@@ -6,12 +6,21 @@
 
 ---
 
-## 当前优先级 plan (2026-05-23 PM 之后新提的)
+## 当前优先级 plan
+
+### 🔥 v7/v8 真机失败验证实验 (2026-05-27 新)
+
+| 优先级 | 计划 | 状态 | 资源 | ETA | 目的 |
+|---|---|---|---|---|---|
+| ⭐⭐⭐ P0 | [**A_0423_0527 双 init JAX** (排 5-16~5-21 校准漂移)](plans/A_0423_0527_excl_calibration_drift.md) | ⏳ pending | 8× GPU × 2 run | ~3-5 day | **验证 v7 gripper 校准漂移假说**: 排除漂移期后真机应 work |
+| ⭐⭐ P0 | [**A_mirror200_pi05_pytorch** (pure_200 PyTorch 对照)](plans/A_mirror200_pi05_pytorch.md) | ⏳ pending | 8× GPU | ~30-50h | **隔离 "PyTorch vs JAX" 训练框架变量**, 在已知 work 的 pure_200 上 reproduce SOTA |
+
+### 之前优先级 plan (2026-05-23 PM 之后新提的)
 
 | 优先级 | 计划 | 状态 | 资源 | ETA | 关联 task |
 |---|---|---|---|---|---|
 | ⭐ P1 | [PyTorch 原生训练 pi05 vis_v2_full R1+R2](plans/pytorch_native_vis_v2_full.md) | ⏳ pending (config 未加) | Robot-North-H20 16 H20 串行 | ~4-5 day | `#18` |
-| ⭐ P1 | [Track X X-VLA 官方架构 X3.A/X3.B Curriculum](plans/xvla_track_x_curriculum.md) | 🟢 Stage A running, Stage B 待 | uc01+uc02 各 8 A800 | ~1 day 余 | `#17` |
+| ⭐ P1 | [Track X X-VLA 官方架构 X3.A/X3.B Curriculum](plans/xvla_track_x_curriculum.md) | ⚠️ X3.A/B/C 数据管线发现 3 bug 已修, 旧结论待复核; 修复版首跑 A_0423_0527 running (uc01 8 GPU, ETA ~6h) | uc01 8 A800 | ~6h | `#17` |
 | P2 | [Track A SSL Phase 0-3 Pretrain Pipeline](plans/ssl_phase_pretrain_pipeline.md) | 🔄 Phase 0 部分 done (kai0 base+dagger CoTracker3+SAM2), 余下 pending | uc02 8 GPU + Robot-North-H20 | ~3-5 day Phase 0, 后续待评估 | `#11/12/13/14` |
 
 ---

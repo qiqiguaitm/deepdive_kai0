@@ -9,6 +9,13 @@
 > - **Stage A multi-domain continual pretrain 是 net-negative**, 不应该做
 > - Track X 终态用 X3.C 路线, 节省 ~60 GPU-h 训练 + 跳过整个 Stage B
 >
+> **⚠️ 2026-05-29 重大订正 — 本文档结论待复核**: X3.A/B/C 共用的 EE6D 转换器 + dataset wrapper 后发现 3 个 bug, 均已修复 (commits `2a01c85` rot6d、`5d5d0a4` gripper、`9633e2a` decode):
+> 1. **Rot6D 排布** `R[:,:2].T.flatten()` (block) ≠ 上游 interleaved → 与预训练 base 错位 + 部署解码 garble;
+> 2. **Gripper 未二值化** (原始米值) → BCE gripper loss 失效, 永不学闭合;
+> 3. **decode_frame** 用了当前 PyAV 不存在的 `frame.index` → 每帧返回**全 0 黑图** (vis/kai parquet 域受影响, xvla hdf5 cv2 解码不受影响)。
+>
+> rot6d 错排 + gripper 失效**确定**存在; 黑图取决于训练时 PyAV 版本 (待查)。**因此本文档全部 MAE 数字与 "X3.C 完胜 / Stage A net-negative" 等结论均建立在 buggy 数据上, 暂作废, 须用修复版重训后重新验证。** 详见 [`../../future_plans/plans/xvla_track_x_curriculum.md`](../../future_plans/plans/xvla_track_x_curriculum.md) §⚠️ + [`../../../../train_scripts/xvla/data/README.md`](../../../../train_scripts/xvla/data/README.md)。修复版首跑见 curriculum §5.6 (A_0423_0527)。
+>
 > **最近更新**: 2026-05-25 (X3.A/B/C Stage A 全部 eval 完成, 路线重大调整)
 >
 > **关联文档**:

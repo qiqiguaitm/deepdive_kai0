@@ -99,6 +99,12 @@ ln -sfn "$LOCAL_DIR" "$WORKSPACE_DIR"
 > - 已迁移 (2026-05-28 完成): `vis_v2_full`, `vis_v2_merged`, `vis_v2_merged_val`, `val_kai0_official`, `A_0423_0527` 原直接放 `Task_A/` 根, 现全部移入 `self_built/`; config.py / build 脚本 / volc+xvla yaml 引用已同步更新。
 > - **gf0 / gf3 / uc 三端均已按此规范对齐** (2026-05-28): 数据统一在 `kai0/data/Task_A/` 下 `kai0_base/kai0_dagger/kai0_advantage`(官方)+ `vis_base`(原始,仅-v2)+ `self_built/`(构建集);内部软链全部 retarget(dangling=0);config.py 对应各端路径(gf0 `/vePFS`、gf3 `/vePFS-North-E`、uc `/data/shared/.../kai0/data`)分别更新。uc 额外有 `vis_dagger/vis_autonomy/vis_inference`(原始自采,gf0/gf3 无)。各端 NFS/git-pull 机制详见 `uc_cluster_data_sharing_analysis.md`。
 
+> ⭐ **X-VLA EE6D 数据集存放规范 (2026-05-29 新增)**: pi0/openpi 用的 joint 数据集放 `kai0/data/Task_A/self_built/`(上条);**X-VLA 架构用的 EE6D 20D 数据集 (由 joint 转换而来) 一律放 `xvla/data/self_built/<name>/`**。
+> - 该目录由 `xvla/data/self_built/.gitignore` (`*` + `!.gitignore`) 保留文件夹、忽略全部数据内容(重 parquet 不入 git, 仅存盘)。
+> - 转换脚本: `train_scripts/xvla/data/joint_to_ee6d.py` (LeRobot parquet 14D joint→20D EE6D) / `convert_xvla_action.py` (hdf5)。⚠️ 转换约定 (rot6d interleaved 排布、gripper 二值化、无需 norm_stats) 见 `train_scripts/xvla/data/README.md`。
+> - 训练 config 在 `train_scripts/xvla/launch/xvla_train.py` 的 `CONFIGS` dict, dataset `root` 指向 `xvla/data/self_built/<name>` 绝对路径。
+> - 现有: `A_0423_0527` (1085 ep, 由 `kai0/.../self_built/A_0423_0527` joint 转换 + cnsh→uc TOS 传输)。
+
 
 ```
 deepdive_kai0/
