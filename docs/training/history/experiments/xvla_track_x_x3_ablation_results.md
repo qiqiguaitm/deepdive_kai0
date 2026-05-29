@@ -14,7 +14,7 @@
 > 2. **Gripper 未二值化** (原始米值) → BCE gripper loss 失效, 永不学闭合;
 > 3. **decode_frame** 用了当前 PyAV 不存在的 `frame.index` → 每帧返回**全 0 黑图** (vis/kai parquet 域受影响, xvla hdf5 cv2 解码不受影响)。
 >
-> rot6d 错排 + gripper 失效**确定**存在; 黑图取决于训练时 PyAV 版本 (待查)。**因此本文档全部 MAE 数字与 "X3.C 完胜 / Stage A net-negative" 等结论均建立在 buggy 数据上, 暂作废, 须用修复版重训后重新验证。** 详见 [`../../future_plans/plans/xvla_track_x_curriculum.md`](../../future_plans/plans/xvla_track_x_curriculum.md) §⚠️ + [`../../../../train_scripts/xvla/data/README.md`](../../../../train_scripts/xvla/data/README.md)。修复版首跑见 curriculum §5.6 (A_0423_0527)。
+> rot6d 错排 + gripper 失效**确定**存在; 黑图取决于训练时 PyAV 版本 (待查)。**因此本文档全部 MAE 数字与 "X3.C 完胜 / Stage A net-negative" 等结论均建立在 buggy 数据上, 暂作废, 须用修复版重训后重新验证。** 详见 [`../../future_plans/plans/xvla_track_x_curriculum.md`](../../future_plans/plans/xvla_track_x_curriculum.md) §⚠️ + [`../../../../train_scripts/xvla/data/README.md`](../../../../train_scripts/xvla/data/README.md)。**取代方案**: 2026-05-29 起跑**新版控制变量 X3 三件套** (configs `A_0423_0527`/`X3B_a0423`/`X3A_a0423`, 全用 A_0423_0527 作 vis + 统一 30k/5e-5, 唯一变量=域组成), 见 curriculum §0。本文档 (vis_v2_merged 版) 仅作历史溯源。
 >
 > **最近更新**: 2026-05-25 (X3.A/B/C Stage A 全部 eval 完成, 路线重大调整)
 >

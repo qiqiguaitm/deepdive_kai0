@@ -47,8 +47,16 @@ Entrypoint: |
     exit 13
   fi
   echo "[$(date)] TAC fix verified, launching training"
+  # CLI-override 数据路径到迁移后的新位置 (cnbj config 可能 stale, 用 override 不依赖 sync).
+  # 旧 dataset/KAI0/... 已被 2026-05-28 数据迁移清空 → 用 repo 内 self_built/.
+  TRAIN=/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_new_pure_200
+  VAL=/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_new_pure_200_val
+  [ -f "$TRAIN/norm_stats.json" ] || { echo "FATAL: train data missing $TRAIN" >&2; exit 13; }
+  [ -f "$VAL/meta/episodes.jsonl" ] || { echo "FATAL: val missing $VAL" >&2; exit 13; }
   exec python -u scripts/train.py pi05_flatten_fold_a_new_pure_200_tac_v2 \
       --exp-name pi05_flatten_fold_a_new_pure_200_tac_v2 \
+      --data.repo_id "$TRAIN" \
+      --inline-eval-val-root "$VAL" \
       --fsdp-devices 8 \
       --num-workers 16 \
       --no-wandb-enabled \
