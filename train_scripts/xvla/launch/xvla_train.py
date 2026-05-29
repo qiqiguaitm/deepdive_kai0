@@ -100,6 +100,39 @@ CONFIGS = {
         batch_size_per_gpu=8,
         vlm_lr_scale=0.1,
     ),
+    # ===== 控制变量新 X3 三件套 (2026-05-29): 三者 vis 数据统一 = A_0423_0527, 同超参 (30k/5e-5/
+    # warmup500/freeze1000), 唯一变量 = 域组成。X3.C = 上面的 `A_0423_0527` (vis-only)。=====
+    "X3B_a0423": dict(
+        # 新 X3.B: kai(base+dagger) + A_0423_0527(vis ×7)。测 kai 域对 vis 部署的贡献。
+        datasets=[
+            dict(root=f"{SB}/kai0_base", domain_id=19, prompt=PROMPT, weight=1.0),
+            dict(root=f"{SB}/kai0_dagger", domain_id=19, prompt=PROMPT, weight=1.0),
+            dict(root=f"{SB}/A_0423_0527", domain_id=20, prompt=PROMPT, weight=7.0),
+        ],
+        steps=30_000,
+        lr=5e-5,
+        warmup_steps=500,
+        freeze_steps=1000,
+        batch_size_per_gpu=8,
+        vlm_lr_scale=0.1,
+    ),
+    "X3A_a0423": dict(
+        # 新 X3.A: kai(base+dagger) + A_0423_0527(vis ×7) + xvla_soft_fold(×2)。测第三方 XVLA 域贡献。
+        datasets=[
+            dict(root=f"{SB}/kai0_base", domain_id=19, prompt=PROMPT, weight=1.0, type="parquet"),
+            dict(root=f"{SB}/kai0_dagger", domain_id=19, prompt=PROMPT, weight=1.0, type="parquet"),
+            dict(root=f"{SB}/A_0423_0527", domain_id=20, prompt=PROMPT, weight=7.0, type="parquet"),
+            dict(root="/data/shared/ubuntu/workspace/deepdive_kai0/xvla/data/xvla_soft_fold",
+                 action_cache_dir=f"{SB}/xvla_soft_fold_action_cache",
+                 domain_id=21, prompt=PROMPT, weight=2.0, type="hdf5"),
+        ],
+        steps=30_000,
+        lr=5e-5,
+        warmup_steps=500,
+        freeze_steps=1000,
+        batch_size_per_gpu=8,
+        vlm_lr_scale=0.1,
+    ),
 }
 
 # ==================== TRAIN ====================
