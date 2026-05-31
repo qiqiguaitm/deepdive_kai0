@@ -89,7 +89,7 @@ export CUDA_VISIBLE_DEVICES=0          # 容器只暴露 1 张 GPU = index 0
 
 ## 4. 部署包 (本次顺带产出)
 
-`_deploy_pytorch_pure200_50k/` (7.0G, repo 根) —— PyTorch plain 50k 真机 spot-check 包:
+`kai0/checkpoints/A_mirror200_pi05_pytorch_50k_deploy/` (7.0G, gitignore'd 因在 checkpoints/ 下) —— PyTorch plain 50k 真机 spot-check 包:
 - `model.safetensors` (size 校验 = 源) + `metadata.pt` + `assets/a_new_pure_200/norm_stats.json` (md5 `52f3bf5f…`, 与 JAX 源一致) + `DEPLOY_README.md`
 - 剥掉了 13.5G optimizer.pt (推理不需要)
 - ⚠️ caveat: PyTorch @50 比 JAX 差 4.1× + pure_200 仅 2 天数据 OOD-prone → 这是 spot-check 不是最优部署候选;最优折叠候选是 JAX `task_a_pure200_base_pi05_step49999` (@50=0.0085)

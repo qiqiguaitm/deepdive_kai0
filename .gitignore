@@ -63,6 +63,11 @@ ros2_ws/build/
 node_modules/
 **/node_modules/
 **/.xla_cache/
-<<<<<<< HEAD
+
+# ===== Claude / editor =====
 .claude/
 *.bak
+*.bak.*
+
+# ===== scratch / 本地产物 (eval 探针, 部署包, soup ckpt 等) =====
+/_*
