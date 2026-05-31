@@ -102,7 +102,7 @@ export CUDA_VISIBLE_DEVICES=0          # 容器只暴露 1 张 GPU = index 0
 |---|---|---|
 | ⭐⭐⭐ | 逐行对比 `pi0_pytorch.sample_actions` vs JAX `pi0.sample_actions` denoising loop (num_steps / dt 符号 / noise→action 方向) | gap 随 horizon 放大 → 最可能是采样器 |
 | ⭐⭐ | 关掉 PyTorch train-time image aug (crop/rotate/color) 重训一小段,看 @1 是否回到 ~0.0066 | aug 拉低 in-distribution 锐度? |
-| — | 真机 spot-check `_deploy_pytorch_pure200_50k` | 确认 offline gap 是否传导到真机 |
+| — | 真机 spot-check `kai0/checkpoints/A_mirror200_pi05_pytorch_50k_deploy` | 确认 offline gap 是否传导到真机 |
 
 ---
 
