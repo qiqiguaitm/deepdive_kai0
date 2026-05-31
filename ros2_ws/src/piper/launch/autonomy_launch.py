@@ -220,6 +220,19 @@ def generate_launch_description():
     transport_arg = DeclareLaunchArgument('transport',
         default_value='ws',
         description='V1 path: ws (default, backward compat) | shm (POSIX shm, low-latency)')
+    # ── EE-mode (Cartesian-output models, e.g. X-VLA) — multimodal protocol §B.6 ──
+    # joint  : server emits [H,14] joint, publish directly (default, legacy path).
+    # ee_pose: server emits [H,16] world EE (action_kind="ee"); node IK→joints (link6,
+    #          R1) before buffering. See docs/deployment/inference/xvla_inference_bringup.md.
+    execution_mode_arg = DeclareLaunchArgument('execution_mode',
+        default_value='joint',
+        description='joint (default) | ee_pose (X-VLA: server emits world EE, node IK→joint)')
+    urdf_path_arg = DeclareLaunchArgument('urdf_path',
+        default_value='',
+        description='ee_pose mode: URDF path; empty = auto-resolve calib/piper_local.urdf')
+    calibration_yaml_arg = DeclareLaunchArgument('calibration_yaml',
+        default_value='',
+        description='ee_pose mode: calibration YAML (T_world_base*); empty = auto-resolve config/calibration.yml')
     # ── LeRobot dataset recorder ──
     # Writes Task_X/autonomy/<date>/{data,videos,meta}/ in the same format as
     # teleop output → start_autonomy.sh --replay --episode <N> consumes it
@@ -252,6 +265,7 @@ def generate_launch_description():
             ('/puppet/arm_status', '/puppet/arm_status_left'),
             ('/puppet/end_pose', '/puppet/end_pose_left'),
             ('/puppet/end_pose_euler', '/puppet/end_pose_euler_left'),
+            ('/pos_cmd', '/pos_cmd_left'),   # ③ 固件笛卡尔 IK: 按臂分 PosCmd 话题
         ],
     )
 
@@ -266,6 +280,7 @@ def generate_launch_description():
             ('/puppet/arm_status', '/puppet/arm_status_right'),
             ('/puppet/end_pose', '/puppet/end_pose_right'),
             ('/puppet/end_pose_euler', '/puppet/end_pose_euler_right'),
+            ('/pos_cmd', '/pos_cmd_right'),   # ③ 固件笛卡尔 IK: 按臂分 PosCmd 话题
         ],
     )
 
@@ -323,6 +338,11 @@ def generate_launch_description():
             'pipelined_obs': ParameterValue(LaunchConfiguration('pipelined_obs'), value_type=bool),
             # C.4 SHM transport: str-typed (ws|shm)
             'transport': ParameterValue(LaunchConfiguration('transport'), value_type=str),
+            # EE-mode (X-VLA): execution_mode=ee_pose engages the action_kind="ee"
+            # branch (server world EE → node IK→joint). joint = legacy passthrough.
+            'execution_mode': ParameterValue(LaunchConfiguration('execution_mode'), value_type=str),
+            'urdf_path': ParameterValue(LaunchConfiguration('urdf_path'), value_type=str),
+            'calibration_yaml': ParameterValue(LaunchConfiguration('calibration_yaml'), value_type=str),
         }],
     )
 
@@ -432,6 +452,7 @@ def generate_launch_description():
         inference_rate_arg, latency_k_arg, min_smooth_steps_arg,
         cam_fps_arg, enable_head_depth_arg, enable_left_depth_arg, enable_right_depth_arg,
         fast_obs_pipeline_arg, pipelined_obs_arg, transport_arg,
+        execution_mode_arg, urdf_path_arg, calibration_yaml_arg,
         record_enable_arg, record_task_arg, record_prompt_arg, record_subset_arg,
         cleanup,
         piper_left_delayed, piper_right_delayed,

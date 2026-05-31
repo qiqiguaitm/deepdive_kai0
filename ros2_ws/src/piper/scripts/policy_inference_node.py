@@ -122,6 +122,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from cv_bridge import CvBridge
 from sensor_msgs.msg import Image, JointState
 from std_msgs.msg import Bool, Header
+from piper_msgs.msg import PosCmd   # ③ 固件笛卡尔 IK: EE 位姿命令 → arm_reader EndPoseCtrl
 from scipy.spatial.transform import Rotation as R_
 
 
@@ -394,6 +395,15 @@ class PolicyInferenceNode(Node):
         self.declare_parameter('publish_rate', 30)
         self.declare_parameter('inference_rate', 3.0)
         self.declare_parameter('chunk_size', 50)
+        # ② 开环整 chunk (上游 SoftFold)。但主机 scipy IK ~0.4s + 30步快播下开环必见底卡顿,
+        # 故默认【关】, 改走 RTC 式: 连续推理 (buffer 不见底) + overlap-blend + commanded-proprio。
+        # 需要严格开环 (硬件够快/低 publish_rate) 时再开 open_loop_chunk:=true。
+        self.declare_parameter('open_loop_chunk', False)
+        self.declare_parameter('open_loop_min_remaining', 8)
+        # RTC 式 commanded-proprio: execute 时用【上次下发的关节命令】当 proprio (而非实测),
+        # 去传感噪声/臂滞后 → 连续推理下连续 chunk 一致 (上游平滑机制的"正确时序版": 喂刚下发
+        # 的命令而非 chunk 末步, 连续模式不前瞻、不脱离进度)。images 仍为实测。
+        self.declare_parameter('proprio_cmd_feedback', True)
         self.declare_parameter('latency_k', 8)
         self.declare_parameter('min_smooth_steps', 8)
         self.declare_parameter('decay_alpha', 0.25)
@@ -434,6 +444,13 @@ class PolicyInferenceNode(Node):
         # ≪ Piper PD ~100ms). Validated 2026-05-25 on vis_v2_full (α=0.5: state
         # jiggle -65%, jerk95_state -29%); α retuned to 0.7 pending re-validation.
         self.declare_parameter('publish_smooth_alpha', 1.0)
+        # Experiment-1a (closed-loop oscillation fix): low-pass the STATE fed to
+        # the model, to break the positive-feedback loop "state jitter → action
+        # jitter → state jitter" that drives the ~1Hz limit-cycle observed on
+        # A_0423_0527 (2026-05-29 diag). obs_state[t] := β·raw + (1-β)·prev_obs.
+        # β=1.0 = OFF (obs bit-identical legacy). Gripper dims (6,13) are SKIPPED
+        # (binary; smoothing traps half-grasp). Reset on observe→execute via flush.
+        self.declare_parameter('obs_state_lowpass_alpha', 1.0)
         # NOTE: mask_prefix_delay is declared upstream in pi0_rtc.py:244 but
         # not exposed here — forwarding a Python bool through jit triggers
         # TracerBoolConversionError at pi0_rtc.py:323. Left as function default
@@ -449,6 +466,26 @@ class PolicyInferenceNode(Node):
         self.declare_parameter('execute_mode', False)
         self.declare_parameter('enable_rerun', False)
         self.declare_parameter('calibration_config', '')
+
+        # ── EE-mode params (multimodal protocol §B.6 — for Cartesian-output models
+        #    e.g. X-VLA; see docs/deployment/inference/xvla_inference_bringup.md §4 C)
+        #    'joint'  : server emits [H,14] joint, publish directly (default, legacy).
+        #    'ee_pose': server emits [H,16] world EE (action_kind="ee"); IK to joints
+        #               (link6, R1) BEFORE buffering — downstream stays joint-domain. ──
+        self.declare_parameter('execution_mode', 'joint')   # joint | ee_pose
+        self.declare_parameter('urdf_path', '')             # auto-resolve calib/piper_local.urdf
+        self.declare_parameter('calibration_yaml', '')      # auto-resolve config/calibration.yml
+        # EE-mode IK 调参 (ee_pose only). 真机实测: 失败几乎全是位置够不到 (20-40mm),
+        # 硬冻结→卡顿, 够不到时解翻分支→相邻步跳 ~100°. 见 xvla_inference_bringup §IK调参.
+        #   策略: 纯位姿 IK(可达目标精确)+ 软接受(5mm<pr<=soft_pos 的最近可达解也用, 止抖)
+        #         + 跳变拒绝(相对种子跳 >max_jump 视为翻分支→hold, 止姿态乱)。
+        self.declare_parameter('ee_ik_seed_weight', 0.0)    # 种子软约束权重 (默认 0=纯位姿; >0 会损精度)
+        self.declare_parameter('ee_ik_soft_pos', 0.04)      # 软接受位置阈值 m (超此判够不到→hold)
+        self.declare_parameter('ee_ik_soft_rot', 0.12)      # 软接受姿态阈值 rad (~6.9°)
+        self.declare_parameter('ee_ik_max_jump', 0.15)      # 关节单步限速 rad (~8.6°/step; clamp 防翻飞且不冻结)
+        # ③ EE 控制后端: 'firmware'=发 PosCmd → 固件 EndPoseCtrl 做笛卡尔 IK (上游同款, 无主机 IK
+        # → 无延迟/分支翻转/rate-limit 接缝踢, 丝滑); 'joint'=主机 PiperDHIK 反解到关节 (旧路径, 备用)。
+        self.declare_parameter('ee_ctrl', 'firmware')
 
         # ── Replay mode params (P1) ──
         # 'inference' = call policy.infer() (default, existing path)
@@ -468,6 +505,10 @@ class PolicyInferenceNode(Node):
         self.prompt = self.get_parameter('prompt').value
         self.publish_rate = self.get_parameter('publish_rate').value
         self.inference_rate = self.get_parameter('inference_rate').value
+        self._open_loop_chunk = bool(self.get_parameter('open_loop_chunk').value)
+        self._open_loop_min_remaining = int(self.get_parameter('open_loop_min_remaining').value)
+        self._last_cycle_s = 0.6   # 实测整周期 (infer+IK+integrate) 时长, 自适应 gate 用; 初值保守
+        self._proprio_cmd_fb = bool(self.get_parameter('proprio_cmd_feedback').value)
         self.chunk_size = self.get_parameter('chunk_size').value
         self.latency_k = self.get_parameter('latency_k').value
         self.min_smooth_steps = self.get_parameter('min_smooth_steps').value
@@ -513,6 +554,11 @@ class PolicyInferenceNode(Node):
         self._publish_smooth_alpha = float(self.get_parameter('publish_smooth_alpha').value)
         if self._publish_smooth_alpha < 1.0:
             self.get_logger().info(f'EMA post-process active: alpha={self._publish_smooth_alpha}')
+        # Exp-1a: obs-state low-pass (break closed-loop feedback). prev buffer reset on flush.
+        self._obs_state_lp_alpha = float(self.get_parameter('obs_state_lowpass_alpha').value)
+        self._obs_state_lp_prev = None
+        if self._obs_state_lp_alpha < 1.0:
+            self.get_logger().info(f'obs-state low-pass active: alpha={self._obs_state_lp_alpha} (break feedback loop)')
 
         # B1 client-side latency profile (opt-in via KAI0_LATENCY_PROFILE=1).
         # Writes one CSV row per inference cycle to /tmp/kai0_latency_<pid>.csv with
@@ -621,6 +667,24 @@ class PolicyInferenceNode(Node):
         self.pub_replay_progress = self.create_publisher(
             Float32MultiArray, '/replay_progress', 5)
 
+        # ── EE-mode kinematics (only when execution_mode=ee_pose) ──
+        # Lives here so the legacy joint path is byte-identical when off (no IK,
+        # no extra publishers, no PiperIK import). See _setup_ee_kinematics.
+        self._execution_mode = self.get_parameter('execution_mode').value
+        self._ik = None            # calib.piper_dh_ik.PiperDHIK (CalFK DH link6, 训练同模型)
+        self._T_world_baseL = None
+        self._T_world_baseR = None
+        self._ee_T_world_baseL = None  # ee-path dedicated (decoupled from rerun-viz attrs above)
+        self._ee_T_world_baseR = None
+        self._ee_last_good = None  # [14] last successful IK solve (hold-on-failure seed)
+        self._ee_ctrl = 'joint'    # ③ 默认值; ee_pose 时在 _setup_ee_kinematics 读真值
+        self.pub_ee_left = None
+        self.pub_ee_right = None
+        self.pub_pos_left = None   # ③ PosCmd → /pos_cmd_{left,right} → 固件 EndPoseCtrl
+        self.pub_pos_right = None
+        if self._execution_mode == 'ee_pose':
+            self._setup_ee_kinematics()
+
         # ── Rerun visualization (conditional) ──
         # Rerun set_time+log is non-atomic. All ROS2 callbacks/timers MUST share
         # a single thread. _rr_require_single_thread is checked in on_configure
@@ -716,6 +780,10 @@ class PolicyInferenceNode(Node):
                     self.latency_k = int(p.value)
                 elif p.name == 'min_smooth_steps':
                     self.min_smooth_steps = int(p.value)
+                elif p.name == 'obs_state_lowpass_alpha':
+                    self._obs_state_lp_alpha = float(p.value)
+                    self._obs_state_lp_prev = None
+                    self.get_logger().info(f'obs_state_lowpass_alpha → {self._obs_state_lp_alpha}')
                 elif p.name == 'decay_alpha':
                     self.decay_alpha = float(p.value)
                     self.stream_buffer.decay_alpha = float(p.value)
@@ -1459,6 +1527,9 @@ class PolicyInferenceNode(Node):
         # a stale trajectory). Next call falls back to base_step (pi0_rtc.py:351).
         with self._rtc_lock:
             self._rtc_prev_chunk = None
+        # Exp-1a: reset obs-state low-pass so the first post-observe frame seeds
+        # from a fresh state (not smoothed against observe-period state).
+        self._obs_state_lp_prev = None
 
     def _keyboard_listener(self):
         """Non-blocking keyboard listener for interactive control.
@@ -2072,6 +2143,33 @@ class PolicyInferenceNode(Node):
             np.array(joint_right_msg.position),
         ), axis=0)
 
+        # Exp-1a: low-pass the state fed to the model to break the closed-loop
+        # positive feedback (state jitter → action jitter → state jitter → ~1Hz
+        # limit cycle). β=1.0 → no-op (bit-identical legacy). Gripper dims (6,13)
+        # bypass smoothing (binary; EMA traps half-grasp).
+        if self._obs_state_lp_alpha < 1.0:
+            b = self._obs_state_lp_alpha
+            if self._obs_state_lp_prev is None or self._obs_state_lp_prev.shape != qpos.shape:
+                self._obs_state_lp_prev = qpos.copy()
+            sm = b * qpos + (1.0 - b) * self._obs_state_lp_prev
+            if qpos.shape[0] >= 14:
+                sm[6] = qpos[6]; sm[13] = qpos[13]  # keep raw gripper
+            self._obs_state_lp_prev = sm.copy()
+            qpos = sm
+
+        # RTC 式 commanded-proprio: execute 时用【上次下发的关节命令】当 proprio, 而非实测。
+        # 去传感噪声/臂滞后 → 连续推理下 chunk 一致 (上游 SoftFold 平滑机制; 喂"刚下发"而非
+        # "chunk 末步" → 连续模式正确时序、不前瞻、随臂推进不卡死)。images 仍用实测。
+        # 首帧 (last_published=None) 或 observe 时回退实测。EE-mode 下 server 由此 14D 关节算 EE6D proprio。
+        # 注: ③ firmware 模式下 _last_published_action 是 EE-cmd (非关节), 不能当 joint proprio →
+        # 该模式回退实测关节 (固件平滑跟随, 实测本就干净)。仅 joint-IK 模式用 commanded-proprio。
+        if (self._proprio_cmd_fb and self._execution_enabled
+                and self._ee_ctrl != 'firmware'
+                and self._last_published_action is not None):
+            lp = np.asarray(self._last_published_action, dtype=float)
+            if lp.shape[0] >= 14:
+                qpos = lp[:14].copy()
+
         obs = {
             'state': qpos,
             'images': {
@@ -2205,6 +2303,18 @@ class PolicyInferenceNode(Node):
             if self._replay_mode == 'idle':
                 time.sleep(0.1)
                 continue
+            # ② 开环整 chunk: execute 时, 当前 chunk 没排到阈值就不重推。让臂跑完大部分
+            # chunk → 重推时用新图像 (任务推进) + ① pred_proprio≈当前。observe 不 gate。
+            # 阈值【自适应】: 预留 = 实测整周期(infer+IK+integrate)会排空的步数 + 余量,
+            # 保证新 chunk 在 buffer 见底前到达 → 边界无停顿 (不必手调 min_remaining)。
+            if self._open_loop_chunk and self._execution_enabled:
+                reserve = int(np.ceil(self._last_cycle_s * float(self.publish_rate))) + 3
+                thr = max(self._open_loop_min_remaining, reserve)
+                with self.stream_buffer.lock:
+                    remaining = len(self.stream_buffer.cur_chunk)
+                if remaining > thr:
+                    time.sleep(0.01)
+                    continue
             try:
                 t_obs_start = time.monotonic()
                 # A.2 异步流水线 (§7.9): worker 在后台预备 obs, main 直接取.
@@ -2272,6 +2382,22 @@ class PolicyInferenceNode(Node):
                 actions = result.get('actions', None)
                 infer_ms = (t_ws_recv - t_start) * 1000
                 self._last_infer_ms = infer_ms
+
+                # EE-mode: server emits [H,16] world EE (action_kind="ee"). IK to
+                # [H,14] joint (link6, R1) HERE — everything downstream (RTC snapshot,
+                # integrate_new_chunk, smoothing, jump-protect, publish) stays
+                # joint-domain → legacy joint path untouched. (xvla_inference_bringup §4 C)
+                if (self._execution_mode == 'ee_pose' and isinstance(result, dict)
+                        and result.get('action_kind') == 'ee'
+                        and actions is not None and len(actions) > 0):
+                    ee_chunk = np.asarray(actions, dtype=np.float32)
+                    self._publish_ee_monitor(ee_chunk)
+                    if self._ee_ctrl == 'firmware':
+                        # ③ 不做主机 IK: 转 base-frame [xyz,rpy,grip]×2 (14D), 下发 PosCmd → 固件 IK。
+                        # 仍走 stream_buffer/publish 复用 RTC 连续 cadence; 单位为 EE (m/rad)。
+                        actions = self._ee_chunk_to_pose(ee_chunk)   # [H,14] EE-cmd
+                    else:
+                        actions = self._ee_chunk_to_joint(ee_chunk)  # [H,14] joint (host IK)
 
                 if actions is not None and len(actions) > 0:
                     # Always snapshot the latest chunk for (a) RTC guidance on the
@@ -2420,12 +2546,18 @@ class PolicyInferenceNode(Node):
                         except Exception as e:
                             self.get_logger().debug(f'Rerun prediction log error: {e}')
 
+                # 记录整周期时长 (infer+IK+integrate), 供 ② 自适应 gate 预留步数。
+                # 仅 infer 迭代到达此处 (gate-poll 迭代已 continue)。
+                self._last_cycle_s = time.monotonic() - t_start
+
                 # Re-read inference_rate each iteration so rtc_apply.sh / ros2
                 # param set takes effect without restart.
-                elapsed = time.monotonic() - t_start
-                period_live = 1.0 / max(0.1, float(self.inference_rate))
-                sleep_time = max(0, period_live - elapsed)
-                time.sleep(sleep_time)
+                # ② 开环执行时不按 inference_rate 节流 —— 由顶部 buffer gate 决定何时重推。
+                if not (self._open_loop_chunk and self._execution_enabled):
+                    elapsed = time.monotonic() - t_start
+                    period_live = 1.0 / max(0.1, float(self.inference_rate))
+                    sleep_time = max(0, period_live - elapsed)
+                    time.sleep(sleep_time)
 
             except Exception as e:
                 import traceback
@@ -2443,6 +2575,13 @@ class PolicyInferenceNode(Node):
             return
         act = self.stream_buffer.pop_next_action()
         if act is None:
+            return
+
+        # ③ firmware 模式: act 是 EE-cmd [xyz,rpy,grip]×2 (非关节)。直接发 PosCmd → 固件 IK,
+        # 跳过下面关节域的 jump-protect/EMA (单位不同会误判); 安全护栏在 _publish_pos_cmd 内 (xyz 跳变)。
+        if self._execution_mode == 'ee_pose' and self._ee_ctrl == 'firmware':
+            self._publish_pos_cmd(act)
+            self._last_published_action = act.copy()
             return
 
         # Jump protection: compare against current joint state (first action after
@@ -2512,6 +2651,204 @@ class PolicyInferenceNode(Node):
         msg.name = [f'left_j{i}' for i in range(7)] + [f'right_j{i}' for i in range(7)]
         msg.position = act.tolist()
         self.pub_action.publish(msg)
+
+    # ──────────────────────────────────────────────────────────────────────
+    # EE-mode (multimodal protocol §B.5 / xvla_inference_bringup §4 C)
+    # Active only when execution_mode=ee_pose. Server emits [H,16] world EE;
+    # we IK to [H,14] joint (link6, R1) BEFORE the StreamActionBuffer, so all
+    # smoothing/RTC/jump-protection/publish stay joint-domain — legacy joint
+    # path is byte-identical when off.
+    # ──────────────────────────────────────────────────────────────────────
+    def _setup_ee_kinematics(self):
+        import os as _os
+        import sys as _sys
+        repo = _os.path.dirname(_os.path.dirname(_os.path.dirname(
+            _os.path.dirname(_os.path.abspath(__file__)))))  # ros2_ws/src/piper/scripts → repo
+        calib_dir = next((c for c in (_os.path.join(repo, 'calib'),
+                                      '/data1/tim/workspace/deepdive_kai0/calib')
+                          if _os.path.isfile(_os.path.join(c, 'piper_dh_ik.py'))), None)
+        if calib_dir is None:
+            self.get_logger().error('[ee] calib/piper_dh_ik.py not found → fallback to joint passthrough')
+            self._execution_mode = 'joint'; return
+        if calib_dir not in _sys.path:
+            _sys.path.insert(0, calib_dir)
+        try:
+            # DH-model IK (CalFK link6) — 与训练 joint_to_ee6d 同模型; ikpy/URDF 有 ~5cm
+            # 偏差不可用 (xvla_inference_bringup §4 C)。
+            from piper_dh_ik import PiperDHIK
+            self._ik = PiperDHIK()
+            self._ee_seed_w = float(self.get_parameter('ee_ik_seed_weight').value)
+            self._ee_soft_pos = float(self.get_parameter('ee_ik_soft_pos').value)
+            self._ee_soft_rot = float(self.get_parameter('ee_ik_soft_rot').value)
+            self._ee_max_jump = float(self.get_parameter('ee_ik_max_jump').value)
+            self._ee_ctrl = str(self.get_parameter('ee_ctrl').value)
+            import yaml as _yaml
+            # NOTE: `repo` (from __file__ dirname-walk) lands on ros2_ws/install under
+            # colcon symlink-install, so repo/config/calibration.yml does not exist.
+            # Derive from calib_dir (robustly resolved above; its parent is the repo root).
+            cyaml = (self.get_parameter('calibration_yaml').value
+                     or _os.path.join(_os.path.dirname(calib_dir), 'config', 'calibration.yml'))
+            tfs = _yaml.safe_load(open(cyaml)).get('transforms', {})
+            # Dedicated attrs (NOT self._T_world_base{L,R}): the Rerun-viz init block in
+            # __init__ runs AFTER this setup and re-defaults self._T_world_base{L,R}=None,
+            # then only re-fills them via _load_calibration_and_fk when enable_rerun=True.
+            # Under autonomy_launch rerun viz is a SEPARATE node so policy_inference's own
+            # enable_rerun=False → those stay None → inv(None) crash. Decouple entirely.
+            self._ee_T_world_baseL = np.array(tfs['T_world_baseL'], dtype=np.float64)
+            self._ee_T_world_baseR = np.array(tfs['T_world_baseR'], dtype=np.float64)
+        except Exception as e:
+            self.get_logger().error(f'[ee] kinematics/calib init failed: {e} → fallback to joint')
+            self._execution_mode = 'joint'; self._ik = None; return
+        from geometry_msgs.msg import PoseStamped  # noqa: F401 (lazy, ee-only)
+        from std_msgs.msg import Float32           # noqa: F401
+        self.pub_ee_left = self.create_publisher(PoseStamped, '/policy/actions_ee_left', 10)
+        self.pub_ee_right = self.create_publisher(PoseStamped, '/policy/actions_ee_right', 10)
+        self.pub_grip_left = self.create_publisher(Float32, '/policy/actions_gripper_left', 10)
+        self.pub_grip_right = self.create_publisher(Float32, '/policy/actions_gripper_right', 10)
+        # ③ firmware 模式: PosCmd → /pos_cmd_{left,right} (launch remap 到各臂 arm_reader → EndPoseCtrl)
+        self.pub_pos_left = self.create_publisher(PosCmd, '/pos_cmd_left', 10)
+        self.pub_pos_right = self.create_publisher(PosCmd, '/pos_cmd_right', 10)
+        self.get_logger().info(
+            f'[ee] ee_pose ready: ee_ctrl={self._ee_ctrl} '
+            f'({"firmware EndPoseCtrl (无主机IK)" if self._ee_ctrl=="firmware" else "host PiperDHIK→joint"}), calib={cyaml}')
+
+    def _current_joints14(self):
+        with self._sensor_lock:
+            jl = self._joint_left_deque[-1] if self._joint_left_deque else None
+            jr = self._joint_right_deque[-1] if self._joint_right_deque else None
+        if jl is None or jr is None:
+            return None
+        ql, qr = np.array(jl.position[:7]), np.array(jr.position[:7])
+        if len(ql) < 7 or len(qr) < 7:
+            return None
+        return np.concatenate([ql, qr]).astype(np.float64)
+
+    def _ee8_to_base_link6(self, ee8, T_world_base):
+        """8D world [xyz, quat_wxyz, grip] → T_base_link6 (4×4)."""
+        from scipy.spatial.transform import Rotation
+        xyz = np.asarray(ee8[:3], dtype=np.float64)
+        q = np.asarray(ee8[3:7], dtype=np.float64)  # wxyz
+        Rm = Rotation.from_quat([q[1], q[2], q[3], q[0]]).as_matrix()
+        Tw = np.eye(4); Tw[:3, :3] = Rm; Tw[:3, 3] = xyz
+        return np.linalg.inv(T_world_base) @ Tw
+
+    def _ee_chunk_to_pose(self, ee_chunk):
+        """③ [H,16] world EE → [H,14] base-frame EE-cmd [xyz(m),rpy(rad),grip(m)]×2。
+        发 PosCmd → 固件 EndPoseCtrl (无主机 IK)。rpy 用 'xyz' 欧拉 (= CalFK/固件约定, 已 frame 验证)。"""
+        from scipy.spatial.transform import Rotation
+        H = ee_chunk.shape[0]
+        out = np.zeros((H, 14), dtype=np.float32)
+        for h in range(H):
+            T6L = self._ee8_to_base_link6(ee_chunk[h, 0:8], self._ee_T_world_baseL)
+            T6R = self._ee8_to_base_link6(ee_chunk[h, 8:16], self._ee_T_world_baseR)
+            out[h, 0:3] = T6L[:3, 3]
+            out[h, 3:6] = Rotation.from_matrix(T6L[:3, :3]).as_euler('xyz')
+            out[h, 6] = ee_chunk[h, 7]      # L gripper (m)
+            out[h, 7:10] = T6R[:3, 3]
+            out[h, 10:13] = Rotation.from_matrix(T6R[:3, :3]).as_euler('xyz')
+            out[h, 13] = ee_chunk[h, 15]    # R gripper (m)
+        return out
+
+    def _publish_pos_cmd(self, act):
+        """③ 把一帧 EE-cmd [xyz,rpy,grip]×2 发成 PosCmd → /pos_cmd_{left,right} → 固件 EndPoseCtrl。
+        简单安全护栏: 相对上次命令 xyz 跳变 > 8cm 则丢弃该帧 (防异常目标突跳)。"""
+        if self.pub_pos_left is None:
+            return
+        prev = self._last_published_action
+        if prev is not None and len(prev) >= 14:
+            dL = float(np.linalg.norm(np.asarray(act[0:3]) - np.asarray(prev[0:3])))
+            dR = float(np.linalg.norm(np.asarray(act[7:10]) - np.asarray(prev[7:10])))
+            if max(dL, dR) > 0.08:
+                self.get_logger().warn(f'[ee-fw] PosCmd xyz 跳变 {max(dL,dR)*1000:.0f}mm > 80mm → 丢帧')
+                return
+        for pub, a in ((self.pub_pos_left, act[0:7]), (self.pub_pos_right, act[7:14])):
+            m = PosCmd()
+            m.x, m.y, m.z = float(a[0]), float(a[1]), float(a[2])
+            m.roll, m.pitch, m.yaw = float(a[3]), float(a[4]), float(a[5])
+            m.gripper = float(a[6])
+            pub.publish(m)
+        # 首发 + 每 ~3s 节流确认 (verify firmware path live; 单位 m/rad)
+        self._ee_fw_pub_n = getattr(self, '_ee_fw_pub_n', 0) + 1
+        if self._ee_fw_pub_n == 1 or self._ee_fw_pub_n % int(max(1, self.publish_rate * 3)) == 0:
+            self.get_logger().info(
+                f'[ee-fw] PosCmd #{self._ee_fw_pub_n} → /pos_cmd_{{l,r}}: '
+                f'L xyz={np.round(act[0:3],3)} rpy={np.round(np.degrees(act[3:6]),0)} g={act[6]:.3f} | '
+                f'R xyz={np.round(act[7:10],3)} g={act[13]:.3f}')
+
+    def _ee_chunk_to_joint(self, ee_chunk):
+        """[H,16] world EE → [H,14] joint via per-step seeded DH IK (link6). None if no seed."""
+        seed = self._ee_last_good if self._ee_last_good is not None else self._current_joints14()
+        if seed is None:
+            self.get_logger().warn('[ee] no joint seed yet (waiting /puppet/joint_*) — drop chunk')
+            return None
+        H = ee_chunk.shape[0]
+        out = np.zeros((H, 14), dtype=np.float32)
+        qL, qR = seed[:6].copy(), seed[7:13].copy()
+        w = getattr(self, '_ee_seed_w', 0.0)
+        soft_pos = getattr(self, '_ee_soft_pos', 0.04)
+        soft_rot = getattr(self, '_ee_soft_rot', 0.12)
+        max_jump = getattr(self, '_ee_max_jump', 0.15)
+
+        # 解一步: 纯位姿 IK(可达目标精确)+ 关节空间限速(rate-limit)。返回 (q, used, far)
+        #   每步把关节变化 clamp 到 ±max_jump → 既不翻飞(有界, 止姿态乱)也不冻结
+        #   (始终朝目标 slew, 止断续)。seed 用上一步限速后的 q → 无级联冻结。
+        #   far = 位姿残差超软阈(模型目标真够不到), 仅作诊断计数, 不改变限速行为。
+        def _step(T6, qseed):
+            s, _hard = self._ik.solve(T6, qseed, seed_weight=w)
+            pr, rr_ = self._ik.last_pos_res, self._ik.last_rot_res
+            far = (pr > soft_pos or rr_ > soft_rot)
+            delta = np.clip(s - qseed, -max_jump, max_jump)
+            return qseed + delta, (not far), far
+
+        failL = failR = 0                  # 硬容差 (5mm) 内才算 0; 这里统计真 hold 数
+        pres_max = rres_max = 0.0
+        jumpL = jumpR = 0.0
+        prevL = qL.copy(); prevR = qR.copy()
+        for h in range(H):
+            T6L = self._ee8_to_base_link6(ee_chunk[h, 0:8], self._ee_T_world_baseL)
+            qL, usedL, heldL = _step(T6L, qL)
+            if heldL:
+                failL += 1
+            pres_max = max(pres_max, self._ik.last_pos_res); rres_max = max(rres_max, self._ik.last_rot_res)
+            jumpL = max(jumpL, float(np.abs(qL - prevL).max())); prevL = qL.copy()
+
+            T6R = self._ee8_to_base_link6(ee_chunk[h, 8:16], self._ee_T_world_baseR)
+            qR, usedR, heldR = _step(T6R, qR)
+            if heldR:
+                failR += 1
+            pres_max = max(pres_max, self._ik.last_pos_res); rres_max = max(rres_max, self._ik.last_rot_res)
+            jumpR = max(jumpR, float(np.abs(qR - prevR).max())); prevR = qR.copy()
+
+            out[h, :6] = qL; out[h, 6] = ee_chunk[h, 7]
+            out[h, 7:13] = qR; out[h, 13] = ee_chunk[h, 15]
+        self._ee_last_good = out[-1].astype(np.float64)
+        spanL = float(np.ptp(ee_chunk[:, 0:3], axis=0).max())
+        spanR = float(np.ptp(ee_chunk[:, 8:11], axis=0).max())
+        bndL = float(np.abs(out[0, :6] - seed[:6]).max())
+        bndR = float(np.abs(out[0, 7:13] - seed[7:13]).max())
+        self.get_logger().info(
+            f'[ee-diag] far(unreach) L{failL}/{H} R{failR}/{H} | res pos<={pres_max*1000:.0f}mm rot<={np.degrees(rres_max):.1f}deg '
+            f'| eeSpan L{spanL*1000:.0f} R{spanR*1000:.0f}mm | jump/step L{np.degrees(jumpL):.0f} R{np.degrees(jumpR):.0f}deg '
+            f'| bnd L{np.degrees(bndL):.0f} R{np.degrees(bndR):.0f}deg | softPos={soft_pos*1000:.0f}mm rateLim={np.degrees(max_jump):.0f}deg/step')
+        return out
+
+    def _publish_ee_monitor(self, ee_chunk):
+        """Publish ee_chunk[0] world pose + gripper for monitoring (control still via joint)."""
+        if self.pub_ee_left is None:
+            return
+        from geometry_msgs.msg import PoseStamped
+        from std_msgs.msg import Float32
+        now = self.get_clock().now().to_msg()
+        e = ee_chunk[0]
+        for pub, gpub, base, gi in ((self.pub_ee_left, self.pub_grip_left, 0, 7),
+                                    (self.pub_ee_right, self.pub_grip_right, 8, 15)):
+            ps = PoseStamped()
+            ps.header.stamp = now; ps.header.frame_id = 'world'
+            ps.pose.position.x = float(e[base + 0]); ps.pose.position.y = float(e[base + 1])
+            ps.pose.position.z = float(e[base + 2])
+            ps.pose.orientation.w = float(e[base + 3]); ps.pose.orientation.x = float(e[base + 4])
+            ps.pose.orientation.y = float(e[base + 5]); ps.pose.orientation.z = float(e[base + 6])
+            pub.publish(ps); gpub.publish(Float32(data=float(e[gi])))
 
 
 def main():

@@ -237,7 +237,7 @@ class C_PiperRosNode(Node):
         rx = round(pos_data.roll * 1000 * factor)
         ry = round(pos_data.pitch * 1000 * factor)
         rz = round(pos_data.yaw * 1000 * factor)
-        self.get_logger().info(f"Received PosCmd: x={x} y={y} z={z} roll={rx} pitch={ry} yaw={rz} gripper={pos_data.gripper}")
+        self.get_logger().debug(f"Received PosCmd: x={x} y={y} z={z} roll={rx} pitch={ry} yaw={rz} gripper={pos_data.gripper}")
         if self.GetEnableFlag():
             self.piper.MotionCtrl_1(0x00, 0x00, 0x00)
             self.piper.MotionCtrl_2(0x01, 0x00, 50)

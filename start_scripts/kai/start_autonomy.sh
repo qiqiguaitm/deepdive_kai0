@@ -40,6 +40,7 @@ EXECUTION_MODE="joint"        # joint | ee_pose
 ENABLE_DEPTH_INPUT="false"
 ENABLE_EE_POSE_INPUT="false"
 WS_PORT="8000"                # preflight + autonomy_launch port (JAX :8000 / V1 :8002)
+DAGGER="false"                # true = use dagger_launch.py (autonomy + master_servo + dagger_recorder)
 EXTRA_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -55,6 +56,7 @@ while [[ $# -gt 0 ]]; do
         --enable-ee-pose-input) ENABLE_EE_POSE_INPUT="true"; shift ;;
         --ws-port)    WS_PORT="$2"; shift 2 ;;
         --port)       WS_PORT="$2"; shift 2 ;;
+        --dagger)     DAGGER="true"; EXECUTE_MODE="true"; shift ;;
         *)            EXTRA_ARGS+=("$1"); shift ;;
     esac
 done
@@ -99,7 +101,7 @@ fi
 
 # ── 路径 ──
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 KAI0_DIR="$PROJECT_ROOT/kai0"
 ROS2_WS="$PROJECT_ROOT/ros2_ws"
 
@@ -402,13 +404,22 @@ echo ""
 
 # ── Deployment mode marker (P1: replay function safety gate) ──
 # Lets `replay_mode=replay` pass `_verify_deployment_marker()` check.
-echo autonomy > /tmp/kai0_deployment_mode
+# In dagger mode mark as "dagger" so toggle_execute.sh switches to /dagger/takeover.
+if [[ "$DAGGER" == "true" ]]; then
+    echo dagger > /tmp/kai0_deployment_mode
+    LAUNCH_FILE="dagger_launch.py"
+else
+    echo autonomy > /tmp/kai0_deployment_mode
+    LAUNCH_FILE="autonomy_launch.py"
+fi
 
-info "starting ros2 launch piper autonomy_launch.py..."
+info "starting ros2 launch piper $LAUNCH_FILE..."
 echo "  Ctrl+C to stop all nodes"
 echo ""
 
-exec ros2 launch piper autonomy_launch.py \
+# dagger_launch.py includes autonomy_launch.py via IncludeLaunchDescription —
+# all autonomy_launch params are valid here too (forwarded transitively).
+exec ros2 launch piper "$LAUNCH_FILE" \
     mode:="$MODE" \
     port:="$WS_PORT" \
     enable_rerun:="$ENABLE_RERUN" \

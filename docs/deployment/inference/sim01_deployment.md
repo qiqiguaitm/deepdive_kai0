@@ -159,6 +159,65 @@ cp checkpoints/Task_A/mixed_1/norm_stats.json data/Task_A/base/
 | `packages/openpi-client/.../websocket_client_policy.py` | `connect()` 添加 `ping_timeout=300, close_timeout=300` | 同上 |
 | `pyproject.toml` | override `av==13.1.0, mujoco>=3.0.0` | Python 3.12 编译兼容 |
 
+### 3.6 X-VLA 推理环境 (可选, 独立 venv) — 与 uc 训练环境对齐
+
+> 部署 X-VLA ckpt 用。与 §3.3 的 openpi 统一环境 **分开**: X-VLA 用一个 **lerobot 0.4.4 fork**(含 `policies/xvla`, 官方 PyPI 无), 依赖栈与 JAX/pi05 主 `.venv` 不同, 必须隔离。一键: `./install.sh --xvla`。
+> 关联: 部署全链路 + R1–R4 正确性契约见 [`xvla_inference_bringup.md`](xvla_inference_bringup.md); 训练侧 EE6D 约定见 [`../../training/future_plans/plans/xvla_track_x_curriculum.md`](../../training/future_plans/plans/xvla_track_x_curriculum.md)。
+
+**为什么要单独对齐**: 推理必须与训练**位字一致** (R4)。训练实际用 `lerobot.policies.xvla.XVLAPolicy` (非 upstream `xvla/X-VLA` repo), 其 processor 流水线 = `ImageToFloat(÷255)` → **ImageNet 归一** → `AddDomainId`; forward 内无 norm_stats; EE6D 20D / abs xyz / EE=link6 / rot6d interleaved / gripper 二值 / chunk30。用训练同款 policy 加载, 这些预处理自动对齐, 不用手搓。
+
+**uc 训练环境 = 真相源** (uc01 NFS `/data/shared/ubuntu/workspace/X-VLA-env/.venv`, uv 建):
+
+| 组件 | 版本 | 备注 |
+|---|---|---|
+| Python | 3.10.4 | |
+| torch / torchvision | 2.4.0+cu121 / 0.19.0+cu121 | ⚠️ cu121 跑不了 sim01 5090 (sm_120), 见下 |
+| **lerobot** | **0.4.4 (fork)** | policies 含 `xvla`+`groot/wall_x/sarm` → fork; factory 已注册 xvla |
+| transformers / accelerate | 4.51.3 / 1.13.0 | Florence2 模型 vendored 在 fork, 对 transformers 版本不敏感 |
+| einops / timm / safetensors / tokenizers | 0.8.2 / 1.0.27 / 0.7.0 / 0.21.4 | |
+| numpy / pillow / opencv / hf-hub / scipy / av / draccus / gymnasium | 2.2.6 / 12 / 4.13.0.92 / 0.36.2 / 1.15.3 / 17.0.1 / 0.11.5 / 1.3.0 | |
+
+> fork 来源: dist-info `direct_url.json` 空 (从本地 wheel 装, 非 git), uc 无源仓库 → **canonical 制品 = uc NFS 上这份已装包**, 复现首选直接 rsync (下)。后续若拿到 fork 正源 (git/wheel) 在此登记改用 pin 安装。
+
+**sim01 适配约束**: sim01 = 2× RTX 5090 (sm_120) 需 **CUDA 12.8 + torch ≥2.7/cu128**; uc 的 torch 2.4+cu121 在 5090 上无 kernel 会崩。故 **lerobot fork 代码照搬 (纯 Python), torch 换 cu128**; Python 取 3.10 (与 uc 一致)。
+
+**安装** (`install.sh --xvla` 自动; 手动等价):
+```bash
+UC_SRC=ubuntu@117.50.196.104:/data/shared/ubuntu/workspace/X-VLA-env/.venv/lib/python3.10/site-packages
+XVLA_VENV=/data1/tim/workspace/deepdive_kai0/kai0/.venv_xvla
+
+uv venv --clear --python 3.10 "$XVLA_VENV"     # 注: uv venv 默认不带 pip, 故用 uv pip install --python
+XPY="$XVLA_VENV/bin/python"
+# torch cu128 (5090; 不要 uc 的 cu121)
+uv pip install --python "$XPY" --index-url https://download.pytorch.org/whl/cu128 torch torchvision
+# (3a) 关键依赖 pin uc 版本 + server 依赖
+uv pip install --python "$XPY" transformers==4.51.3 accelerate==1.13.0 einops==0.8.2 \
+    timm==1.0.27 safetensors==0.7.0 tokenizers==0.21.4 huggingface-hub==0.36.2 \
+    'numpy>=2.2' pillow opencv-python==4.13.0.92 scipy==1.15.3 av==17.0.1 \
+    draccus==0.11.5 gymnasium==1.3.0  msgpack msgpack-numpy websockets pyyaml
+# (3b) lerobot core 传递依赖较多 (datasets/diffusers/rerun/pandas/...). 从 uc freeze 取
+#      包名 unpinned 补齐 (uv 自解析; 手动 pin 全集会撞 rerun-sdk vs pyarrow 版本冲突),
+#      去 torch/torchvision/lerobot/transformers/nvidia-*(cu13 与 cu128 torch 冲突)。
+UC_HOST="${UC_SRC%%:*}"; UC_PYBIN="${UC_SRC#*:}"; UC_PYBIN="${UC_PYBIN%/lib/python3.10/site-packages}/bin/python"
+ssh "$UC_HOST" "$UC_PYBIN -c 'import importlib.metadata as m;[print(d.metadata[\"Name\"]) for d in m.distributions()]'" \
+  | grep -viE '^(torch|torchvision|lerobot|pip|setuptools|wheel|transformers|nvidia-)$' \
+  | uv pip install --python "$XPY" -r /dev/stdin
+# (4) lerobot fork 本体 ← rsync from uc (canonical 制品)
+XSITE="$($XVLA_VENV/bin/python -c 'import site;print(site.getsitepackages()[0])')"
+rsync -a "$UC_SRC/lerobot" "$UC_SRC/lerobot-0.4.4.dist-info" "$XSITE/"
+```
+
+**验证 gate**:
+```bash
+$XVLA_VENV/bin/python -c "import torch;print('torch',torch.__version__,torch.cuda.is_available()); \
+from lerobot.policies.xvla.modeling_xvla import XVLAPolicy; print('XVLAPolicy OK')"
+```
+
+**实测状态 (2026-05-29, sim01)**: ✅ 已建成并验证 — `.venv_xvla` (8.2G), **torch 2.11.0+cu128** (`arch_list` 含 `sm_120`), `XVLAPolicy` 导入 OK, 5090 实算 OK; 旧 `.venv` / `.venv_5090` **mtime 未变, 零影响**。
+> ⚠️ torch 报 `cuda.is_available()=True` 但 matmul `CUDA out of memory` = 该卡显存被占满 (非环境缺陷); serve 用空闲卡即可 (`start_xvla_autonomy.sh` 默认 `CUDA_VISIBLE_DEVICES=3`)。
+
+`setup_env.sh` 暴露 `XVLA_VENV` / `XVLA_LEROBOT_UC_SRC`; `start_scripts/xvla/start_xvla_autonomy.sh` 的 `VENV_PY` 应指向 `$XVLA_VENV/bin/python` (server 改造时一并改)。一键复现: `./install.sh --xvla-only` (只建此 venv, 不碰系统/ROS2/openpi venv/ckpt)。
+
 ---
 
 ## 4. 启动流程
