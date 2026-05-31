@@ -63,3 +63,6 @@ ros2_ws/build/
 node_modules/
 **/node_modules/
 **/.xla_cache/
+.claude/
+*.bak
+*.bak.*

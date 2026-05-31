@@ -174,23 +174,54 @@ class MultiCameraNode(Node):
                         config.enable_stream(rs.stream.depth, w, h, rs.format.z16, fps)
                     profile = pipeline.start(config)
 
-                    # Anti-flicker.
-                    #   D435 (rolling-shutter RGB): power_line_frequency=1 (50Hz)
-                    #     fixes horizontal banding under LED light.
-                    #   D405 (global-shutter color on depth_module): PLF has no
-                    #     effect; whole-frame brightness pulses unless exposure
-                    #     covers the LED PWM period. Lock to 20ms — verified
-                    #     empirically to eliminate flicker with adequate
-                    #     brightness in the sim01 workspace.
+                    # Anti-flicker — must mirror launch_3cam.py / official
+                    # realsense2_camera_node behavior, which sets BOTH
+                    # `rgb_camera.power_line_frequency` AND
+                    # `depth_module.power_line_frequency`, and for D405 also
+                    # `depth_module.{enable_auto_exposure,exposure}`.
+                    #
+                    # On D405 color shares the Stereo Module with depth, so
+                    # `enable_auto_exposure` / `exposure` only appear on the
+                    # depth sensor handle, not on `first_color_sensor()`. The
+                    # previous code only touched `first_color_sensor()` →
+                    # `supports(exposure)` returned False on D405 → the lock
+                    # silently no-op'd → flicker. Fix: iterate every sensor
+                    # and apply each option defensively to whichever one
+                    # supports it.
+                    #
+                    #   D435 (rolling-shutter RGB): PLF=1 (50Hz) on RGB Camera
+                    #     fixes horizontal banding; AE left auto.
+                    #   D405 (global-shutter color on Stereo Module): PLF has
+                    #     no effect, but locking exposure to 20ms covers the
+                    #     LED PWM period and eliminates pulsing.
                     try:
-                        color_sensor = profile.get_device().first_color_sensor()
-                        if color_sensor.supports(rs.option.power_line_frequency):
-                            color_sensor.set_option(rs.option.power_line_frequency, 1)
-                        if not is_d435:
-                            if color_sensor.supports(rs.option.enable_auto_exposure):
-                                color_sensor.set_option(rs.option.enable_auto_exposure, 0)
-                            if color_sensor.supports(rs.option.exposure):
-                                color_sensor.set_option(rs.option.exposure, 20000)
+                        sensors = profile.get_device().query_sensors()
+                        applied = []
+                        for s in sensors:
+                            sname = s.get_info(rs.camera_info.name) if s.supports(rs.camera_info.name) else '?'
+                            if s.supports(rs.option.power_line_frequency):
+                                try:
+                                    s.set_option(rs.option.power_line_frequency, 1)  # 50 Hz
+                                    applied.append(f'{sname}:PLF=50Hz')
+                                except Exception:
+                                    pass
+                            if not is_d435:
+                                # D405: disable AE + lock 20ms exposure on
+                                # whichever sensor exposes the controls.
+                                if s.supports(rs.option.enable_auto_exposure):
+                                    try:
+                                        s.set_option(rs.option.enable_auto_exposure, 0)
+                                        applied.append(f'{sname}:AE=off')
+                                    except Exception:
+                                        pass
+                                if s.supports(rs.option.exposure):
+                                    try:
+                                        s.set_option(rs.option.exposure, 20000)  # μs
+                                        applied.append(f'{sname}:exp=20ms')
+                                    except Exception:
+                                        pass
+                        self.get_logger().info(
+                            f'{role} anti-flicker applied: {", ".join(applied) if applied else "(none — sensor reports no support)"}')
                     except Exception as e:
                         self.get_logger().warn(
                             f'{role} set anti-flicker options failed: {e}')

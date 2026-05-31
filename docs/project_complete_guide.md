@@ -103,12 +103,12 @@ deepdive_kai0/
 │       └── overfit_watcher.py          ← MAE 反弹检测
 │
 ├── start_scripts/
+│   ├── start_data_collect.sh   遥操+脚踏采集 (与模型无关)
 │   ├── kai/                sim01 部署脚本 (pi0/openpi 架构)
 │   │   ├── start_autonomy.sh   主入口（相机+CAN+ROS2+policy node）
 │   │   ├── start_autonomy_temp.sh  快速切换 ckpt 的 scratch
 │   │   ├── start_policy_node.sh
 │   │   ├── start_teleop.sh
-│   │   ├── start_data_collect.sh   遥操+脚踏采集
 │   │   ├── toggle_execute.sh   execute_mode 切换
 │   │   ├── rtc_apply.sh        RTC 参数运行时调整
 │   │   └── test_{hardware,cameras,integration_ros2,inference_parity}.py
@@ -168,7 +168,7 @@ deepdive_kai0/
 
 ```bash
 # 启动遥操 + 脚踏采集
-./start_scripts/kai/start_data_collect.sh
+./start_scripts/start_data_collect.sh
 
 # 采集触发: 脚踏 USB button (USB foot-pedal)
 # 录制内容: 3 相机 mp4 + parquet (state/action/timestamp)

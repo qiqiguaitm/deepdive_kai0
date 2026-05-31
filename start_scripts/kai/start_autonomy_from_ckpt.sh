@@ -23,8 +23,10 @@ if [ ! -f "$CKPT_DIR/train_config.json" ]; then
   echo "       Use train_scripts/kai/data/pack_inference_ckpt.py to produce it." >&2
   exit 1
 fi
-if [ ! -f "$CKPT_DIR/_CHECKPOINT_METADATA" ]; then
-  echo "ERROR: $CKPT_DIR/_CHECKPOINT_METADATA missing — invalid ckpt dir." >&2
+# JAX (orbax) ckpt 自带 _CHECKPOINT_METADATA; PyTorch (safetensors) ckpt 自带 metadata.pt。
+# 二者之一存在即认为是有效 ckpt 目录 (向后兼容: 旧 JAX ckpt 仍走 _CHECKPOINT_METADATA)。
+if [ ! -f "$CKPT_DIR/_CHECKPOINT_METADATA" ] && [ ! -f "$CKPT_DIR/metadata.pt" ]; then
+  echo "ERROR: neither $CKPT_DIR/_CHECKPOINT_METADATA (JAX) nor $CKPT_DIR/metadata.pt (PyTorch) found — invalid ckpt dir." >&2
   exit 1
 fi
 

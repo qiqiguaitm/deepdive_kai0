@@ -50,7 +50,13 @@ case "$_profile" in
         ;;
 esac
 
-export KAI0_DATA_ROOT OPENPI_DATA_HOME PYTORCH_CKPT_BASE
+# X-VLA 推理 venv (sim01 only; 与 uc 训练环境对齐, 见 sim01_deployment.md §3.6)
+#   - XVLA_VENV: serve_policy_xvla.py 用的 lerobot-fork venv (cu128, 5090)
+#   - XVLA_LEROBOT_UC_SRC: uc 上 lerobot 0.4.4 fork 制品 (install.sh --xvla 的 rsync 源)
+: "${XVLA_VENV:=$KAI0_DATA_ROOT/.venv_xvla}"
+: "${XVLA_LEROBOT_UC_SRC:=ubuntu@117.50.196.104:/data/shared/ubuntu/workspace/X-VLA-env/.venv/lib/python3.10/site-packages}"
+
+export KAI0_DATA_ROOT OPENPI_DATA_HOME PYTORCH_CKPT_BASE XVLA_VENV XVLA_LEROBOT_UC_SRC
 
 echo "[setup_env] host=$_host profile=$_profile"
 unset _host _profile
@@ -58,3 +64,4 @@ unset _host _profile
 echo "[setup_env] KAI0_DATA_ROOT=$KAI0_DATA_ROOT"
 echo "[setup_env] OPENPI_DATA_HOME=$OPENPI_DATA_HOME"
 echo "[setup_env] PYTORCH_CKPT_BASE=$PYTORCH_CKPT_BASE"
+echo "[setup_env] XVLA_VENV=$XVLA_VENV"

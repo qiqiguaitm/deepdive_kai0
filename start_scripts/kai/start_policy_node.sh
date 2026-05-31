@@ -11,18 +11,25 @@
 set -e
 
 MODE="both"
-for arg in "$@"; do
-  case "$arg" in
-    --mode=*) MODE="${arg#*=}" ;;
-    --mode)   shift_next=1 ;;
-    *)
-      if [ "$shift_next" = "1" ]; then
-        MODE="$arg"
-        shift_next=0
-      fi
-      ;;
+EXECUTION_MODE="joint"
+ENABLE_DEPTH_INPUT="false"
+ENABLE_EE_POSE_INPUT="false"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --mode=*)               MODE="${1#*=}"; shift ;;
+    --mode)                 MODE="$2"; shift 2 ;;
+    --execution-mode=*)     EXECUTION_MODE="${1#*=}"; shift ;;
+    --execution-mode)       EXECUTION_MODE="$2"; shift 2 ;;
+    --enable-depth-input)   ENABLE_DEPTH_INPUT="true"; shift ;;
+    --enable-ee-pose-input) ENABLE_EE_POSE_INPUT="true"; shift ;;
+    *) shift ;;
   esac
 done
+
+if [[ "$EXECUTION_MODE" != "joint" && "$EXECUTION_MODE" != "ee_pose" ]]; then
+    echo "[FAIL] --execution-mode must be 'joint' or 'ee_pose', got '$EXECUTION_MODE'" >&2
+    exit 1
+fi
 
 eval "$(conda shell.bash hook 2>/dev/null)"; conda deactivate 2>/dev/null || true
 source /opt/ros/jazzy/setup.bash
@@ -48,4 +55,7 @@ exec ros2 run piper policy_inference_node.py --ros-args \
   -p gpu_id:=0 -p ws_port:=8000 \
   -p img_front_topic:=/camera_f/color/image_raw \
   -p img_left_topic:=/camera_l/color/image_raw \
-  -p img_right_topic:=/camera_r/color/image_raw
+  -p img_right_topic:=/camera_r/color/image_raw \
+  -p execution_mode:=${EXECUTION_MODE} \
+  -p enable_depth_input:=${ENABLE_DEPTH_INPUT} \
+  -p enable_ee_pose_input:=${ENABLE_EE_POSE_INPUT}

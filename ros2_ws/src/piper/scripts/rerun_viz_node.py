@@ -301,9 +301,13 @@ class RerunVizNode(Node):
         else:
             rr.init("inference_viz")
 
+        # Live viewer with all spatial entities logged static=True so no
+        # per-frame chunks accumulate. Scalar timeseries (joints) keep time
+        # stamps so plots scroll normally. Replay history comes from ros2 bag,
+        # not rerun timeline. 4 GB cap is defensive — should rarely be hit.
         if os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'):
             try:
-                rr.spawn()
+                rr.spawn(memory_limit=os.environ.get('KAI0_RERUN_MEMORY_LIMIT', '4GB'))
             except Exception as e:
                 from datetime import datetime
                 rrd_path = f'/tmp/inference_viz_{datetime.now():%Y%m%d_%H%M%S}.rrd'
@@ -674,11 +678,10 @@ class RerunVizNode(Node):
         ]:
             if cached is None:
                 continue
-            img, stamp = cached
+            img, _stamp = cached
             try:
                 img_small = img[::2, ::2]  # 2x downsample
-                rr.set_time("ros_time", timestamp=stamp)
-                rr.log(entity, rr.Image(img_small))
+                rr.log(entity, rr.Image(img_small), static=True)
             except Exception as e:
                 self.get_logger().debug(f'img tick error ({entity}): {e}')
 
@@ -913,11 +916,11 @@ class RerunVizNode(Node):
             rr.log(entity, rr.Mesh3D(
                 vertex_positions=verts,
                 triangle_indices=tris,
-                vertex_colors=colors))
+                vertex_colors=colors), static=True)
         else:
             rr.log(entity, rr.Mesh3D(
                 vertex_positions=verts,
-                triangle_indices=tris))
+                triangle_indices=tris), static=True)
 
     # ── Static background mesh (Step 5) ─────────────────────────────
 
@@ -1212,9 +1215,8 @@ class RerunVizNode(Node):
                     self._T_world_camF, depth_min, depth_max,
                     rgb_img)
                 if pts is not None:
-                    rr.set_time("ros_time", timestamp=stamp)
                     rr.log("world/head_rgb", rr.Points3D(
-                        pts, radii=[0.001], colors=colors))
+                        pts, radii=[0.001], colors=colors), static=True)
             except Exception as e:
                 self.get_logger().debug(f'head pc error: {e}')
 
@@ -1244,13 +1246,12 @@ class RerunVizNode(Node):
                     depth_u16, step, fx, fy, cx, cy,
                     T_world_cam, 0.01, depth_max, rgb)
                 if pts is not None:
-                    rr.set_time("ros_time", timestamp=stamp)
                     if colors is not None:
                         rr.log(f"world/{arm}_rgb", rr.Points3D(
-                            pts, colors=colors, radii=[0.001]))
+                            pts, colors=colors, radii=[0.001]), static=True)
                     else:
                         rr.log(f"world/{arm}_rgb", rr.Points3D(
-                            pts, radii=[0.001]))
+                            pts, radii=[0.001]), static=True)
             except Exception as e:
                 self.get_logger().debug(f'{arm} pc error: {e}')
 
@@ -1311,9 +1312,10 @@ class RerunVizNode(Node):
             if q is None or self._fk is None:
                 continue
             try:
-                rr.set_time("ros_time", timestamp=stamp)
-                # Timeseries at 1/3 of FK rate (5Hz) — still smooth for plots.
+                # Scalar timeseries stays time-stamped so plot scrolls. Trail
+                # + FK transforms are static (live overwrite, no history).
                 if self._tick_arms_count % 3 == 0:
+                    rr.set_time("ros_time", timestamp=stamp)
                     for i in range(min(7, len(q))):
                         rr.log(f"timeseries/{arm}_j{i}", rr.Scalars([float(q[i])]))
                 ee_pos = self._log_arm_fk(arm, q, T_base)
@@ -1321,7 +1323,8 @@ class RerunVizNode(Node):
                     trail.append(ee_pos.copy())
                     trail_arr = np.array(list(trail))
                     rr.log(f"world/actual/{arm}_trail", rr.Points3D(
-                        trail_arr, colors=[trail_color], radii=[0.002]))
+                        trail_arr, colors=[trail_color], radii=[0.002]),
+                        static=True)
             except Exception as e:
                 self.get_logger().warn(f'arm tick error ({arm}): {e}')
         self._tick_arms_ms_sum = getattr(self, '_tick_arms_ms_sum', 0.0) + (
@@ -1369,10 +1372,10 @@ class RerunVizNode(Node):
             # Commanded EE marker (orange = left, yellow = right)
             color = [255, 150, 50] if arm_label == 'left' else [255, 220, 50]
             rr.log(f"world/master/{arm_label}/ee", rr.Points3D(
-                [ee], colors=[color], radii=[0.01]))
+                [ee], colors=[color], radii=[0.01]), static=True)
             trail_arr = np.array(list(trail))
             rr.log(f"world/master/{arm_label}/trail", rr.LineStrips3D(
-                [trail_arr], colors=[color], radii=[0.002]))
+                [trail_arr], colors=[color], radii=[0.002]), static=True)
         except Exception as e:
             self.get_logger().debug(f'master {arm_label} error: {e}')
 
@@ -1432,18 +1435,20 @@ class RerunVizNode(Node):
             rr = self._rr
             left_arr = np.array(left_path)
             right_arr = np.array(right_path)
-            stamp = self.get_clock().now().nanoseconds * 1e-9
-            rr.set_time("ros_time", timestamp=stamp)
             rr.log("world/predicted/left_traj", rr.LineStrips3D(
-                [left_arr], colors=[[50, 150, 255]], radii=[0.004]))
+                [left_arr], colors=[[50, 150, 255]], radii=[0.004]),
+                static=True)
             rr.log("world/predicted/right_traj", rr.LineStrips3D(
-                [right_arr], colors=[[50, 255, 150]], radii=[0.004]))
+                [right_arr], colors=[[50, 255, 150]], radii=[0.004]),
+                static=True)
             rr.log("world/predicted/left_endpoints", rr.Points3D(
                 [left_arr[0], left_arr[-1]], colors=[[50, 150, 255]],
-                radii=[0.005], labels=["start", "end"], show_labels=False))
+                radii=[0.005], labels=["start", "end"], show_labels=False),
+                static=True)
             rr.log("world/predicted/right_endpoints", rr.Points3D(
                 [right_arr[0], right_arr[-1]], colors=[[50, 255, 150]],
-                radii=[0.005], labels=["start", "end"], show_labels=False))
+                radii=[0.005], labels=["start", "end"], show_labels=False),
+                static=True)
         except Exception as e:
             self.get_logger().warn(f'action_chunk error: {e}')
 
@@ -1471,19 +1476,20 @@ class RerunVizNode(Node):
                 break
             processed += 1
             try:
-                rr.set_time("ros_time", timestamp=stamp)
                 ee_pos = self._log_arm_fk(arm_label, q7, T_base)
                 if ee_pos is not None:
                     if arm_label == 'left':
                         self._actual_trail_left.append(ee_pos.copy())
                         trail = np.array(list(self._actual_trail_left))
                         rr.log("world/actual/left_trail", rr.Points3D(
-                            trail, colors=[[50, 100, 255]], radii=[0.002]))
+                            trail, colors=[[50, 100, 255]], radii=[0.002]),
+                            static=True)
                     else:
                         self._actual_trail_right.append(ee_pos.copy())
                         trail = np.array(list(self._actual_trail_right))
                         rr.log("world/actual/right_trail", rr.Points3D(
-                            trail, colors=[[50, 255, 100]], radii=[0.002]))
+                            trail, colors=[[50, 255, 100]], radii=[0.002]),
+                            static=True)
             except Exception as e:
                 self.get_logger().debug(f'FK viz error ({arm_label}): {e}')
 
@@ -1498,16 +1504,18 @@ class RerunVizNode(Node):
         T_base = np.array(T_world_base)
 
         rr.log(f"world/{arm_label}/base_link", rr.Transform3D(
-            translation=T_base[:3, 3], mat3x3=T_base[:3, :3]))
+            translation=T_base[:3, 3], mat3x3=T_base[:3, :3]), static=True)
 
         for idx, T_link in enumerate(link_Ts):
             T_world_link = T_base @ T_link
             rr.log(f"world/{arm_label}/link{idx+1}", rr.Transform3D(
-                translation=T_world_link[:3, 3], mat3x3=T_world_link[:3, :3]))
+                translation=T_world_link[:3, 3], mat3x3=T_world_link[:3, :3]),
+                static=True)
 
         T_world_link6 = T_base @ link_Ts[5]
         rr.log(f"world/{arm_label}/gripper_base", rr.Transform3D(
-            translation=T_world_link6[:3, 3], mat3x3=T_world_link6[:3, :3]))
+            translation=T_world_link6[:3, 3], mat3x3=T_world_link6[:3, :3]),
+            static=True)
 
         finger_spread = np.clip(gripper_val, 0.0, 0.04) / 0.04
         max_lateral = 0.025
@@ -1518,13 +1526,13 @@ class RerunVizNode(Node):
             T_offset[:3, 3] = [sign * finger_spread * max_lateral, 0, 0.1358]
             T_w = T_world_link6 @ T_offset
             rr.log(f"world/{arm_label}/{link_name}", rr.Transform3D(
-                translation=T_w[:3, 3], mat3x3=T_w[:3, :3]))
+                translation=T_w[:3, 3], mat3x3=T_w[:3, :3]), static=True)
 
         ee_pos = T_world_link6[:3, 3]
         ee_color = [50, 100, 255] if arm_label == 'left' else [50, 255, 100]
         cam_color = [100, 100, 255] if arm_label == 'left' else [100, 255, 100]
         rr.log(f"world/{arm_label}/ee", rr.Points3D(
-            [ee_pos], colors=[ee_color], radii=[0.008]))
+            [ee_pos], colors=[ee_color], radii=[0.008]), static=True)
 
         # Wrist camera frustum only (no link6->base line — visually noisy)
         T_link6_cam = self._T_link6_camL if arm_label == 'left' else self._T_link6_camR
@@ -1541,11 +1549,11 @@ class RerunVizNode(Node):
                  [fc[1], fc[2]], [fc[2], fc[3]], [fc[3], fc[4]], [fc[4], fc[1]],
                  [cam_pos.tolist(), ee_pos.tolist()]],
                 colors=[cam_color], radii=[0.002],
-            ))
+            ), static=True)
             rr.log(f"world/{arm_label}_cam_label", rr.Points3D(
                 [cam_pos.tolist()], colors=[cam_color], radii=[0.002],
                 labels=[f"D405 ({arm_label})"], show_labels=False,
-            ))
+            ), static=True)
 
         return ee_pos
 

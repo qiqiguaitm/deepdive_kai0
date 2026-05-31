@@ -26,30 +26,51 @@
 | bucket | 用途 | 启动入口 |
 |---|---|---|
 | `ckpt_v0/` | 走 JAX orbax 直载, RTC / chunk overlay 仅靠 JAX serve | `start_autonomy.sh` / `start_autonomy_from_ckpt.sh` / `start_policy_node.sh` |
-| `ckpt_v1/` | 已转换为 V1 Triton pickle (`optimize/results/<name>_v1_p200.pkl` 存在); 走 20Hz V1 serve + SHM transport | `start_autonomy_v1.sh` / `start_autonomy_from_ckpt_v1.sh` / `start_policy_node_v1.sh` + `start_serve_v1.sh` |
+| `ckpt_v1/` | 已转换为 V1 Triton pickle (自包含 `<name>/v1_p200.pkl`, 见 §1.2); 走 20Hz V1 serve + SHM transport | `start_autonomy_v1.sh` / `start_autonomy_from_ckpt_v1.sh` / `start_policy_node_v1.sh` + `start_serve_v1.sh` |
 | `ckpt_others/` | 跨 embodiment / 实验性栈 (XVLA 等), 走专属 launch | `start_xvla_autonomy.sh` 等 |
 
-**双栈 ckpt** (同时有 JAX + V1 部署需求): 在 `ckpt_v0/<name>/` 和 `ckpt_v1/<name>/` 下**各放一份物理实体** (不用 symlink). 两份独立 12 GB orbax, 两个 bucket 入口完全自治, 删一边不影响另一边。
+**双栈 ckpt** (同时有 JAX + V1 部署需求): `ckpt_v0/<name>/` 放 JAX orbax 实体 (12 GB), `ckpt_v1/<name>/` 放自包含 V1 实体 (6.7 GB pkl + sidecar, 见 §1.2). 两个 bucket 入口完全自治, 删一边不影响另一边。
 
 ```bash
-# 双栈落法示例 (新 ckpt 同时支持 JAX + V1 部署):
-# 1. 拉到 ckpt_v1/ (V1 转换需要 orbax 实体, 在这先生成 .pkl)
-mkdir -p /data1/DATA_IMP/checkpoints/ckpt_v1/<name>
-rsync ... ckpt_v1/<name>/
-
-# 2. 复制一份到 ckpt_v0/ (JAX 入口的物理实体)
-cp -r /data1/DATA_IMP/checkpoints/ckpt_v1/<name> /data1/DATA_IMP/checkpoints/ckpt_v0/<name>
+# JAX (ckpt_v0 orbax 实体):
+./start_scripts/kai/start_autonomy_from_ckpt.sh /data1/DATA_IMP/checkpoints/ckpt_v0/<name>
+# V1 Triton (ckpt_v1 自包含实体):
+./start_scripts/kai/start_autonomy_from_ckpt_v1.sh /data1/DATA_IMP/checkpoints/ckpt_v1/<name>
 ```
 
-启动命令两个 bucket 各自读自己 bucket 内的实体:
+---
+
+## 1.2 v0 → v1 转换 (一键自动化, 2026-05-31 起)
+
+V1 Triton 部署需要把 v0 (JAX orbax) ckpt 转成 V1 pickle。**统一用一键脚本**, 产物是**自包含** v1 目录, 直接喂 `start_autonomy_from_ckpt_v1.sh`:
+
 ```bash
-# JAX (ckpt_v0 实体):
-./start_scripts/start_autonomy_from_ckpt.sh /data1/DATA_IMP/checkpoints/ckpt_v0/<name>
-# V1 Triton (ckpt_v1 实体, basename 与 optimize/results/<basename>_v1_p200.pkl 自动配对):
-./start_scripts/start_autonomy_from_ckpt_v1.sh /data1/DATA_IMP/checkpoints/ckpt_v1/<name>
+cd /data1/tim/workspace/deepdive_kai0
+./optimize/v1_triton/v0_to_v1_ckpt.sh \
+    /data1/DATA_IMP/checkpoints/ckpt_v0/<name>_step49999
+# → /data1/DATA_IMP/checkpoints/ckpt_v1/<name>_step49999/
+#     ├── v1_p200.pkl              (6.7 GB, convert+expand 产物; language_embeds 已扩到 200 行)
+#     ├── train_config.json        (从 v0 复制)
+#     ├── _CHECKPOINT_METADATA     (从 v0 复制)
+#     └── assets/<asset_id>/norm_stats.json  (从 v0 复制)
 ```
 
-> 双栈实体已就位 (2026-05-25): `pi05_flatten_fold_vis_v2_full_step49999`, `task_a_base_delta_step49999`, `task_a_mix_b6000_p1200_mixed_1_step49999`, `task_a_new_pure_200_step49999` — 每份 12 GB × 2 bucket = 24 GB / ckpt.
+脚本 (`optimize/v1_triton/v0_to_v1_ckpt.sh`) 自动:
+- 解析 `train_config.json` 的 `base_config_name` / `override_asset_id`;
+- **从 base_config 取 `data.default_prompt`** 烘焙 sentencepiece language_embeds —— **大小写/句点原样, 绝不 lowercase** (窄分布 ckpt prompt 大小写不符会静默退化到近乎不动, 见 [dagger_collection_guide §Prompt 大小写](../data_collection/dagger_collection_guide.md)). 可用 `--prompt "..."` 覆盖;
+- `convert_kai0_to_v1.py` (sentencepiece, 非 HF AutoTokenizer) → `expand_v1_pkl_for_phase2.py` (8→200 行);
+- 复制 sidecar/metadata/norm_stats 成自包含目录, 删中间 pkl (`--keep-intermediate` 保留);
+- **convert 步 OOM 自动重试 ×3** + 中间/最终 pkl ≥6 GB 完整性校验。
+
+> **OOM 注意**: sim01 的 `.venv_5090_trt` 无 CUDA jaxlib, convert 在 **CPU** 上加载 ~12 GB orbax 参数, 峰值 ~18-20 GB。并发 tosutil 上传 / ROS2 栈 / swap 吃紧时会被 OOM-killer 杀掉 (SIGKILL → 无 traceback, 退出码 137)。脚本已自动重试; 若连续 3 次失败, 暂停并发任务再跑。
+
+**delta 模式**无需在转换时指定 —— `start_autonomy_from_ckpt_v1.sh` 启动时按 base_config (`use_delta_joint_actions` 或名字含 `delta`) 自动判定。
+
+**launcher 找 pkl 的优先级**: 先 `<ckpt_dir>/v1_p200.pkl` (本节自包含布局), 找不到再退回旧布局 `optimize/results/<basename>_v1_p200.pkl`。新转换一律走自包含。
+
+底层两步手动流程 (调试用) 见 [`optimize/v1_triton/README.md`](../../../optimize/v1_triton/README.md)。
+
+> 已转 v1 自包含实体: `A_0423_0527_mixed1_step49999`, `pi05_flatten_fold_vis_5day_recent_step49999`, `task_a_new_pure_200_step49999`, `task_a_new_smooth_800_step49999` (2026-05-31) 等。
 
 ---
 

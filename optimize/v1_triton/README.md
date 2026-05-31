@@ -13,6 +13,7 @@
 | `dm0_infer.py` | V1 DM0 推理类 (benchmark.py 需要 import) |
 | `convert_from_jax_pi05.py` | V1 原版 JAX → V1 weight dict 转换 (依赖 HF AutoTokenizer) |
 | `convert_kai0_to_v1.py` | **我们的 adapter**: deepdive_kai0 ckpt → V1 pkl, 用 sentencepiece (绕开 HF AutoTokenizer) |
+| `v0_to_v1_ckpt.sh` | **一键自动化**: v0 (JAX orbax) ckpt 目录 → 自包含 v1 ckpt 目录 (convert+expand+复制 sidecar/norm_stats, 自动解析 prompt/delta, OOM 自动重试)。产物直接喂 `start_autonomy_from_ckpt_v1.sh <v1_dir>` |
 | `benchmark_kai0_v1.py` | 真 ckpt 100-iter benchmark |
 | `benchmark.py` | V1 原版 benchmark (synthetic random weight) |
 | `test.py` | V1 原版 PiModelEvaluator (含 JAX vs Triton 对比) |
@@ -20,7 +21,24 @@
 
 ## 使用流程
 
-### 一次性: 转换 deepdive_kai0 ckpt → V1 pkl
+### 推荐: 一键 v0 → v1 自包含 ckpt (真机测试直接可用)
+
+```bash
+cd /data1/tim/workspace/deepdive_kai0
+./optimize/v1_triton/v0_to_v1_ckpt.sh \
+    /data1/DATA_IMP/checkpoints/ckpt_v0/<name>_step49999
+# → /data1/DATA_IMP/checkpoints/ckpt_v1/<name>_step49999/{v1_p200.pkl, train_config.json,
+#    _CHECKPOINT_METADATA, assets/<asset_id>/norm_stats.json}
+# 然后:
+./start_scripts/kai/start_autonomy_from_ckpt_v1.sh \
+    /data1/DATA_IMP/checkpoints/ckpt_v1/<name>_step49999
+```
+
+自动: 从 base_config 解析 `default_prompt` (大小写原样, 不 lowercase)、convert+expand (8→200 行 language_embeds)、复制 sidecar/metadata/norm_stats 成自包含目录、convert OOM 自动重试 3 次。可选 `--prompt "..."` 覆盖、`--keep-intermediate` 保留中间 pkl、第二位置参覆盖输出目录。
+
+### 手动 (底层两步, 调试用)
+
+#### 一次性: 转换 deepdive_kai0 ckpt → V1 pkl
 
 ```bash
 cd /home/tim/workspace/deepdive_kai0

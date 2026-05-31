@@ -1,8 +1,17 @@
 """ROS2 launch file for 4-arm teleoperation.
 
-Launches left/right master (teach-handle) arms in mode=0 and left/right slave
-(executor) arms in mode=1, using arm_teleop_node.py. Used for dual-arm teleop
-data collection on the master/slave CAN topology (can_*_mas + can_*_slave).
+Master arms use **arm_master_servo_node** (compatible with both 0xFA leader and
+0xFC follower firmware roles): auto-switches subscribe/publish state based on
+the physical freedrive button (teach_status field). Slave arms unchanged
+(arm_reader / arm_teleop_node mode=1).
+
+Workflow:
+  - Press master arm freedrive button (LED bright) → firmware enters compliant
+    mode → master_servo detects via teach_status poll → enters publish state →
+    encoder + gripper published to /master/joint_left,right → slave's reader
+    subscribes and drives slave via JointCtrl + GripperCtrl
+  - Release button (LED dark) → master_servo enters subscribe state → motors
+    hold last commanded position → slave keeps its last commanded pose
 """
 
 from launch import LaunchDescription
@@ -12,77 +21,50 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    # Declare arguments
-    mode_master_arg = DeclareLaunchArgument(
-        'mode_master', default_value='true',
-        description='Master arm initial mode (true=teach/drag, false=slave-follow)'
-    )
     auto_enable_slave_arg = DeclareLaunchArgument(
         'auto_enable_slave', default_value='true',
         description='Auto-enable slave arms'
     )
 
-    # --- Master arms: mode=0, publish control commands ---
+    # --- Master arms: arm_master_servo_node (button-driven, 0xFC-compatible) ---
+    # start_state='control' = motors enabled in CAN_CTRL hold (subscribe mode).
+    # Pressing the physical button auto-flips to 'drag' (publish mode) at the
+    # poll rate. NOTE: master needs 0xFC firmware role for this to work. If
+    # role is 0xFA leader, run flash_master_to_follower.py + power cycle.
+    master_remap = lambda side: [
+        ('/master/joint_states',           f'/master/joint_{side}'),
+        ('/puppet/joint_states',           f'/puppet_master/joint_{side}'),
+        ('/master/enable',                 f'/teach/master_enable_{side}'),
+        ('/master/linkage_config',         f'/teach/master_config_{side}'),
+        ('/master/teach_mode',             f'/teach/teach_mode_{side}'),
+        ('/master_controled/joint_states', f'/master_controled/joint_{side}'),
+        ('/master/button_pressed',         f'/master_button_{side}'),
+    ]
 
-    # Left master
     piper_master_left = Node(
-        package='piper',
-        executable='arm_teleop_node.py',
-        name='piper_master_left',
-        output='screen',
+        package='piper', executable='arm_master_servo_node.py',
+        name='piper_master_left', output='screen',
         parameters=[{
             'can_port': 'can_left_mas',
-            'mode': 0,
-            'auto_enable': False,
-            'mode_master': LaunchConfiguration('mode_master'),
+            'speed_percent': 30,
+            'publish_rate_hz': 30.0,
+            'start_state': 'control',
         }],
-        remappings=[
-            ('/puppet/arm_status', '/puppet_master/arm_status_left'),
-            ('/puppet/joint_states', '/puppet_master/joint_left'),
-            ('/master/joint_states', '/master/joint_left'),
-            ('/puppet/end_pose', '/puppet_master/end_pose_left'),
-            ('/pos_cmd', '/puppet_master/pos_cmd_left'),
-            ('/puppet/end_pose_euler', '/puppet_master/end_pose_euler_left'),
-            ('/master/arm_status', '/teach/master_control_status_left'),
-            ('/master/mode_status', '/teach/master_mode_status_left'),
-            ('/master/enable', '/teach/master_enable_left'),
-            ('/master/linkage_config', '/teach/master_config_left'),
-            ('/master/teach_mode', '/teach/teach_mode_left'),
-            ('/master_controled/joint_states', '/master_controled/joint_left'),
-        ],
+        remappings=master_remap('left'),
     )
-
-    # Right master
     piper_master_right = Node(
-        package='piper',
-        executable='arm_teleop_node.py',
-        name='piper_master_right',
-        output='screen',
+        package='piper', executable='arm_master_servo_node.py',
+        name='piper_master_right', output='screen',
         parameters=[{
             'can_port': 'can_right_mas',
-            'mode': 0,
-            'auto_enable': False,
-            'mode_master': LaunchConfiguration('mode_master'),
+            'speed_percent': 30,
+            'publish_rate_hz': 30.0,
+            'start_state': 'control',
         }],
-        remappings=[
-            ('/puppet/arm_status', '/puppet_master/arm_status_right'),
-            ('/puppet/joint_states', '/puppet_master/joint_right'),
-            ('/master/joint_states', '/master/joint_right'),
-            ('/puppet/end_pose', '/puppet_master/end_pose_right'),
-            ('/pos_cmd', '/puppet_master/pos_cmd_right'),
-            ('/puppet/end_pose_euler', '/puppet_master/end_pose_euler_right'),
-            ('/master/arm_status', '/teach/master_control_status_right'),
-            ('/master/mode_status', '/teach/master_mode_status_right'),
-            ('/master/enable', '/teach/master_enable_right'),
-            ('/master/linkage_config', '/teach/master_config_right'),
-            ('/master/teach_mode', '/teach/teach_mode_right'),
-            ('/master_controled/joint_states', '/master_controled/joint_right'),
-        ],
+        remappings=master_remap('right'),
     )
 
-    # --- Slave arms: mode=1, subscribe and execute control commands ---
-
-    # Left slave
+    # --- Slave arms: arm_teleop_node mode=1 (unchanged) ---
     piper_slave_left = Node(
         package='piper',
         executable='arm_teleop_node.py',
@@ -103,8 +85,6 @@ def generate_launch_description():
             ('/enable_flag', '/puppet/enable_left'),
         ],
     )
-
-    # Right slave
     piper_slave_right = Node(
         package='piper',
         executable='arm_teleop_node.py',
@@ -127,7 +107,6 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        mode_master_arg,
         auto_enable_slave_arg,
         piper_master_left,
         piper_master_right,
