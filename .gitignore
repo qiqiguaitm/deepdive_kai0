@@ -62,3 +62,4 @@ ros2_ws/build/
 # ===== Node =====
 node_modules/
 **/node_modules/
+**/.xla_cache/
