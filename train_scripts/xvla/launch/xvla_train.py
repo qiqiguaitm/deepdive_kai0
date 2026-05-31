@@ -133,6 +133,52 @@ CONFIGS = {
         batch_size_per_gpu=8,
         vlm_lr_scale=0.1,
     ),
+    # ===== §0.NEW 控制变量 X3 三件套 (2026-05-31): vis = A_new_smooth_800 (811 ep, X1 cleaned,
+    # 真机已验证 work). 同超参 30k/5e-5/warmup500/freeze1000, 唯一变量=域组成. 取代 A_0423_0527 版
+    # (那版 eval 是 fit 非泛化 + 真机未验证). EE6D fixed 转换器, vis 权重 ×7. =====
+    "X3C_smooth800": dict(
+        # X3.C: vis-only (smooth_800).
+        datasets=[
+            dict(root=f"{SB}/A_new_smooth_800", domain_id=20, prompt=PROMPT, weight=1.0),
+        ],
+        steps=30_000,
+        lr=5e-5,
+        warmup_steps=500,
+        freeze_steps=1000,
+        batch_size_per_gpu=8,
+        vlm_lr_scale=0.1,
+    ),
+    "X3B_smooth800": dict(
+        # X3.B: kai(base+dagger) + smooth_800(vis ×7).
+        datasets=[
+            dict(root=f"{SB}/kai0_base", domain_id=19, prompt=PROMPT, weight=1.0),
+            dict(root=f"{SB}/kai0_dagger", domain_id=19, prompt=PROMPT, weight=1.0),
+            dict(root=f"{SB}/A_new_smooth_800", domain_id=20, prompt=PROMPT, weight=7.0),
+        ],
+        steps=30_000,
+        lr=5e-5,
+        warmup_steps=500,
+        freeze_steps=1000,
+        batch_size_per_gpu=8,
+        vlm_lr_scale=0.1,
+    ),
+    "X3A_smooth800": dict(
+        # X3.A: kai(base+dagger) + smooth_800(vis ×7) + xvla_soft_fold(×2).
+        datasets=[
+            dict(root=f"{SB}/kai0_base", domain_id=19, prompt=PROMPT, weight=1.0, type="parquet"),
+            dict(root=f"{SB}/kai0_dagger", domain_id=19, prompt=PROMPT, weight=1.0, type="parquet"),
+            dict(root=f"{SB}/A_new_smooth_800", domain_id=20, prompt=PROMPT, weight=7.0, type="parquet"),
+            dict(root="/data/shared/ubuntu/workspace/deepdive_kai0/xvla/data/xvla_soft_fold",
+                 action_cache_dir=f"{SB}/xvla_soft_fold_action_cache",
+                 domain_id=21, prompt=PROMPT, weight=2.0, type="hdf5"),
+        ],
+        steps=30_000,
+        lr=5e-5,
+        warmup_steps=500,
+        freeze_steps=1000,
+        batch_size_per_gpu=8,
+        vlm_lr_scale=0.1,
+    ),
 }
 
 # ==================== TRAIN ====================
