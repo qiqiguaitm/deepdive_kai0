@@ -171,6 +171,53 @@ js02:/mnt/data/tim/checkpoints/pi05_flatten_fold_a_new_pure_200_js/task_a_new_pu
 2. **vis_v2_full 学到"平均策略", 不锐利**: 跨 16 dates 的"折中" → 在任何具体场景上都不是最锐利, 但比 pure_200 在 OOD 时稳定
 3. **Real-world vs offline gap**: offline val 是录制好的数据, 真机有 lighting/setup variations 等 noise
 
+---
+
+## 8. 2026-05-31 更新 — PyTorch 原生训练对照 (隔离 JAX vs PyTorch 框架变量)
+
+> 实验 `A_mirror200_pi05_pytorch`: 同 pure_200 数据 + **同 pi05_base init** + 同 50k schedule, 唯一变量 = **训练框架 PyTorch DDP (`scripts/train_pytorch.py`) vs JAX (§7.1)**。设计见 [`../../future_plans/plans/A_mirror200_pi05_pytorch.md`](../../future_plans/plans/A_mirror200_pi05_pytorch.md)。
+
+### 8.1 配置
+
+| 项 | 值 |
+|---|---|
+| Config | `pi05_pytorch_a_new_pure_200` |
+| 框架 | **PyTorch DDP** (vs §7 的 JAX) ⭐ 唯一变量 |
+| Init | **pi05_base** (与 §7.1 JAX pi05_base 对照组**完全一致**) |
+| Dataset / Val | `A_new_pure_200` / `A_new_pure_200_val` (与 §7 同) |
+| Steps / batch | 50000 / 128, peak_lr 1.5e-5 |
+| 集群 | cnsh robot-task 8× A100, 训练耗时 **~68.5h** (DDP + dataloader 慢) |
+| Ckpt 目录 | `kai0/checkpoints/pi05_pytorch_a_new_pure_200/A_mirror200_pi05_pytorch/{step}/` (含 model.safetensors + optimizer.pt) |
+
+### 8.2 MAE@{1,10,25,50} (native A_new_pure_200_val, 20 ep × 200 frames)
+
+| step | MAE@1 | @10 | @25 | @50 |
+|---:|---:|---:|---:|---:|
+| 8000 | 0.0142 | 0.0256 | 0.0444 | 0.0703 |
+| 16000 | 0.0129 | 0.0239 | 0.0416 | 0.0662 |
+| 24000 | 0.0131 | 0.0237 | 0.0412 | 0.0653 |
+| 32000 | 0.0125 | 0.0234 | 0.0409 | 0.0650 |
+| 40000 | 0.0123 | 0.0231 | 0.0406 | 0.0649 |
+| 48000 | 0.0121 | 0.0230 | 0.0404 | 0.0647 |
+| **50000** | **0.0121** | **0.0229** | **0.0404** | **0.0646** | ⭐ best |
+
+**Best = step 50000, MAE@1 = 0.0121** (全 horizon 单调下降到 final)。最佳 ckpt: `kai0/checkpoints/pi05_pytorch_a_new_pure_200/A_mirror200_pi05_pytorch/50000/`。
+
+### 8.3 🔥 关键发现 — PyTorch 比 JAX 显著差 (同 init 纯框架对照)
+
+| 框架 (同 pi05_base init, 同数据, 同 val) | MAE@1 | @50 |
+|---|---:|---:|
+| **JAX** (§7.1, native val) | **0.0065** | 0.0087 |
+| **PyTorch** (本节, native val) | **0.0121** | 0.0646 |
+| **Δ (PyTorch / JAX)** | **+86% (1.86×)** | +643% |
+
+> ⚠️ §7 已证 init (pi05_base vs mixed_1_clean) 在 native val 上对 final MAE 无影响 (都 0.0065)，故本对比是**纯框架变量** — PyTorch 路径在 pure_200 上 offline MAE 显著劣于 JAX：
+> - **@1 差 86%** (0.0121 vs 0.0065)，**@50 差 6.4×** (0.0646 vs 0.0087) — 长 horizon 退化尤其严重，PyTorch 版 @1→@50 gap 达 434% (0.0121→0.0646) vs JAX 仅 34% (0.0065→0.0087)。
+> - **可能原因** (待查): (a) PyTorch flow-matching sampler / num_steps 与 JAX 实现差异; (b) DDP gradient sync / mixed-precision 数值差异; (c) PyTorch 侧 EMA 未启用或实现不同 (JAX ema_decay=0.9999); (d) preprocessing (image norm / action norm) 在 `models_pytorch/preprocessing_pytorch.py` 与 JAX transform 不一致。
+> - **结论**: **PyTorch 原生路径当前尚不能等价 reproduce JAX 的 pure_200 表现** — 在用 PyTorch 跑生产/其他实验前需先排查上述 gap。真机对照 (PyTorch ckpt vs JAX ckpt 同场景) 可进一步确认是 offline-only 伪差还是真实退化。
+
+> 评估方法: JAX `eval_val_action_mse.py` 经 `create_trained_policy` 自动检测 `model.safetensors` → 走 `load_pytorch` 分支, 同一脚本即可评 PyTorch ckpt (无需单独 PyTorch eval 工具)。
+
 ### 7.7 修正后的归因表
 
 | 维度 | 之前 (错误) | 现在 (正确) |
