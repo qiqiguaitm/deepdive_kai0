@@ -143,7 +143,7 @@
 | ⭐ | vis_v2_full + hflip mirror 重训 | 30h | 注入对称性 prior |
 | ⭐ | vis_v2_full 跑 100k step | 60h | 加深 supervision (不解决 multi-mode) |
 
-⚠️ TAC 路线 (G2) 已确认无效 — 见 §A.3 TAC bug. 修了 bug 重训才能验证 TAC 设计的真实效果, 但优先级低于 G0 (inference 侧已能修).
+⚠️ TAC 路线 (G2): buggy v7 无效; **bug-fixed `tac_v2` 已验证在"喂前缀 (RTC)"场景有效** (2026-05-29, 见 [tac_v2_effectiveness_pure_200.md](tac_v2_effectiveness_pure_200.md)) —— 但它解决的是 chunk 连续性/RTC 条件预测, 不是本文的 noise multi-modal collapse (那条仍走 G0 fixed-noise).
 
 ---
 
@@ -209,6 +209,8 @@ time_per_token = jnp.where(prefix_mask_tac, 0.0, time[..., None])
 ```
 
 **TAC pure_200 (`t-20260526154023-7fg82`)**: 用户决定不 kill, 跑完作为 buggy baseline (见 [memory](../../../../home/tim/.claude/projects/-home-tim-workspace/memory/project_tac_implementation_bug.md)). 等修了 bug 重训为 `tac_v2` 才能验证 TAC 设计真实效果.
+
+> **✅ 2026-05-29 更新 — bug-fixed `tac_v2` (pure_200) 已验证有效**: 详见 [tac_v2_effectiveness_pure_200.md](tac_v2_effectiveness_pure_200.md)。要点: 用**无前缀**指标 (clean MAE / P1 / P2) 评判 TAC 是**错误 regime** (TAC 只改前缀-后段条件预测); faithful prefix-conditioned 测试下 **tac_v2 喂干净前缀 postfix MAE 改善 +14% (d=8), 而 baseline 喂前缀直接 OOD 崩溃 -595%** —— 只有 TAC 能用前缀。"TAC 无效"是 buggy v7 + 无前缀 regime + 连续帧假象三重错误。代价: 无前缀单步精度在过拟合 native val 略差 ~18%。
 
 ### A.4 ❌ 假说: "vis_v2_full chunk discontinuity 导致 oscillation" (2026-05-27 PM, 推翻)
 
