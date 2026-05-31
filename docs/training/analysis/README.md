@@ -12,6 +12,8 @@
 |---|---|---|---|
 | **数据量增大反而 MAE 变差** (vis_v2_full 0.0131 vs pure_200 0.0065) — 排除 init 后的训练动态归因 + **2026-05-27 §11 chunk/noise 诊断 + 真机 oscillation 修复路线** | [data_scale_vs_quality_vis_v2_full_vs_pure_200.md](data_scale_vs_quality_vis_v2_full_vs_pure_200.md) | 2026-05-26 | 主线 |
 | **base 数据集是否值得预处理?** — 全 19 日期质量扫描 (高频噪声/teleport/end-snap/gripper). 结论: 不值得去噪平滑 (数据已干净); 4-29 gripper "异常" 经分桶证实是正常夹布非半夹 | [base_dataset_preprocess_assessment.md](base_dataset_preprocess_assessment.md) | 2026-05-28 | 结论 |
+| **vis_v2_full 真机 oscillation 数据侧 audit** — gripper 校准漂移 (v7/v8) / Class C 跳变 / stay-still ideal 等真机失败根因 | [vis_v2_full_data_audit.md](vis_v2_full_data_audit.md) | 2026-05-27 | 主线 |
+| **PyTorch vs JAX 框架对比 — eval 方法论 + 踩坑 postmortem** — 同协议 PyTorch @50 真差 JAX 4.1×; EMA 假说被 model-soup 证伪; 最初 "7.4×" 是跨协议伪对比; 6 个坑 + 通用 checklist | [pytorch_vs_jax_eval_postmortem.md](pytorch_vs_jax_eval_postmortem.md) | 2026-05-31 | 方法论 |
 
 ---
 

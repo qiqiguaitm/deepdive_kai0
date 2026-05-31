@@ -211,12 +211,96 @@ js02:/mnt/data/tim/checkpoints/pi05_flatten_fold_a_new_pure_200_js/task_a_new_pu
 | **PyTorch** (本节, native val) | **0.0121** | 0.0646 |
 | **Δ (PyTorch / JAX)** | **+86% (1.86×)** | +643% |
 
+> 🔴 **本表 (8.3) 的 PyTorch 0.0121/0.0646 是训练 inline-eval 数字, 与 JAX 行 (0.0065/0.0087, 训练记录) 协议不一致 — 此对比已被 §8.4 推翻为 "苹果比橘子" (同一 50k ckpt 独立 eval 实为 0.0100/0.0350)。真实框架 gap 见 §8.4.4 三方同协议对比 (@50 真差 4.1× 而非 6.4×)。本表保留作错误轨迹。**
+
 > ⚠️ §7 已证 init (pi05_base vs mixed_1_clean) 在 native val 上对 final MAE 无影响 (都 0.0065)，故本对比是**纯框架变量** — PyTorch 路径在 pure_200 上 offline MAE 显著劣于 JAX：
 > - **@1 差 86%** (0.0121 vs 0.0065)，**@50 差 6.4×** (0.0646 vs 0.0087) — 长 horizon 退化尤其严重，PyTorch 版 @1→@50 gap 达 434% (0.0121→0.0646) vs JAX 仅 34% (0.0065→0.0087)。
 > - **可能原因** (待查): (a) PyTorch flow-matching sampler / num_steps 与 JAX 实现差异; (b) DDP gradient sync / mixed-precision 数值差异; (c) PyTorch 侧 EMA 未启用或实现不同 (JAX ema_decay=0.9999); (d) preprocessing (image norm / action norm) 在 `models_pytorch/preprocessing_pytorch.py` 与 JAX transform 不一致。
 > - **结论**: **PyTorch 原生路径当前尚不能等价 reproduce JAX 的 pure_200 表现** — 在用 PyTorch 跑生产/其他实验前需先排查上述 gap。真机对照 (PyTorch ckpt vs JAX ckpt 同场景) 可进一步确认是 offline-only 伪差还是真实退化。
 
 > 评估方法: JAX `eval_val_action_mse.py` 经 `create_trained_policy` 自动检测 `model.safetensors` → 走 `load_pytorch` 分支, 同一脚本即可评 PyTorch ckpt (无需单独 PyTorch eval 工具)。
+
+### 8.4 🔬 根因排查 — **EMA 假说被实测证伪 (2026-05-31)**
+
+> ⚠️ **重大修正**: 本节早期版本断言 "EMA 缺失是 PyTorch 差的主因"。**2026-05-31 model-soup 实测直接证伪了这个假说**。以下是诚实的修正记录 — 保留错误推断的轨迹以警示。
+
+#### 8.4.1 代码事实 (仍成立): train_pytorch.py 确实不支持 EMA
+
+`train_pytorch.py:513` 写死 `logging.info("EMA is not supported for PyTorch training")` — PyTorch 训练**确实没有 EMA** (config 的 ema_decay=0.9999 被静默忽略, ckpt 存 raw 末步权重)。这是**事实**, 但下面证明它**不是** MAE gap 的主因。
+
+#### 8.4.2 Model-soup 实测 (decisive, 2026-05-31)
+
+**方法**: 均匀平均末段 6 个 ckpt (40k/42k/44k/46k/48k/50k) 模拟 EMA(0.9999) 末 ~10k 步窗口 (脚本 `train_scripts/kai/eval/model_soup_ema_probe.py`)。同 `eval_val_action_mse.py` (20 ep × 200 frame) 评估 soup vs plain-50k。
+
+**权重确实平均了** (diff 探针): `|soup−50k| ≈ 0.5 × |40k−50k|` (action_in_proj.weight: 2.3e-5 vs 4.9e-5), 数学正确, soup ≠ 50k。
+
+**结果** (native A_new_pure_200_val, 20 ep × 200 frame, 同协议):
+
+| ckpt | @1 | @10 | @25 | @50 |
+|---|---:|---:|---:|---:|
+| **PyTorch plain 50k** (no EMA) | **0.0100** | 0.0174 | 0.0258 | **0.0350** |
+| **PyTorch soup 40k-50k** (≈EMA) | **0.0101** | 0.0175 | 0.0259 | **0.0349** |
+| Δ (soup vs plain) | +1% | +0.6% | +0.4% | **−0.3%** |
+
+→ **soup ≈ plain, 全 horizon 差异 < 1%**。模拟 EMA **没有任何改善**。**EMA 缺失假说证伪。**
+
+#### 8.4.3 同时发现: §8.2 训练 inline-eval 数字 ≠ 独立 eval (协议不同)
+
+| 来源 | 同一个 50k ckpt 的 @50 |
+|---|---:|
+| §8.2 训练时 inline-eval 记录 | **0.0646** |
+| 本次独立 `eval_val_action_mse.py` (20ep×200f) | **0.0350** |
+
+差 1.8× — **训练内 inline-eval 与独立 eval 脚本的采样/帧选取/val 子集不同**。
+
+→ **这推翻了 §8.3 "PyTorch @50 比 JAX 差 7.4×" 的整个对比基础**: 那是拿 PyTorch 训练 inline-eval (0.0646) 比 JAX 训练 inline-eval (0.0087), 但两者 eval 协议未对齐 + ckpt 也未同协议重测。**是苹果比橘子。**
+
+#### 8.4.3b Preprocessing / norm 对齐复核 (2026-05-31, 仍有效)
+
+| 环节 | 对齐? |
+|---|---|
+| action/state Normalize (共享 data loader) | ✅ 一致 |
+| norm_stats 来源 / eval 反归一化 | ✅ 同脚本 |
+| image 像素域 [-1,1] (eval train=False) | ✅ 一致 |
+| **image augmentation (train)** | ⚠️ PyTorch train 有 crop/rotate/color aug, JAX 待确认 |
+
+#### 8.4.4 ✅ 三方同协议对比 — 框架 gap 真实存在 (2026-05-31 闭环)
+
+JAX ckpt (`task_a_pure200_base_pi05_step49999`, 自带 `assets/a_new_pure_200/norm_stats.json`) **就在本机**, 用同一 `eval_val_action_mse.py` (20ep×200f, prompt 一致) 重测, 三方终于可比:
+
+| ckpt | @1 | @10 | @25 | @50 |
+|---|---:|---:|---:|---:|
+| **JAX pure_200** (同协议) | **0.0066** | **0.0074** | **0.0078** | **0.0085** |
+| PyTorch plain 50k | 0.0100 | 0.0174 | 0.0258 | 0.0350 |
+| PyTorch soup (≈EMA) | 0.0101 | 0.0175 | 0.0259 | 0.0349 |
+| **Δ (PyTorch / JAX)** | **+52%** | +135% | +231% | **+312% (4.1×)** |
+
+> JAX 同协议 @1=0.0066 ≈ §7.1 训练记录 0.0065 → JAX eval 协议自洽, 数字可信。
+
+**铁结论**:
+1. ✅ **EMA 不是主因** (soup≈plain, 证伪)。
+2. ✅ **PyTorch 确实显著差于 JAX** — 同协议 @50 真差 **4.1×** (不是 §8.3 的 7.4× 伪数, 但绝非无差)。
+3. ✅ **gap 随 horizon 单调放大** (@1 +52% → @50 +312%) — 典型 **chunk rollout 误差累积**, 单步就偏 (52%) + 越滚越偏。
+
+**修正后的根因候选** (EMA 已排除, 按 horizon-scaling 签名重排):
+
+| 候选 | 与"@1 就偏 + horizon 放大"签名吻合? | 优先级 |
+|---|---|:-:|
+| **flow-matching sampler / denoising 实现差异** (num_steps / dt / noise schedule, PyTorch `sample_actions` vs JAX) | ✅ 高度吻合 — 采样器偏差每步累积 | ⭐⭐⭐ |
+| **train-time image aug** (PyTorch 有 crop/rotate/color, §8.4.3b) 拉低 in-distribution 锐度 | ⚠️ 能解释 @1 偏 52%, 但不完全解释 horizon 放大 | ⭐⭐ |
+| bf16 数值 / DDP grad sync | ⚠️ 通常均匀抬高, 不强烈 horizon-scaling | ⭐ |
+
+**待办 (要定位 PyTorch 真实缺陷)**:
+- ⭐ 对比 PyTorch `pi0_pytorch.sample_actions` vs JAX `pi0.sample_actions` 的 denoising loop (num_steps, dt 符号, noise→action 方向) 是否逐行等价
+- ⭐ 关掉 PyTorch train-time image aug 重训一小段, 看 @1 是否回到 ~0.0066
+- 这些是 PyTorch 路径能否用于生产的前置, 不是 EMA。
+
+#### 8.4.5 教训 (诚信)
+
+1. **跨协议对比 = 苹果比橘子**: §8.3 拿 PyTorch 训练 inline-eval 比 JAX 训练 inline-eval, 未确认两者 eval 协议一致 → 得出 7.4× 的伪结论。**任何框架/方法对比, eval 协议必须逐字对齐, ckpt 用同一脚本重测。**
+2. **假说要先证再写**: 早期版本把 "EMA 缺失是主因" 当结论写进文档 (还一度写了未实测数字), 实测 soup≈plain 直接打脸。**机理推断 (EMA 平滑长 horizon) 听起来合理, 但本数据集/本规模下不成立。**
+3. **soup 是诊断 EMA 假说的正确工具**, 这次用对了 — 它廉价、确定地证伪了假说, 避免了白做 EMA patch + 68h 重训。
+
 
 ### 7.7 修正后的归因表
 
