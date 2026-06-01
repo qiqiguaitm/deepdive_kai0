@@ -172,9 +172,20 @@ def create_torch_dataset(
     if repo_id == "fake":
         return FakeDataset(model_config, num_samples=1024)
 
-    dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
+    # Absolute local path repo_id: newer huggingface_hub (≥0.30) strictly validates repo_id
+    # format and rejects "/abs/path". Pass it via `root=` with a dummy valid label instead so
+    # it loads from local disk regardless of hub version. (older hub on cnsh 3.11 tolerated abs
+    # repo_id; cnbj 3.12 venv hub 0.32 does not.)
+    _root = None
+    _repo_label = repo_id
+    if os.path.isabs(repo_id):
+        _root = repo_id
+        _repo_label = "local/" + os.path.basename(repo_id.rstrip("/"))
+
+    dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(_repo_label, root=_root)
     dataset = lerobot_dataset.LeRobotDataset(
-        data_config.repo_id,
+        _repo_label,
+        root=_root,
         episodes=episodes,
         delta_timestamps={
             key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
