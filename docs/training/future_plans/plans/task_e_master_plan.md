@@ -390,8 +390,8 @@ pkill -f "scripts/train.py" || true             # 训练停
 # 相机和 Piper 换过硬件，calibration 必须重做：
 ./piper_tools/calibrate_can_mapping.py
 # 更新 config/calibration.yml 里的 T_world_cam*、T_link6_cam*
-./scripts/test_hardware.py                       # 相机 + CAN + 回零
-./scripts/test_cameras.py                        # 三路 RealSense 序列号（新 unit 要核对）
+./piper_tools/test_hardware.py                       # 相机 + CAN + 回零
+./piper_tools/test_cameras.py                        # 三路 RealSense 序列号（新 unit 要核对）
 ```
 
 ### 4.2 启动

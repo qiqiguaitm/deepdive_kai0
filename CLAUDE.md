@@ -104,8 +104,7 @@ Local scripts for this specific deployment setup:
 - `launch_3cam.py`, `launch_e2e_test.py`
 - `test_integration_ros2.py`, `test_inference_parity.py` — End-to-end and parity tests
 - `test_inference_server.py --check latency|quality|all` — Inference latency + quality benchmarking
-- `test_hardware.py` — Hardware verification (cameras + arms)
-- `test_cameras.py` — Camera diagnostics
+- (Hardware self-check / camera diagnostics moved to `piper_tools/` — see Piper Tools section)
 
 ### Training Scripts (top-level `train_scripts/`) — gf0/gf1/gf2
 
@@ -119,6 +118,11 @@ Offline training, evaluation, data prep, and monitoring scripts. See `docs/train
 ### Piper Tools (`piper_tools/`)
 
 CAN bus utilities for Agilex Piper arms: `setup_can.sh`, `activate_can.sh`, `find_all_can_port.sh`, `diagnose_can.sh`, `calibrate_can_mapping.py`, `verify_can_mapping.py`, `piper_ctrl_go_zero.py`, `piper_ctrl_gripper.py`.
+
+Hardware self-check / diagnostics:
+- `test_hardware.py` — Hardware verification (RealSense cameras + CAN arms; `--cam-only` / `--arm-only`)
+- `test_cameras.py --mode ros2|direct` — Three-camera FPS/jitter/drop diagnostics
+- `can_health_snap.sh [--loop N]` — CAN bus health snapshot (errors/bus-off, candump Hz, ROS topic Hz); `--loop` mode also wired into `web/data_manager/run.sh` for incident capture
 
 ### ROS2 Workspace (`ros2_ws/`)
 

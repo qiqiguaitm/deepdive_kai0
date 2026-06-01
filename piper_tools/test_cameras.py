@@ -3,7 +3,7 @@
 三相机验��脚本 (统一入口)
 
 模式:
-  --mode ros2    ROS2 topic 订阅验证 (需先 ros2 launch scripts/launch_3cam.py)
+  --mode ros2    ROS2 topic 订阅验证 (需先 ros2 launch start_scripts/kai/launch_3cam.py)
   --mode direct  pyrealsense2 SDK 直连压测 (不需要 ROS2)
 
 检查项:
@@ -17,10 +17,10 @@
 Usage:
   # ROS2 模式 (需要相机 launch 在跑)
   source /opt/ros/jazzy/setup.bash
-  python3 scripts/test_cameras.py --mode ros2 [--duration 10]
+  python3 piper_tools/test_cameras.py --mode ros2 [--duration 10]
 
   # 直连模式 (不需要 ROS2)
-  python3 scripts/test_cameras.py --mode direct [--duration 10] [--save-sample]
+  python3 piper_tools/test_cameras.py --mode direct [--duration 10] [--save-sample]
 """
 import argparse
 import time

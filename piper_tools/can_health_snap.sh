@@ -2,9 +2,9 @@
 # can_health_snap.sh — 数据采集偶发臂中断的现场快照采集
 #
 # 用法:
-#   bash start_scripts/diag/can_health_snap.sh                # 一次性快照到 stdout
-#   bash start_scripts/diag/can_health_snap.sh > /tmp/snap.txt # 保存快照
-#   bash start_scripts/diag/can_health_snap.sh --loop 30      # 每 30s 写一次到 /tmp/can_diag/
+#   bash piper_tools/can_health_snap.sh                # 一次性快照到 stdout
+#   bash piper_tools/can_health_snap.sh > /tmp/snap.txt # 保存快照
+#   bash piper_tools/can_health_snap.sh --loop 30      # 每 30s 写一次到 /tmp/can_diag/
 #
 # 触发时机: 出现"某条臂突然不能遥操"时立刻跑;
 #           长跑 (--loop) 可在数据采集开始时启动, 自动捕捉中断瞬间的状态.
@@ -26,7 +26,7 @@
 
 set -u
 
-PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"  # piper_tools/ → deepdive_kai0/
 IFACES=(can_left_mas can_left_slave can_right_mas can_right_slave)
 LOG_DIR="/tmp/can_diag"
 

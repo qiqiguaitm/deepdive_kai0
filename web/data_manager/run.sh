@@ -264,7 +264,7 @@ do_start() {
 
     # 7) CAN 健康监控 (出事自动打包 incident bundle 到 /tmp/can_diag/)
     if [[ "${SKIP_CAN_DIAG:-0}" != "1" ]]; then
-        local can_diag_sh="$REPO_ROOT/start_scripts/kai/diag/can_health_snap.sh"
+        local can_diag_sh="$REPO_ROOT/piper_tools/can_health_snap.sh"
         local can_diag_interval="${CAN_DIAG_INTERVAL:-30}"
         if [[ -x "$can_diag_sh" ]]; then
             start_svc can_diag "exec bash '$can_diag_sh' --loop $can_diag_interval"
