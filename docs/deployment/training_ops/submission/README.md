@@ -27,6 +27,14 @@
 
 6. **ckpt/log 落地路径** — 单机训练走 symlink trick 落本地盘(**别直接写 NFS/vePFS 的 `checkpoints/` 真实路径**);volc 任务写 vePFS `checkpoints/<config>/<exp>/`, 日志重定向到 vePFS `logs/`。
 
+## ⚠️ 踩坑经验 (提交/排障必读)
+
+| 文档 | 范围 |
+|---|---|
+| [`training_pitfalls_common.md`](training_pitfalls_common.md) ⭐ | **跨集群共性坑** — norm_stats 不自动算 / 绝对 repo_id 被新 hub 拒 / 数据集视频目录命名 / init 按 size 校验 / TOS 嵌套 / eval prompt 默认错 / inline-eval 静默失败 / config 先 push。文末附"一个新数据集→提交训练完整前置链"7 步速查 |
+| [`volc_ml_platform.md`](volc_ml_platform.md) §"Volc 特有踩坑" | Volc cnbj/cnsh — 卡 Deploying=资源被占(gang-sched)/镜像缓存 vs 多机 tradeoff / VOLC_REGION 必设 / SubPath 否则 403 / Status.State 字段 / 多机 orbax race |
+| [`uc_cluster_jobs.md`](uc_cluster_jobs.md) §12.10-12.11 | uc01/02/03 — ssh alias↔eth1 错位 / JAX coordinator 启动时序(proc0 先听 :15830)/ ICMP 滤但 TCP 通 / SSH 过载走 NFS 读 log / num_workers=16×节点 |
+
 ## 3 路径对比
 
 | 路径 | 适用场景 | 状态 |
@@ -39,7 +47,8 @@
 
 | 文件 | 行数 | 用途 |
 |---|---|---|
-| [`volc_ml_platform.md`](volc_ml_platform.md) | ~172 | Volc YAML/SDK 模式 + 16 卡 H20 YAML 配置要点 + region/queue mapping + image_cr |
+| [`training_pitfalls_common.md`](training_pitfalls_common.md) ⭐ | ~76 | 跨集群共性踩坑 (数据/init/eval/config) + 新数据集→提交 7 步前置链 |
+| [`volc_ml_platform.md`](volc_ml_platform.md) | ~230 | Volc YAML/SDK 模式 + 16 卡 H20 YAML 配置要点 + region/queue mapping + image_cr + "Volc 特有踩坑" |
 | [`gf0_control_plane.md`](gf0_control_plane.md) | ~361 | gf0 安装 volcengine SDK / mlp CLI 速查 / queue mapping / 镜像选择 / vsubmit 工具 |
 | [`uc_cluster_jobs.md`](uc_cluster_jobs.md) | ~423 | gf0 → SSH 管理 uc01-03 + uc 单机 8 GPU 启动 + uc01+uc02+uc03 24 GPU RDMA HSDP/FSDP 集群训练 |
 

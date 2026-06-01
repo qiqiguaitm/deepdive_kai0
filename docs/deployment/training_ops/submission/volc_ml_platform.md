@@ -170,3 +170,42 @@ python train_scripts/kai/volc/submit_yaml.py train_scripts/kai/volc/gf3_cluster_
 - 日志走 vePFS 共享, `logs/cluster_smoke_*_node${MLP_ROLE_INDEX}.log`, gf3 上 tail 即可
 - 任务列表 / GUI: `https://console.volcengine.com/ml-platform/region:ml-platform+cn-beijing/task`
 
+---
+
+## Volc 特有踩坑 (2026-06 实战归纳)
+
+> 跨集群共性坑 (norm_stats / 绝对 repo_id / init 完整性 / eval prompt 等) 见 [`training_pitfalls_common.md`](training_pitfalls_common.md)。本段只列 **Volc ML Platform 特有**的。
+
+### V1. 多卡任务卡 Deploying 0 进度 = 资源被占, 不是配置/镜像 ⚠️ (最常误判)
+
+- 16 卡 (2 节点) 是 **gang-scheduling**: 必须**同时**凑齐 2 个干净的整节点。queue "free=28" 可能是**碎片化**散在多机, 没有 2 个空 8-GPU 节点 → 任务 **Deploying 卡死, `UpdateTime` 冻结在创建时刻, 0/2 实例, 无报错**。
+- **先查是谁占着**: `list_jobs` 看活跃任务 (含**别的用户**的, 如 libero/GigaWorld/act-mvsw)。再查 `get_resource_queue` 的 `free=Capability-Allocated`。
+- 本轮实测: cnbj 从 free=28 被别人任务占到 **free=6** → 16 卡 (需 32... 实为 2×8=16) 调度不出。**别人占满时 16 卡等不到, 单节点 8 卡 (只需 1 节点) 也可能不够 → 迁 uc**。
+- ⚠️ 单节点秒起 ≠ 多节点能起: 单节点只要 1 个 8-GPU 节点; 多节点要 2 个整节点 + gang 同步。
+
+### V2. 镜像缓存决定部署速度 (换镜像有代价) ⚠️
+
+- **kai0-gf1 镜像** (`dvs-cr-cn-beijing.../kai:kai0-gf1`): cnbj 节点**已缓存** (A_0423/X-VLA 跑过) → 部署秒级。但**多机 JAX 会崩 "Logging error"** at distributed.initialize (该镜像 jax/日志环境问题)。
+- **h2r 镜像** (`visincept-cn-beijing.../grasp/h2r:1.0`): 文档实测**能多机** (2026-05-21 X-VLA Stage1), 但 cnbj 节点**没缓存** → 首拉 ~30min+, 甚至卡死。
+- → 换镜像修一个问题会引入另一个 (缓存)。**多机优先用已验证能多机 + 尽量已缓存的镜像**; 首次拉取慢要耐心 (看 `UpdateTime` 是否推进区分慢拉 vs 卡死)。
+- 镜像 URL 拼写: `cn-beijing` 别写成 `bejing` (DNS 不解析 → 卡 Deploying 25min+ 自动失败)。`curl -sI https://<cr>/v2/` 应返回 401 = endpoint 存在。
+
+### V3. 提交命令的坑
+
+- **`submit_yaml.py` 用 venv python** (`kai0/.venv/bin/python`) — 系统 python 缺 `yaml` 模块。
+- **凭证**: `VOLC_AK` + `VOLC_SK` env (inline 传, 别写文件/log)。
+- **`VOLC_REGION` 必须设** — submit_yaml.py 默认 `cn-shanghai`。提 **cnbj 任务必须 `VOLC_REGION=cn-beijing`**, 否则提到错的区。
+- cnbj vePFS 必须 `SubPath: "/vis_robot"` (IAM 限定), 否则 403 AccessDenied。
+
+### V4. API 字段 / 状态查询
+
+- job 状态在 **`Status.State`** (不是顶层 `State`); `Status.Message` 有人话原因 ("worker-1 实例异常结束" / "2 个实例皆在运行中" / "0/2 完成部署")。
+- `list_jobs` 用 **`Items`** key (非 `List`); 有效 state: Creating/Waiting/Queueing/Deploying/Running/Stopping/Completed/Failed/Stopped。
+- SDK 5.0.27 deserializer 坏 → 脚本顶部打 monkey-patch (见 §5.6.a 示例)。
+- 失败但 log 截断在 "Logging error" / 看不到真错 → 查 `get_job` 的 `Status.Message` + 两个 node log (`*_node0.log` / `*_node1.log`)。
+
+### V5. 多机 orbax + JAX 协调
+
+- multi-host orbax 保存 race → `sync_global_devices ... mismatch` → 用 `--overwrite` + 清 stale ckpt 目录。
+- JAX coordinator: `JAX_COORDINATOR_ADDRESS=$MLP_WORKER_0_HOST:15830` (port 15830, 不用 2222=SSH)。Volc 自动给 MLP_* env (需 `Framework: PyTorch`)。
+
