@@ -319,3 +319,22 @@ ssh tim@192.168.1.4 "grep -c '<new_config_name>' $CFG"
 | NCCL `NET/Socket` 出现（不是 `NET/IB`） | `NCCL_IB_DISABLE=1` 错设 | unset, 改用 `NCCL_IB_HCA=mlx5_0..3` |
 | `Shutdown barrier failed, 2/3 tasks reached` | 1 个 host 进程先死了 | 看那个 host 的 worker log 找根因 |
 | GPU mem 满但 util 0% 长时间 | XLA 编译中 (正常) 或卡死 | check master CPU + ~/.cache/jax mtime |
+
+### 12.11 2-host 16-GPU JAX 实战经验 (2026-06-01, A_0522_0526_raw, 8 坑全记录) ⭐
+
+cnbj 16卡被别人任务占满 (只剩 6 卡, gang-scheduling 凑不齐 2 节点) → 迁 uc **2 节点 16 卡** (uc01 被 X3.C-100k 占, 用另外 2 个空闲节点)。一次跑通踩了 8 个坑, 逐一记录:
+
+| # | 坑 | 现象 | 修复 / 教训 |
+|---|---|---|---|
+| 1 | **ssh alias↔eth1 错位** | `ssh uc02` 实际连到 eth1=.1.4 的机器 (文档 uc02=.1.3) | `~/.ssh/config` 三机 HostName 是乱的, 已修正对齐文档约定 **ucN eth1=192.168.1.{N+1}** (uc01=.1.2/uc02=.1.3/uc03=.1.4) + 注释。**操作前先 `ssh <a> "ip a show eth1"` 核对真身** |
+| 2 | **JAX coordinator 时序** | proc1 起后 5min `DEADLINE_EXCEEDED` at `train.py:434` distributed.initialize | **必须 proc0(coordinator) 先起 + `ss -tlnp\|grep 15830` 确认监听, 再起 proc1**。proc1 默认 init timeout 300s, coordinator 起晚就崩。我先起 proc1 又因 SSH reset proc0 起晚 → 超时 |
+| 3 | **ICMP 被滤 ≠ 不通** | `ping .1.2` 0 received, 误判网络断 | **用 TCP 测连通, 不用 ping**: python socket connect 到 `<peer>:15830` 成功 = JAX coordinator + NCCL 可用。eth1 RoCE 网 ICMP 被过滤但 TCP/RDMA 正常 |
+| 4 | **init ckpt 截断** | `FAILED_PRECONDITION: Truncated Zstd-compressed stream` 读 mixed_1_clean params | TOS 同步 init 不完整 (d/chunk 2401B / ocdbt 9.2G)。**按 size 校验不按文件数**: 完整 `params/ocdbt.process_0` ≈ **22G**。重传到 22G 才对 |
+| 5 | **tosutil 仅在某节点** | `/home/ubuntu/tosutil: No such file` | tosutil 只装在某一台 (本轮在 .1.3 机)。alias 改后路径机器变了。**NFS 共享 → 从有 tosutil 的机器跑同步即可** (落 NFS 全机可见) |
+| 6 | **多机 orbax sync race** | `AssertionError: sync_global_devices name mismatch (CheckpointManager:save_root_metadata)` | stale ckpt metadata + 残留进程。**清 ckpt 目录 + 训练加 `--overwrite`** (非 `--resume`) |
+| 7 | **残留进程干扰** | 反复重启后每机 `pgrep` 2 个 train.py | 旧崩溃/hanging 进程没杀净 (SSH 失败致 cleanup 没确认)。但 **JAX 若形成干净 `process N/2` 组就无害** (僵尸不参与协调); 真冲突才需彻底 kill |
+| 8 | **uc 外网 SSH 过载** | 高频 ssh 后 `kex_exchange_identification: Connection reset` | **我连续 ssh 把外网 22 端口打过载了**。修复: ① 停手让它 backoff ② **log 在 NFS 共享, 从更稳的节点 (如 X3.C 所在机) 读同一 log**, 不必连卡死的节点 ③ 低频 + 长 sleep 间隔 |
+
+**2 节点启动 (非 uc01 master 也行)** — 本轮 coordinator = 空闲节点之一 (eth1 .1.4), 不用必须 uc01。每节点独立从控制端 ssh 起进程 (不需节点间 ssh), 各设 `JAX_COORDINATOR_ADDRESS=<proc0 eth1>:15830` / `JAX_NUM_PROCESSES=2` / `JAX_PROCESS_INDEX=0|1` + §12.2 NCCL RDMA env + `--fsdp-devices 16`。脚本见 `/tmp/launch_raw_uc.sh` 模式 (单 proc 版, proc0 先 + 确认监听 + proc1)。
+
+**验证稳定**: 两节点 log (NFS) 都出 `process 0/2`+`process 1/2` 且 `Step N: loss=…` 同步下降 = 16 卡 FSDP 正常 (本轮 Step100 loss 0.268→0.118)。
