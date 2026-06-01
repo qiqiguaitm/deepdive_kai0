@@ -1492,6 +1492,66 @@ _CONFIGS = [
 
     # ===================================================================================
     # A_0423_0527 dual init JAX (2026-05-27, plan: A_0423_0527_excl_calibration_drift.md)
+    # ===================================================================================
+    # Data root-cause probe Exp-1 (走停/犹豫/cloth loop 排查):
+    #   plans/data_root_cause_probe_experiments.md — 验证 H1 "投放过程污染".
+    #   两个数据集均来自 vis_base 5-22 + 5-26 (各 100 ep, 合 200 ep):
+    #   - `_no_release`: 裁掉每个 ep 开头投放等待静止段 (~7% 帧). 313419 frames.
+    #   - `_raw`       : 同两天但不裁 (对照, 隔离 "裁投放" vs "200ep 规模"). 336917 frames.
+    #   单变量=是否裁投放. init=mixed_1_clean (与 smooth_800 work 锚点一致), 40k step.
+    #   ⚠️ norm_stats 各自重算 (compute_norm_stats.py), gripper/wrist 现状不动.
+    # ===================================================================================
+    TrainConfig(
+        name="pi05_flatten_fold_A_0522_0526_no_release",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_0522_0526_no_release",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/home/tim/local_ckpts/Task_A_init/mixed_1_clean/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6,
+        ),
+        ema_decay=0.9999,
+        num_train_steps=40_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=16,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
+    TrainConfig(
+        name="pi05_flatten_fold_A_0522_0526_raw",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_0522_0526_raw",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/home/tim/local_ckpts/Task_A_init/mixed_1_clean/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6,
+        ),
+        ema_decay=0.9999,
+        num_train_steps=40_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=16,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
+
     # Dataset = 4-23~5-27 EXCEPT 5-16/18/19/20/21 (校准漂移期, v7 发现).
     # 13 dates / ~1059 ep (排 Class C 107 + End-snap 5 截尾).
     # 用 build_A_0423_0527.py 生成数据, 同 hparams 双 init 对照:
