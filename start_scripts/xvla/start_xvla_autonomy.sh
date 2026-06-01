@@ -15,7 +15,7 @@
 #   ros2 topic pub /policy/execute std_msgs/Bool 'data: true' --once
 #
 # Examples:
-#   ./start_scripts/xvla/start_xvla_autonomy.sh server /data1/DATA_IMP/checkpoints/ckpt_others/xvla_x3a_stage_a_step_final
+#   ./start_scripts/xvla/start_xvla_autonomy.sh server /data1/DATA_IMP/checkpoints/ckpt_xvla/xvla_x3c_smooth800_step_final
 #   ./start_scripts/xvla/start_xvla_autonomy.sh client                 # observe-only (default)
 #   ./start_scripts/xvla/start_xvla_autonomy.sh client --execute       # drive arms immediately
 #
