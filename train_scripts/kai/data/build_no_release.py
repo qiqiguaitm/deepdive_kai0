@@ -143,7 +143,9 @@ def main():
         (dst / "data" / "chunk-000").mkdir(parents=True)
         (dst / "meta").mkdir()
         for cam in CAMERAS:
-            (dst / "videos" / "chunk-000" / CAM_DIRS[cam]).mkdir(parents=True)
+            # dst dir uses the FULL feature key (lerobot video_path {video_key}=observation.images.*),
+            # NOT the bare cam name. Source (vis_base) uses bare names via CAM_DIRS.
+            (dst / "videos" / "chunk-000" / cam).mkdir(parents=True)
 
     episodes_out, stats_out = [], []
     new_idx = 0
@@ -185,7 +187,7 @@ def main():
                 # --- videos: 3 RGB cams ---
                 for cam in CAMERAS:
                     sv = src / "videos" / "chunk-000" / CAM_DIRS[cam] / f"episode_{old_id:06d}.mp4"
-                    dv = dst / "videos" / "chunk-000" / CAM_DIRS[cam] / f"episode_{new_idx:06d}.mp4"
+                    dv = dst / "videos" / "chunk-000" / cam / f"episode_{new_idx:06d}.mp4"  # feature-key dir
                     if trim:
                         video_jobs.append((str(sv), str(dv), cut, new_len))  # deferred to pool
                     elif args.symlink_video:
