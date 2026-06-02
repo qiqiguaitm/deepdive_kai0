@@ -66,6 +66,10 @@ def generate_launch_description():
     record_subset_arg = DeclareLaunchArgument(
         'record_subset', default_value='dagger',
         description='Dataset subset (default "dagger" — matches kai0_dagger upstream)')
+    record_inference_arg = DeclareLaunchArgument(
+        'record_inference', default_value='true',
+        description='Form C: also record policy rollouts to <task>/inference/<date-v2>/ '
+                    '(intervention=0). Set false to record dagger/ only.')
 
     # ── Compose autonomy_launch.py: same policy + slave + cameras (no rerun) ──
     # Three key overrides:
@@ -142,6 +146,7 @@ def generate_launch_description():
             'subset':         LaunchConfiguration('record_subset'),
             'checkpoint_dir': LaunchConfiguration('checkpoint_dir'),
             'operator':       'dagger',
+            'record_inference': LaunchConfiguration('record_inference'),
         }],
     )
 
@@ -163,7 +168,7 @@ def generate_launch_description():
     pedal_delayed        = TimerAction(period=2.0,  actions=[pedal_node])
 
     return LaunchDescription([
-        record_task_arg, record_prompt_arg, record_subset_arg,
+        record_task_arg, record_prompt_arg, record_subset_arg, record_inference_arg,
         autonomy,  # includes mode_arg/gpu_arg/config_arg/ckpt_arg/etc. transitively
         master_left_delayed,
         master_right_delayed,

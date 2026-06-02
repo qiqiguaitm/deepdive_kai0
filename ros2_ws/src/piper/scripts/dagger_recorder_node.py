@@ -204,6 +204,11 @@ class DaggerRecorder(Node):
         self.declare_parameter("align_tol_rad", ALIGN_TOL_RAD)
         self.declare_parameter("align_timeout_s", ALIGN_TIMEOUT_S)
         self.declare_parameter("min_episode_sec", MIN_EPISODE_SEC)
+        # Form C dual-dataset toggle. When false, the policy-rollout (inference/)
+        # side is fully disabled: no inference episode is opened/written and no
+        # <task>/inference/<date-v2>/ dir is created — only dagger/ is recorded.
+        # String-typed so it flows cleanly through shell→launch→param.
+        self.declare_parameter("record_inference", "true")
 
         ckpt_dir = self.get_parameter("checkpoint_dir").value or ""
         task_p = self.get_parameter("task_name").value or ""
@@ -215,6 +220,9 @@ class DaggerRecorder(Node):
         self._align_tol: float = float(self.get_parameter("align_tol_rad").value)
         self._align_timeout: float = float(self.get_parameter("align_timeout_s").value)
         self._min_ep_sec: float = float(self.get_parameter("min_episode_sec").value)
+        self._record_inference: bool = str(
+            self.get_parameter("record_inference").value
+        ).strip().lower() in ("1", "true", "yes", "on")
 
         self._lock = threading.Lock()
         self._state: State = State.POLICY_RUN
@@ -359,7 +367,8 @@ class DaggerRecorder(Node):
 
         self.get_logger().info(
             f"dagger_recorder ready: task={self._task} subset={self._subset} "
-            f"prompt={self._prompt!r} fps={FPS}\n"
+            f"prompt={self._prompt!r} fps={FPS} "
+            f"record_inference={'ON' if self._record_inference else 'OFF (dagger-only)'}\n"
             f"  state={self._state.value} — waiting for /dagger/takeover"
         )
 
@@ -811,6 +820,8 @@ class DaggerRecorder(Node):
         estimator (see docs/deployment/strategy/awbc_implementation_plan.md
         Stage 1) as negative / low-advantage samples.
         """
+        if not self._record_inference:
+            return  # inference recording disabled by config
         try:
             ep = next_episode_id(self._task, "inference")
             writer = EpisodeWriter(
@@ -926,6 +937,10 @@ class DaggerRecorder(Node):
         # ── POLICY_RUN branch: write to inference (lazy-open if needed) ──
         if cur_state != State.POLICY_RUN:
             # ALIGNING / HUMAN_RECORD-not-recording / RETURNING — quiet
+            return
+
+        if not self._record_inference:
+            # inference recording disabled by config — policy runs, nothing written
             return
 
         if inf_writer is None:

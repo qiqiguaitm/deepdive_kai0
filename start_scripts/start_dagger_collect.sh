@@ -23,6 +23,9 @@ CHECKPOINT_DIR=""
 TASK_NAME=""
 PROMPT=""
 SUBSET="dagger"
+# Form C inference-rollout recording (-> <task>/inference/<date-v2>/, intervention=0).
+# Default OFF per 2026-06-02 decision (暂不录 inference); --record-inference re-enables.
+RECORD_INFERENCE="false"
 CONFIG_NAME=""         # auto from sidecar
 EXTRA_ARGS=()          # passed through to start_autonomy.sh
 # DAgger sessions are driven via web/dagger_manager (or via the freedrive
@@ -46,6 +49,8 @@ Options:
   --config-name <s>  Override base_config_name (default: from sidecar)
   --no-rerun         Disable Rerun viz (DEFAULT — dagger session uses web/dagger_manager)
   --rerun            Force Rerun viz on (override default-off)
+  --record-inference Also record policy rollouts to <task>/inference/<date-v2>/ (Form C)
+  --no-inference     Record dagger/ only — no inference dataset (DEFAULT)
   --mode <ros2|websocket|both>  Inference channel (forwarded)
 
 All other flags are forwarded to start_autonomy.sh.
@@ -66,6 +71,8 @@ while [[ $# -gt 0 ]]; do
         --subset)                 need_value "$@"; SUBSET="$2";          shift 2 ;;
         --rerun)                  USE_RERUN="true"; shift ;;
         --no-rerun)               USE_RERUN="false"; shift ;;
+        --record-inference)       RECORD_INFERENCE="true"; shift ;;
+        --no-inference)           RECORD_INFERENCE="false"; shift ;;
         -h|--help)                usage ;;
         *)                        EXTRA_ARGS+=("$1"); shift ;;
     esac
@@ -114,6 +121,7 @@ echo " kai0 DAgger Collection (delegates to start_autonomy.sh --dagger)"
 echo " checkpoint : $CHECKPOINT_DIR"
 echo " task       : ${TASK_NAME:-<infer-from-ckpt>}"
 echo " subset     : $SUBSET"
+echo " inference  : $([ "$RECORD_INFERENCE" = "true" ] && echo 'ON (Form C: dagger/ + inference/)' || echo 'OFF (dagger/ only)')"
 echo " prompt     : ${PROMPT:-<infer-from-ckpt>}"
 echo " config     : $CONFIG_NAME"
 echo " asset_id   : ${ASSET_ID:-<none>}"
@@ -122,7 +130,7 @@ echo "============================================================"
 echo ""
 
 # Build dagger-specific launch args for dagger_launch.py
-DAGGER_ARGS=("record_subset:=$SUBSET")
+DAGGER_ARGS=("record_subset:=$SUBSET" "record_inference:=$RECORD_INFERENCE")
 [[ -n "$TASK_NAME" ]] && DAGGER_ARGS+=("record_task:=$TASK_NAME")
 [[ -n "$PROMPT" ]] && DAGGER_ARGS+=("record_prompt:=$PROMPT" "prompt:=$PROMPT")
 
