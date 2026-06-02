@@ -36,17 +36,21 @@ LOCK=/tmp/vis_base_sync.lock
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
 # ---- host-aware: KAI0_ROOT + TOSUTIL 自动探测 ----
-#   gf0 (cnsh):  /vePFS/tim/workspace/deepdive_kai0          + /home/tim/tosutil
-#   gf3 (cnbj):  /vePFS-North-E/vis_robot/workspace/deepdive_kai0 + tosutil(PATH, /usr/bin)
-#   uc01-03:     /data/shared/ubuntu/workspace/deepdive_kai0 + /home/ubuntu/tosutil
-if   [ -d /vePFS/tim/workspace/deepdive_kai0 ];                       then
-  KAI0_ROOT=/vePFS/tim/workspace/deepdive_kai0
-elif [ -d /vePFS-North-E/vis_robot/workspace/deepdive_kai0 ];        then
+#   gf3 (cnbj):  /vePFS-North-E/vis_robot/workspace/deepdive_kai0 + tosutil(PATH 或 /root/tosutil)
+#   uc01-03:     /data/shared/ubuntu/workspace/deepdive_kai0      + /home/ubuntu/tosutil
+#   gf0 (cnsh):  /vePFS/tim/workspace/deepdive_kai0              + /home/tim/tosutil
+# ⚠️ 探测顺序: North-E / data-shared 优先于 /vePFS/tim — 因为 gf3 上同时存在一个 **空壳**
+#   /vePFS/tim/workspace/deepdive_kai0 目录树 (非真实 cnsh 挂载), 若先判它会误写。
+#   每个候选都要求真实数据路径 kai0/data/Task_A/vis_base 存在 (空壳树不含 → 不命中)。
+_VB=kai0/data/Task_A/vis_base
+if   [ -d /vePFS-North-E/vis_robot/workspace/deepdive_kai0/$_VB ];  then
   KAI0_ROOT=/vePFS-North-E/vis_robot/workspace/deepdive_kai0
-elif [ -d /data/shared/ubuntu/workspace/deepdive_kai0 ];             then
+elif [ -d /data/shared/ubuntu/workspace/deepdive_kai0/$_VB ];      then
   KAI0_ROOT=/data/shared/ubuntu/workspace/deepdive_kai0
+elif [ -d /vePFS/tim/workspace/deepdive_kai0/$_VB ];               then
+  KAI0_ROOT=/vePFS/tim/workspace/deepdive_kai0
 else
-  echo "[$(ts)] ERROR: cannot locate deepdive_kai0 root on this host" >&2; exit 1
+  echo "[$(ts)] ERROR: cannot locate deepdive_kai0/$_VB on this host" >&2; exit 1
 fi
 # tosutil: 优先 ~/tosutil, 退回 PATH 中的 tosutil
 if   [ -x "$HOME/tosutil" ];        then TOSUTIL="$HOME/tosutil"
