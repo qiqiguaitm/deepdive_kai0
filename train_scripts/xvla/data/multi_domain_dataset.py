@@ -20,6 +20,20 @@ import torch
 from torch.utils.data import Dataset
 import av  # PyAV for mp4 decoding
 
+# P0 (2026-06-01): ImageNet normalization to match lerobot/xvla-base pretrain domain.
+# The lerobot XVLAPolicy.forward does NOT normalize (XVLAImageNetNormalizeProcessorStep
+# lives in the processor, which our train/serve path bypasses). Training on raw [0,1]
+# left the pretrained Florence2 visual frontend mis-fed -> real-robot oscillation
+# (see docs/training/analysis/xvla_vs_official_gap_rootcause.md R1). Apply ImageNet
+# (image - mean) / std here; serve_policy_xvla.py applies the IDENTICAL transform.
+_IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+_IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+
+
+def imagenet_normalize_chw(t: torch.Tensor) -> torch.Tensor:
+    """(3,H,W) float in [0,1] -> ImageNet-normalized. Mirrors serve_policy_xvla._imagenet_normalize."""
+    return (t - _IMAGENET_MEAN) / _IMAGENET_STD
+
 
 def decode_frame(video_path: Path, frame_idx: int) -> np.ndarray:
     """Decode 1 frame from mp4, return RGB (H,W,3) uint8."""
@@ -153,8 +167,8 @@ class LeRobotEE6DDataset(Dataset):
                 frame = decode_frame(video_path, f_idx)
                 size = self.image_size_main if i < 2 else self.image_size_wrist
                 frame = resize_pad(frame, size)
-                # (H,W,3) → (3,H,W) [0,1]
-                t = torch.from_numpy(frame).permute(2, 0, 1).float() / 255.0
+                # (H,W,3) → (3,H,W) [0,1] → ImageNet-normalized (P0)
+                t = imagenet_normalize_chw(torch.from_numpy(frame).permute(2, 0, 1).float() / 255.0)
                 img_dict["observation.images.image" + (str(i+1) if i > 0 else "")] = t
             except Exception as e:
                 # Skip this sample on decode failure
@@ -277,7 +291,7 @@ class XVLAHdf5Dataset(Dataset):
                     arr = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
                     arr = resize_pad(arr, size)
                 key = "observation.images.image" + (str(i+1) if i > 0 else "")
-                imgs[key] = torch.from_numpy(arr).permute(2, 0, 1).float() / 255.0
+                imgs[key] = imagenet_normalize_chw(torch.from_numpy(arr).permute(2, 0, 1).float() / 255.0)
 
         return {
             **imgs,

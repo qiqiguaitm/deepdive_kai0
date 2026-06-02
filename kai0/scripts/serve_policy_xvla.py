@@ -75,6 +75,12 @@ _OBS_SLOT_FOR_IMG = ["top_head", "hand_right", "hand_left"]
 _STATE_KEY = "observation.state"
 _LANG_KEY = "observation.language.tokens"
 
+# P0 (2026-06-01): ImageNet normalization — MUST match multi_domain_dataset.imagenet_normalize_chw
+# exactly (train/serve parity). See docs/training/analysis/xvla_vs_official_gap_rootcause.md R1.
+# Only active for checkpoints trained WITH normalization (X3.C P0 retrain onward).
+_IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+_IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # 预处理 (镜像 multi_domain_dataset.py)
@@ -184,11 +190,16 @@ class XVLAServerPolicy(_base_policy.BasePolicy):
     def __init__(self, policy: XVLAPolicy, device, dtype, tokenizer,
                  default_prompt, default_domain_id, T_world_baseL, T_world_baseR,
                  g_open, g_close, binarize, seed=42,
-                 proprio_feedback=True, proprio_resync=0.15):
+                 proprio_feedback=True, proprio_resync=0.15, imagenet_norm=False):
         self._p = policy
         self._device = device
         self._dtype = dtype
         self._seed = seed   # 确定性采样种子; None=随机 (每次重采)
+        # P0: ImageNet 归一化 — 必须与训练 ckpt 一致。30k 旧 ckpt=False; P0 重训 ckpt=True。
+        self._imagenet_norm = bool(imagenet_norm)
+        if self._imagenet_norm:
+            self._in_mean = _IMAGENET_MEAN.to(device, dtype=dtype)
+            self._in_std = _IMAGENET_STD.to(device, dtype=dtype)
         # ① 预测式 proprio (上游 SoftFold-Agilex trick): 用"上一次预测末步"当下次 proprio,
         # 而非实测关节 → 去传感噪声/臂滞后, 连续 chunk 一致 (平滑)。漂移超 resync 则回实测。
         self._proprio_fb = bool(proprio_feedback)
@@ -243,7 +254,10 @@ class XVLAServerPolicy(_base_policy.BasePolicy):
             if self._trace is not None:
                 _trace_imgs[slot] = hwc
             t = torch.from_numpy(hwc).permute(2, 0, 1).float().div_(255.0)  # (3,H,W) ∈[0,1]
-            batch[key] = t.unsqueeze(0).to(self._device, dtype=self._dtype)
+            t = t.unsqueeze(0).to(self._device, dtype=self._dtype)
+            if self._imagenet_norm:  # P0: (img-mean)/std, 与 multi_domain_dataset 一致
+                t = (t - self._in_mean) / self._in_std
+            batch[key] = t
 
         # proprio: 20D EE6D。① 预测式 proprio (上游): 用上次预测末步, 而非实测关节。
         # 实测仍算出来用于首帧初始化 + 漂移保护 (pred 偏离实测 EE 位置过大→resync 回实测)。
@@ -401,6 +415,9 @@ def _parse_args():
     p.add_argument("--proprio_feedback", action=argparse.BooleanOptionalAction, default=False,
                    help="server 端预测式 proprio (用上次预测末步当 proprio)。默认【关】: 改由 client node "
                         "走 commanded-proprio (上次下发命令当 proprio, 连续模式正确时序)。开此与 node 版冲突, 勿同开")
+    p.add_argument("--imagenet_norm", action=argparse.BooleanOptionalAction, default=False,
+                   help="P0: 对输入图像做 ImageNet 归一化 (必须与训练 ckpt 一致). "
+                        "30k 旧 ckpt 用 --no-imagenet_norm; P0 重训 ckpt 用 --imagenet_norm.")
     p.add_argument("--proprio_resync", type=float, default=0.15,
                    help="预测 proprio 偏离实测 EE 位置超此 (m) 则 resync 回实测 (漂移保护)")
     return p.parse_args()
@@ -437,7 +454,8 @@ def main():
         T_world_baseL=TL, T_world_baseR=TR,
         g_open=args.gripper_open_value, g_close=args.gripper_close_value,
         binarize=args.binarize_gripper, seed=(None if args.seed < 0 else args.seed),
-        proprio_feedback=args.proprio_feedback, proprio_resync=args.proprio_resync)
+        proprio_feedback=args.proprio_feedback, proprio_resync=args.proprio_resync,
+        imagenet_norm=args.imagenet_norm)
 
     metadata = {
         "action_kind": "ee",
