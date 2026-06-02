@@ -43,6 +43,18 @@ CAM_DIRS = {"observation.images.top_head": "top_head",
             "observation.images.hand_left": "hand_left",
             "observation.images.hand_right": "hand_right"}
 FPS = 30
+# 并行: os.cpu_count() 在容器里常被 cgroup 误报 (本机报 13, 实际 56) → 用 sched_getaffinity.
+# BUILD_WORKERS env 可覆盖. 每 worker ENC_THREADS 编码线程; workers×threads ≈ 核数.
+def _avail_cores() -> int:
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:
+        return os.cpu_count() or 8
+ENC_THREADS = int(os.environ.get("BUILD_ENC_THREADS", "2"))
+BUILD_WORKERS = int(os.environ.get("BUILD_WORKERS", str(max(1, _avail_cores() // ENC_THREADS))))
+# 瓶颈实测是 PyAV decode→encode 流水 (单进程~0.4核, 加 worker 收益递减). preset 提速最有效:
+# veryfast(默认, 近无损) → ultrafast(再快~2x, 文件略大但 VLA 训练无所谓). BUILD_PRESET 可覆盖.
+ENC_PRESET = os.environ.get("BUILD_PRESET", "veryfast")
 ARM_DIMS = list(range(0, 6)) + list(range(7, 13))   # 12 arm dims (exclude dim6 L_grip, dim13 R_grip)
 THR = 3e-3      # rad/frame: sustained mean |Δa| over arm dims => "moving"
 WIN = 10        # frames of sustained motion to call it the onset
@@ -73,7 +85,7 @@ def trim_video_pyav(src_mp4: Path, dst_mp4: Path, cut: int, expected_frames: int
     out_stream.pix_fmt = "yuv420p"
     # veryfast preset + crf18: near-visually-lossless, ~5-8x faster than default 'medium'.
     # threads=4 per encoder; episodes run in parallel so keep per-proc thread count modest.
-    out_stream.options = {"crf": "18", "preset": "veryfast", "threads": "4"}
+    out_stream.options = {"crf": "18", "preset": ENC_PRESET, "threads": str(ENC_THREADS)}
 
     written = 0
     idx = 0
@@ -147,7 +159,12 @@ def build_per_date_v3(date_v2: str, dry_run: bool = False) -> dict:
 
     if not dry_run:
         if dst.exists():
-            sys.exit(f"dst already exists: {dst} (delete first)")
+            # complete = meta/info.json present (written last). 半成品 (被 kill 打断, 无 meta) → 删除重建.
+            if (dst / "meta" / "info.json").exists():
+                print(f"  skip {date_v3}: already complete (meta/info.json present)", flush=True)
+                return {"date_v2": date_v2, "date_v3": date_v3, "skipped": True}
+            print(f"  ⚠️ {date_v3}: incomplete (no meta/info.json) → removing + rebuilding", flush=True)
+            shutil.rmtree(dst)
         (dst / "data" / "chunk-000").mkdir(parents=True)
         (dst / "meta").mkdir()
         for cam in CAMERAS:
@@ -196,7 +213,7 @@ def build_per_date_v3(date_v2: str, dry_run: bool = False) -> dict:
     # parallel video trim (asserts frame-count == new_len inside _trim_job)
     if video_jobs:
         from concurrent.futures import ProcessPoolExecutor, as_completed
-        nproc = min(14, max(1, (os.cpu_count() or 8) // 4))
+        nproc = BUILD_WORKERS
         print(f"  trimming {len(video_jobs)} videos ({nproc} workers)...", flush=True)
         with ProcessPoolExecutor(max_workers=nproc) as ex:
             for fut in as_completed({ex.submit(_trim_job, j): j for j in video_jobs}):
@@ -245,8 +262,11 @@ def main():
         reps = [build_per_date_v3(d, dry_run=args.dry_run) for d in dates]
         print("\n=== per-date v3 summary ===")
         for r in reps:
-            print(f"  {r['date_v3']}: {r['episodes']} ep, {r['total_frames']} frames, "
-                  f"cut median={r['cut_median']}, dropped {r['dropped_pct']:.1f}%")
+            if r.get("skipped"):
+                print(f"  {r['date_v3']}: SKIPPED (already complete)")
+            else:
+                print(f"  {r['date_v3']}: {r['episodes']} ep, {r['total_frames']} frames, "
+                      f"cut median={r['cut_median']}, dropped {r['dropped_pct']:.1f}%")
         return
 
     if not args.mode:
@@ -329,7 +349,7 @@ def main():
     # --- parallel video trim (the slow part: 600 mp4 re-encodes) ---
     if trim and not args.dry_run and video_jobs:
         from concurrent.futures import ProcessPoolExecutor, as_completed
-        nproc = min(14, max(1, (os.cpu_count() or 8) // 4))  # 4 enc-threads each
+        nproc = BUILD_WORKERS  # 4 enc-threads each
         print(f"trimming {len(video_jobs)} videos with {nproc} workers (4 threads each)...")
         done = 0
         with ProcessPoolExecutor(max_workers=nproc) as ex:
