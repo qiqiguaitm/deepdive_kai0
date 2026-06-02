@@ -89,8 +89,15 @@ class MultiCameraNode(Node):
         self.declare_parameter('enable_head_depth_override', 'auto')
         self.declare_parameter('enable_left_depth_override', 'auto')
         self.declare_parameter('enable_right_depth_override', 'auto')
+        # D405 wrist anti-flicker exposure lock (μs). MUST be an integer multiple
+        # of the mains half-period: 50Hz mains → light pulses at 100Hz (10ms) →
+        # use 10000/20000/30000. 20000 (2×10ms) is the sweet spot under 30fps
+        # (40000 is cleaner but >33.3ms frame period kills 30fps). NEVER 16667
+        # (=1/60s): that is a 60Hz value and reintroduces flicker on 50Hz mains.
+        self.declare_parameter('wrist_exposure_us', 20000)
 
         fps = self.get_parameter('fps').value
+        self._wrist_exposure_us = int(self.get_parameter('wrist_exposure_us').value)
         w = self.get_parameter('width').value
         h = self.get_parameter('height').value
 
@@ -194,42 +201,23 @@ class MultiCameraNode(Node):
                     #   D405 (global-shutter color on Stereo Module): PLF has
                     #     no effect, but locking exposure to 20ms covers the
                     #     LED PWM period and eliminates pulsing.
-                    try:
-                        sensors = profile.get_device().query_sensors()
-                        applied = []
-                        for s in sensors:
-                            sname = s.get_info(rs.camera_info.name) if s.supports(rs.camera_info.name) else '?'
-                            if s.supports(rs.option.power_line_frequency):
-                                try:
-                                    s.set_option(rs.option.power_line_frequency, 1)  # 50 Hz
-                                    applied.append(f'{sname}:PLF=50Hz')
-                                except Exception:
-                                    pass
-                            if not is_d435:
-                                # D405: disable AE + lock 20ms exposure on
-                                # whichever sensor exposes the controls.
-                                if s.supports(rs.option.enable_auto_exposure):
-                                    try:
-                                        s.set_option(rs.option.enable_auto_exposure, 0)
-                                        applied.append(f'{sname}:AE=off')
-                                    except Exception:
-                                        pass
-                                if s.supports(rs.option.exposure):
-                                    try:
-                                        s.set_option(rs.option.exposure, 20000)  # μs
-                                        applied.append(f'{sname}:exp=20ms')
-                                    except Exception:
-                                        pass
-                        self.get_logger().info(
-                            f'{role} anti-flicker applied: {", ".join(applied) if applied else "(none — sensor reports no support)"}')
-                    except Exception as e:
-                        self.get_logger().warn(
-                            f'{role} set anti-flicker options failed: {e}')
+                    exp_us = self._wrist_exposure_us
+                    self._apply_antiflicker(profile, role, is_d435, exp_us)
 
                     # Warm up: grab frames to stabilize the USB stream
                     # (critical for D405 on shared USB hubs)
                     for _ in range(10):
                         pipeline.wait_for_frames(timeout_ms=2000)
+
+                    # Verify-and-retry. When all 3 cameras init simultaneously on
+                    # the shared USB hub, an individual set_option (esp. on the
+                    # right wrist, usb2/2-1.3) can silently fail or get reset by
+                    # the first auto-exposed frames — leaving AE on → 工频闪烁
+                    # (mains flicker) on that one camera while the others are
+                    # clean. A standalone single-cam probe never reproduces it.
+                    # Read back after warmup and re-assert until it sticks.
+                    if not is_d435:
+                        self._verify_antiflicker(pipeline, profile, role, exp_us)
 
                     align = rs.align(rs.stream.color) if need_depth else None
                     self._pipelines[serial] = (pipeline, align, not is_d435)  # store needs_bgr2rgb flag
@@ -261,6 +249,103 @@ class MultiCameraNode(Node):
 
         self.get_logger().info(
             f'Multi-camera node ready: {len(self._pipelines)} cameras at {w}x{h}@{fps}fps')
+
+    def _apply_antiflicker(self, profile, role, is_d435, exp_us):
+        """Apply anti-flicker options to every sensor that supports them.
+
+        Must mirror launch_3cam.py / official realsense2_camera_node, which set
+        BOTH rgb_camera.power_line_frequency AND depth_module.power_line_frequency,
+        and for D405 also depth_module.{enable_auto_exposure,exposure}.
+
+        On D405 the color stream shares the Stereo Module with depth, so AE /
+        exposure only appear on the depth-module sensor handle, not on
+        first_color_sensor(). We iterate every sensor and apply each option
+        defensively to whichever one supports it.
+
+          D435 (rolling-shutter RGB): PLF=50Hz on the RGB Camera fixes
+            horizontal banding; AE left auto.
+          D405 (global-shutter color on Stereo Module): PLF has no effect, but
+            locking exposure to an integer multiple of the mains half-period
+            (exp_us) covers the light's PWM cycle and removes brightness pulsing.
+        """
+        try:
+            applied = []
+            for s in profile.get_device().query_sensors():
+                sname = s.get_info(rs.camera_info.name) if s.supports(rs.camera_info.name) else '?'
+                if s.supports(rs.option.power_line_frequency):
+                    try:
+                        s.set_option(rs.option.power_line_frequency, 1)  # 50 Hz
+                        applied.append(f'{sname}:PLF=50Hz')
+                    except Exception:
+                        pass
+                if not is_d435:
+                    # Order matters: AE must go off BEFORE the manual exposure
+                    # write, or the auto-exposure loop overwrites it.
+                    if s.supports(rs.option.enable_auto_exposure):
+                        try:
+                            s.set_option(rs.option.enable_auto_exposure, 0)
+                            applied.append(f'{sname}:AE=off')
+                        except Exception:
+                            pass
+                    if s.supports(rs.option.exposure):
+                        try:
+                            s.set_option(rs.option.exposure, exp_us)
+                            applied.append(f'{sname}:exp={exp_us/1000:.0f}ms')
+                        except Exception:
+                            pass
+            self.get_logger().info(
+                f'{role} anti-flicker applied: {", ".join(applied) if applied else "(none — sensor reports no support)"}')
+        except Exception as e:
+            self.get_logger().warn(f'{role} set anti-flicker options failed: {e}')
+
+    def _verify_antiflicker(self, pipeline, profile, role, exp_us, max_retries=4):
+        """Read back AE/exposure after warmup; re-assert until they stick.
+
+        Targets the concurrent-init race on the shared USB hub where one wrist
+        camera's set_option silently no-ops. Without this, the only symptom is
+        visible mains flicker on that single camera at runtime — which a
+        standalone single-cam probe can never reproduce.
+        """
+        def _wrist_sensor():
+            # The sensor that actually exposes the exposure control on D405.
+            for s in profile.get_device().query_sensors():
+                if s.supports(rs.option.exposure) and s.supports(rs.option.enable_auto_exposure):
+                    return s
+            return None
+
+        for attempt in range(max_retries):
+            s = _wrist_sensor()
+            if s is None:
+                self.get_logger().warn(
+                    f'{role} anti-flicker verify: no sensor exposes exposure control — cannot lock')
+                return
+            ae = s.get_option(rs.option.enable_auto_exposure)
+            exp = s.get_option(rs.option.exposure)
+            # exposure step on D405 is coarse; accept anything within one frame's
+            # worth of the target rather than demanding an exact match.
+            locked = (ae == 0) and (abs(exp - exp_us) <= 1000)
+            if locked:
+                if attempt:
+                    self.get_logger().info(
+                        f'{role} anti-flicker locked after {attempt} ret(s): AE=off exp={exp/1000:.1f}ms')
+                return
+            self.get_logger().warn(
+                f'{role} anti-flicker NOT locked (AE={ae} exp={exp/1000:.1f}ms, '
+                f'want AE=0 exp={exp_us/1000:.0f}ms) — re-asserting [{attempt+1}/{max_retries}]')
+            try:
+                s.set_option(rs.option.enable_auto_exposure, 0)
+                s.set_option(rs.option.exposure, exp_us)
+            except Exception as e:
+                self.get_logger().warn(f'{role} re-assert failed: {e}')
+            # let the new setting propagate through a few frames before re-checking
+            for _ in range(5):
+                pipeline.wait_for_frames(timeout_ms=2000)
+
+        # Exhausted retries — make the failure impossible to miss in the log.
+        self.get_logger().error(
+            f'{role} anti-flicker FAILED to lock after {max_retries} retries — '
+            f'expect 工频闪烁 (mains flicker) on this camera. Power-cycle the USB hub '
+            f'or restart with fewer concurrent cameras.')
 
     def _make_header(self, frame_ts, frame_id='camera'):
         """Create ROS2 header from RealSense frame timestamp."""
