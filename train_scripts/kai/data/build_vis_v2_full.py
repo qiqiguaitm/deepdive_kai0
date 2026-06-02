@@ -14,7 +14,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-SRC_ROOT = Path("/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_base")
+SRC_ROOT = Path("/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_base/v2")
 DST = Path("/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_v2_full")
 CHUNKS_SIZE = 1000
 PROMPT = "Flatten and fold the cloth."

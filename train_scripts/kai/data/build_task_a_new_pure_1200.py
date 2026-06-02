@@ -30,7 +30,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 ROOT = Path("/home/tim/workspace/deepdive_kai0/kai0/data/Task_A")
-VIS_BASE = Path("/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_base")  # *-new subdirs only (filtered in collect_vis_base)
+VIS_BASE = Path("/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/vis_base/v2")  # *-new subdirs only (filtered in collect_vis_base)
 DST_DEFAULT = ROOT / "self_built" / "A_new_pure_1200"
 
 CAMERAS = ("top_head", "hand_left", "hand_right")

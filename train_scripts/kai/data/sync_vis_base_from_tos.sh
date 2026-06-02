@@ -41,8 +41,9 @@ ts() { date '+%Y-%m-%d %H:%M:%S'; }
 #   gf0 (cnsh):  /vePFS/tim/workspace/deepdive_kai0              + /home/tim/tosutil
 # ⚠️ 探测顺序: North-E / data-shared 优先于 /vePFS/tim — 因为 gf3 上同时存在一个 **空壳**
 #   /vePFS/tim/workspace/deepdive_kai0 目录树 (非真实 cnsh 挂载), 若先判它会误写。
-#   每个候选都要求真实数据路径 kai0/data/Task_A/vis_base 存在 (空壳树不含 → 不命中)。
-_VB=kai0/data/Task_A/vis_base
+#   每个候选都要求真实数据路径 kai0/data/Task_A/vis_base/v2 存在 (空壳树不含 → 不命中)。
+#   (2026-06-02: v2 数据归入 vis_base/v2/, 探测改判 v2 子目录更严谨)
+_VB=kai0/data/Task_A/vis_base/v2
 if   [ -d /vePFS-North-E/vis_robot/workspace/deepdive_kai0/$_VB ];  then
   KAI0_ROOT=/vePFS-North-E/vis_robot/workspace/deepdive_kai0
 elif [ -d /data/shared/ubuntu/workspace/deepdive_kai0/$_VB ];      then
@@ -57,7 +58,7 @@ if   [ -x "$HOME/tosutil" ];        then TOSUTIL="$HOME/tosutil"
 elif command -v tosutil >/dev/null; then TOSUTIL="$(command -v tosutil)"
 else echo "[$(ts)] ERROR: tosutil not found (~/tosutil or PATH)" >&2; exit 1
 fi
-DST="$KAI0_ROOT/kai0/data/Task_A/vis_base"
+DST="$KAI0_ROOT/kai0/data/Task_A/vis_base/v2"   # 2026-06-02: v2 数据归入 vis_base/v2/ 子目录 (v3 裁投放数据并列在 vis_base/v3/)
 LOG="$KAI0_ROOT/logs/vis_base_sync.log"
 mkdir -p "$KAI0_ROOT/logs" 2>/dev/null || true
 

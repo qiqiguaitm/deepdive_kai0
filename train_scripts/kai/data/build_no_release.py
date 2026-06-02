@@ -33,8 +33,10 @@ import pandas as pd
 
 # ---- constants ---- (REPO_ROOT overridable via env KAI0_REPO_ROOT for cross-cluster, e.g. cnbj)
 _REPO = os.environ.get("KAI0_REPO_ROOT", "/vePFS/tim/workspace/deepdive_kai0")
-VIS_BASE = Path(f"{_REPO}/kai0/data/Task_A/vis_base")
-DST_ROOT = Path(f"{_REPO}/kai0/data/Task_A/self_built")
+# 2026-06-02: vis_base v2 数据归入 vis_base/v2/ 子目录; v3 (裁投放) 并列在 vis_base/v3/.
+VIS_BASE = Path(f"{_REPO}/kai0/data/Task_A/vis_base/v2")          # 源: v2 各日期 <date>-v2
+V3_ROOT = Path(f"{_REPO}/kai0/data/Task_A/vis_base/v3")           # per-date 模式输出: <date>-v3
+DST_ROOT = Path(f"{_REPO}/kai0/data/Task_A/self_built")           # 合并模式输出 (原 A_0522_0526_*)
 DATES = ["2026-05-22-v2", "2026-05-26-v2"]
 CAMERAS = ("observation.images.top_head", "observation.images.hand_left", "observation.images.hand_right")
 CAM_DIRS = {"observation.images.top_head": "top_head",
@@ -126,13 +128,129 @@ def per_episode_stats(df: pd.DataFrame) -> dict:
     return stats
 
 
+def build_per_date_v3(date_v2: str, dry_run: bool = False) -> dict:
+    """Per-date v3: trim 投放 static head from every episode of vis_base/v2/<date>-v2,
+    write vis_base/v3/<date>-v3. PRESERVES original episode_index (no merge/renumber),
+    drops depth (RGB-only), per-ep assert video frames == parquet rows.
+
+    Returns a report dict. Reuses motion_onset / trim_video_pyav / per_episode_stats."""
+    src = VIS_BASE / date_v2
+    date_v3 = date_v2.replace("-v2", "-v3")
+    dst = V3_ROOT / date_v3
+    if not src.exists():
+        raise FileNotFoundError(f"src date dir not found: {src}")
+
+    parquets = sorted((src / "data" / "chunk-000").glob("episode_*.parquet"))
+    src_eps = {json.loads(l).get("episode_id", json.loads(l).get("episode_index")): json.loads(l)
+               for l in (src / "meta" / "episodes.jsonl").open()}
+    print(f"[{date_v2}→{date_v3}] {len(parquets)} episodes", flush=True)
+
+    if not dry_run:
+        if dst.exists():
+            sys.exit(f"dst already exists: {dst} (delete first)")
+        (dst / "data" / "chunk-000").mkdir(parents=True)
+        (dst / "meta").mkdir()
+        for cam in CAMERAS:
+            (dst / "videos" / "chunk-000" / cam).mkdir(parents=True)
+
+    episodes_out, stats_out, video_jobs, cut_report = [], [], [], []
+    total_frames = 0
+    for pq in parquets:
+        ep_id = int(pq.stem.split("_")[1])   # preserve original episode number
+        df = pd.read_parquet(pq)
+        T0 = len(df)
+        action = np.stack(df["action"].to_numpy()).astype(np.float64)
+        onset = motion_onset(action)
+        cut = max(0, onset - MARGIN)
+        cut_report.append(cut)
+        new_len = T0 - cut
+
+        if not dry_run:
+            sub = df.iloc[cut:].copy().reset_index(drop=True)
+            sub["frame_index"] = np.arange(new_len, dtype=np.int64)
+            sub["episode_index"] = np.int64(ep_id)
+            # index column = global running index within THIS date (per-date dataset is standalone)
+            sub["index"] = np.arange(total_frames, total_frames + new_len, dtype=np.int64)
+            sub["timestamp"] = (np.arange(new_len, dtype=np.float32) / FPS).astype(np.float32)
+            sub.to_parquet(dst / "data" / "chunk-000" / f"episode_{ep_id:06d}.parquet", index=False)
+            for cam in CAMERAS:
+                sv = src / "videos" / "chunk-000" / CAM_DIRS[cam] / f"episode_{ep_id:06d}.mp4"
+                dv = dst / "videos" / "chunk-000" / cam / f"episode_{ep_id:06d}.mp4"  # feature-key dir
+                video_jobs.append((str(sv), str(dv), cut, new_len))
+            meta = src_eps.get(ep_id, {})
+            episodes_out.append({"episode_index": ep_id,
+                                 "tasks": [meta.get("prompt", "Flatten and fold the cloth.")],
+                                 "length": new_len})
+            stats_out.append({"episode_index": ep_id, "stats": per_episode_stats(sub)})
+        total_frames += new_len
+
+    cr = np.array(cut_report)
+    rep = {"date_v2": date_v2, "date_v3": date_v3, "episodes": len(parquets),
+           "total_frames": int(total_frames), "cut_median": int(np.median(cr)) if len(cr) else 0,
+           "cut_max": int(cr.max()) if len(cr) else 0,
+           "dropped_pct": float(100 * cr.sum() / (cr.sum() + total_frames)) if total_frames else 0.0}
+    if dry_run:
+        print(f"  DRY: cut median={rep['cut_median']} max={rep['cut_max']} dropped={rep['dropped_pct']:.1f}%", flush=True)
+        return rep
+
+    # parallel video trim (asserts frame-count == new_len inside _trim_job)
+    if video_jobs:
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        nproc = min(14, max(1, (os.cpu_count() or 8) // 4))
+        print(f"  trimming {len(video_jobs)} videos ({nproc} workers)...", flush=True)
+        with ProcessPoolExecutor(max_workers=nproc) as ex:
+            for fut in as_completed({ex.submit(_trim_job, j): j for j in video_jobs}):
+                fut.result()
+
+    # meta
+    with (dst / "meta" / "episodes.jsonl").open("w") as f:
+        for r in episodes_out:
+            f.write(json.dumps(r) + "\n")
+    with (dst / "meta" / "episodes_stats.jsonl").open("w") as f:
+        for r in stats_out:
+            f.write(json.dumps(r) + "\n")
+    shutil.copy(src / "meta" / "tasks.jsonl", dst / "meta" / "tasks.jsonl")
+    info = json.loads((src / "meta" / "info.json").read_text())
+    info["total_episodes"] = len(parquets)
+    info["total_frames"] = total_frames
+    info["total_videos"] = len(parquets) * len(CAMERAS)
+    info["total_chunks"] = 1
+    info["splits"] = {"train": f"0:{len(parquets)}"}
+    info["features"].pop("observation.depth.top_head", None)   # v3 drops depth
+    info.pop("depth_path", None)
+    (dst / "meta" / "info.json").write_text(json.dumps(info, indent=2))
+    print(f"  done → {dst}  (cut median={rep['cut_median']} dropped={rep['dropped_pct']:.1f}%)", flush=True)
+    return rep
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", choices=["raw", "no_release"], required=True)
+    ap.add_argument("--mode", choices=["raw", "no_release"],
+                    help="legacy merge mode: 5-22+5-26 → single self_built/A_0522_0526_{raw,no_release}")
+    ap.add_argument("--per-date", nargs="+", metavar="DATE",
+                    help="per-date v3 mode: trim 投放 head, write vis_base/v3/<date>-v3 (preserve ep ids, "
+                         "no depth). Pass dates like 2026-05-22-v2, or 'all' for every <date>-v2 under vis_base/v2.")
     ap.add_argument("--symlink-video", action="store_true",
                     help="raw mode only: symlink videos instead of copy (saves disk)")
     ap.add_argument("--dry-run", action="store_true", help="compute cuts + report, write nothing")
     args = ap.parse_args()
+
+    # ---- per-date v3 mode ----
+    if args.per_date:
+        if args.per_date == ["all"]:
+            dates = sorted(d.name for d in VIS_BASE.iterdir() if d.is_dir() and d.name.endswith("-v2"))
+        else:
+            dates = args.per_date
+        print(f"per-date v3: {len(dates)} dates → vis_base/v3/", flush=True)
+        reps = [build_per_date_v3(d, dry_run=args.dry_run) for d in dates]
+        print("\n=== per-date v3 summary ===")
+        for r in reps:
+            print(f"  {r['date_v3']}: {r['episodes']} ep, {r['total_frames']} frames, "
+                  f"cut median={r['cut_median']}, dropped {r['dropped_pct']:.1f}%")
+        return
+
+    if not args.mode:
+        sys.exit("must pass either --mode {raw,no_release} (legacy merge) or --per-date DATE... (v3)")
 
     trim = (args.mode == "no_release")
     dst = DST_ROOT / ("A_0522_0526_no_release" if trim else "A_0522_0526_raw")

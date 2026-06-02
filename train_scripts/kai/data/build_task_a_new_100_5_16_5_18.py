@@ -24,7 +24,7 @@ RAW_CAM = {
     "observation.images.hand_left":  "hand_left",
     "observation.images.hand_right": "hand_right",
 }
-SRC_ROOT = Path("/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/vis_base")
+SRC_ROOT = Path("/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/vis_base/v2")
 SRC_DIRS = [SRC_ROOT / "2026-05-16-v2", SRC_ROOT / "2026-05-18-v2"]
 DST_TRAIN = Path("/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_new_100_5_16_5_18")
 DST_VAL   = Path("/data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_new_100_5_16_5_18_val")
