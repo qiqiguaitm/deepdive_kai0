@@ -150,8 +150,12 @@ X3.C 自身 MAE (EE6D 20D, final, 1000 窗口):
 - §0.NEW 用 smooth_800 重训, 重点是 **真机可部署 + 真机终判**, 不只看 offline fit。
 - 两版可对比 "vis 数据选择 (A_0423_0527 vs smooth_800) 对 X3 域贡献结论是否稳健"。
 
-### §0.NEW.5 ⭐ X3.C 100K 步延长训练 (待启) — 验证 X-VLA 是否欠训
+### §0.NEW.5 ⭐ X3.C 100K 步延长训练 — ⚠️ 被 P0 取代 (2026-06-02)
 
+> 🔄 **状态更新 (2026-06-02)**: 真机 trace ([`../../analysis/x3c_realrobot_trace_20260601.md`](../../analysis/x3c_realrobot_trace_20260601.md)) + 官方对比 ([`../../analysis/xvla_vs_official_gap_rootcause.md`](../../analysis/xvla_vs_official_gap_rootcause.md)) 发现真机差**主因是 R1 (训练缺 ImageNet 归一化), 不是欠训**。**单纯加步数 = 在错误输入域上白练**。改走 **P0 重训** (`X3C_smooth800_p0`): 修 R1 + 对齐官方配方 (60k / lr1e-4 / warmup2000 / wd0 / ColorJitter), uc01 运行中。本 100K 纯延长计划**作废** — 若 P0 后仍欠训再议。配置见 rootcause.md §6.1。
+>
+> **(以下为原 100K 纯延长计划, 已被 P0 取代)**
+>
 > **动机**: §0.NEW.2.5 (a.2) 训练曲线显示 X3.C 30k **MAE 全程严格单调下降、final=best、无过拟合回弹** —— 末段仍在降 (24k→30k @1 还有 -4%)。30k step 仅 ≈ **2.1 epoch** (eff batch 64 × 30k / ~901k windows)。对比: pi05 smooth_800 跑 50k step (≈ 3.4 epoch 等效) 才 plateau。**X-VLA 0.9B 可能只是欠训, 而非架构上限**。延长到 100K (≈ 7 epoch) 验证: action fidelity 能否继续逼近 pi05 (§0.NEW.2.5 b 的 5× gap 是否部分来自欠训)。
 
 **配置 (与 30k 版完全相同, 仅改 steps)**:

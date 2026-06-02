@@ -104,9 +104,40 @@
 
 | 优先级 | 行动 | 成本 | 预期 |
 |---|---|---|---|
-| ⭐⭐⭐ **P0** | **修 R1: 训练+推理都加 ImageNet 归一化**, 重训 X3.C (A/B 对照: 有/无归一化) | 1 训练 (~5h) | 若真机显著改善 → R1 坐实, 这是主因 |
-| ⭐⭐ P1 | **R2 诊断**: 真机录 X3.C 一次执行, log EE6D 预测 + IK 解 + 实际 joint, 看 IK 是否跳变/奇异 | 1 真机 session | 定位 IK 是否独立贡献真机差 |
-| ⭐⭐ P1 | R3: P0 修好后再跑 100k (§0.NEW.5), 否则白练 | ~15h | 补足欠训分量 |
+| ⭐⭐⭐ **P0** 🔄 **执行中** | **修 R1 + 对齐官方配方**, 重训 X3.C (`X3C_smooth800_p0`, uc01, 2026-06-02 起, ETA ~11h) | 1 训练 | 若真机显著改善 → R1 坐实 |
+| ⭐⭐ P1 | **R2 诊断**: 已有真机 trace ([`x3c_realrobot_trace_20260601.md`](x3c_realrobot_trace_20260601.md)) 证 EE↔joint 相关仅 0.47; P0 后复测看 IK 是否独立残余 | — | 定位 IK 残余 |
+| ⭐ P2 | P0 真机若仍不足, 再评估 R3 (更多步) / R4 (架构) | — | — |
+
+### 6.1 P0 重训配置 (`X3C_smooth800_p0`, 2026-06-02) — 修 R1 + 对齐官方
+
+| 参数 | 官方 X-VLA | 30k 旧版 | **P0 版** | 说明 |
+|---|---|---|---|---|
+| **图像归一化** | ImageNet | ❌ 只 /255 | ✅ **ImageNet (img-mean)/std** | **R1 修复, 主改动** |
+| ColorJitter | 0.2 | ❌ | ✅ 0.2 (brightness/contrast/saturation) | 对齐官方 |
+| steps | 50k (finetune 示例) | 30k | **60k** | 适配 eff batch 64 (官方 4×) + R1 后视觉重适应余量 (≈4.3 epoch) |
+| lr | 1e-4 | 5e-5 | **1e-4** | 对齐官方 (VLM lr = 1e-5 via scale 0.1) |
+| warmup | 2000 | 500 | **2000** | 对齐官方 |
+| freeze | 1000 | 1000 | 1000 | 已一致 |
+| weight_decay | 0.0 | 1e-4 | **0.0** | 对齐官方 |
+| lr schedule | constant (默认) | cosine | cosine (适配) | 定长训练 cosine 更稳, 非照搬 |
+| batch | 16 (单卡) | 64 | 64 (适配) | 单机 8 A800 |
+| betas / grad clip | (0.9,0.95) / 1.0 | 同 | 同 | ✅ |
+
+- ckpt: `uc01:/data/shared/ubuntu/local_ckpts/xvla_x3c_smooth800_p0/` (每 2k step), 不覆盖 30k 版。
+- **train/serve parity 铁律**: `multi_domain_dataset.imagenet_normalize_chw` 与 `serve_policy_xvla` 的 `_IMAGENET_MEAN/STD` 数值完全一致; 推理须加 `--imagenet_norm` (旧 30k ckpt 用 `--no-imagenet_norm`)。ColorJitter 仅训练 (eval/serve image_aug=False)。
+- ⚠️ eval: `eval_xvla_ee6d.py` 经 `multi_domain_dataset` 现也归一化 → **P0 ckpt eval 自洽; 旧 30k ckpt 勿再用此 eval** (mismatch)。
+
+### 6.2 P0 验收 — 真机客观判据 (复测 trace 指标)
+
+P0 ckpt 真机录 trace, 对比 [`x3c_realrobot_trace_20260601.md`](x3c_realrobot_trace_20260601.md) 的 30k 基线:
+
+| 指标 | 30k 基线 (差) | P0 目标 |
+|---|---|---|
+| EE-L y/z 速度 lag1 自相关 | −0.34 / −0.35 (震荡) | → 接近 0 |
+| EE 折返比 (路程/净位移) | 9.1× / 13.1× | → ~2× (smooth 数据级) |
+| 关节方向反转率 | 0.45~0.69 | → ~0.1 |
+| 夹爪开合切换 (200帧) | 16 | → 个位数 |
+| 任务完成 | ❌ 需人干预 | → 自主折叠 |
 | ⭐ P2 | R1 修复后重跑 §0.NEW.2.5b pi05 对比, 看 gap 缩小多少 → 估 R4 残余 | 2 eval | 量化架构天花板 |
 
 > **关键判断**: pi05 同数据 work 证明**数据没问题、任务可学**。X3.C 的差是**实现/配方**问题 (R1 主导) + **架构**劣势 (R4)。**先修 R1 (零数据成本, 纯代码) 是性价比最高的一步。**
