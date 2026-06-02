@@ -1,6 +1,6 @@
 # Track X — X-VLA 官方架构 Native 训练 (X3.A + X3.B + X3.C)
 
-> **状态**: 🔄 **原版 X3.A/B/C (vis_v2_merged) 全部作废** (buggy 管线 + 未控制变量) → 2026-05-29 控制变量三件套 (A_0423_0527 vis) → **2026-05-31 再换 vis = `A_new_smooth_800` (811 ep, X1 cleaned, 真机已验证 work) 重训**, 见 §0.NEW (⭐ 当前)。§0/§0.1 (A_0423_0527) 降为对照; 原 vis_v2_merged 版 (含旧 §主要结论 + §4/§5/§5.5) 已删除。
+> **状态**: 🔄 vis_v2_merged 版作废 → A_0423_0527 控制变量 → **smooth_800 三件套训练完成 + eval (§0.NEW)** → X3.C 真机**失败** → 根因 R1 (缺 ImageNet 归一化) → **🔴 当前: P0 重训 `X3C_smooth800_p0` (修 R1 + 对齐官方, uc01 运行中), 见 §0.NEW.6 ⭐⭐**。§0/§0.1 (A_0423_0527) 降为对照。
 > **关联 task**: `#17 Track X X-VLA 官方架构训练`。
 > **战略上下文**: [cross_embodiment_strategy.md](../../../deployment/strategy/cross_embodiment_strategy.md) §1 (3 robots) + §5.2 (Soft Prompt) + §7 (Tri-track)。
 
@@ -196,6 +196,56 @@ X3.C 自身 MAE (EE6D 20D, final, 1000 窗口):
 | @1 先降后 **回弹** (过拟合) | ⚠️ 901k windows / 7 epoch 触及过拟合点, 记录回弹起始 step 作为该数据集上限 |
 
 > **为何只延 X3.C**: X3.C 是 vis-only 干净 baseline, 步数-性能关系最干净 (无跨域混合干扰)。先用它定位 "X-VLA 欠训 vs 架构上限", 再决定 X3.A/B 是否值得 100k (省算力)。
+
+---
+
+## §0.NEW.6 ⭐⭐ X3.C P0 重训 (修 R1 + 对齐官方) — 🔄 运行中 (2026-06-02)
+
+> **由来**: 真机测试 X3.C 30k **任务失败** (走停/震荡/夹后松手)。逐层根因分析 ([`../../analysis/xvla_vs_official_gap_rootcause.md`](../../analysis/xvla_vs_official_gap_rootcause.md)) + 真机 trace 实证 ([`../../analysis/x3c_realrobot_trace_20260601.md`](../../analysis/x3c_realrobot_trace_20260601.md)) 定位 **主因 R1 = 训练全程缺 ImageNet 图像归一化** (lerobot XVLAPolicy.forward 不归一, 归一在被绕过的 processor; 我们 dataset 只 /255 → base ckpt 视觉前端输入域错位)。pi05 同数据真机 work (图像管线正确)。
+
+### §0.NEW.6.1 实验设计 (单一主变量 = R1 归一化, 顺带对齐官方配方)
+
+| 项 | 30k 旧版 (失败) | **P0 版 `X3C_smooth800_p0`** | 性质 |
+|---|---|---|---|
+| **图像归一化** | ❌ 只 /255 [0,1] | ✅ **ImageNet (img-mean)/std** | 🔴 **主改动 (修 R1)** |
+| ColorJitter | ❌ | ✅ 0.2 (brightness/contrast/saturation) | 对齐官方 |
+| steps | 30k | **60k** | 适配官方 50k 量级 (eff batch 64=官方4×, ≈4.3 epoch) |
+| lr | 5e-5 | **1e-4** (VLM 1e-5 via scale 0.1) | 对齐官方 |
+| warmup / freeze / wd | 500 / 1000 / 1e-4 | **2000 / 1000 / 0.0** | 对齐官方 |
+| lr schedule / batch | cosine / 64 | cosine / 64 | 适配 (非照搬官方 constant/16) |
+| vis 数据 | A_new_smooth_800 | 同 (不变) | 控制 |
+
+**Batch 决策 (2026-06-02)**: 保持 **eff batch 64 (per_gpu 8)**, 不上 128。实测 batch64 时 GPU 已 **99-100% 利用 + 显存仅 38/80GB** → 上 128 不提速 (算力已饱和, 单步耗时翻倍 wall-time 不变)、偏离官方更远 (已 4×)、削弱泛化 (大 batch 减梯度噪声不利真机泛化)、小数据集 (901k windows) 过拟合风险↑。64 是单机 8 A800 对齐官方的合理上限。
+
+### §0.NEW.6.2 实施 + 状态
+
+| Step | 内容 | 状态 |
+|---|---|---|
+| P0.1 | 代码: `multi_domain_dataset.imagenet_normalize_chw` (train) + `serve_policy_xvla --imagenet_norm` (serve, 数值完全一致) + ColorJitter | ✅ commit `f8f7c79`+`0e0775b` |
+| P0.2 | config `X3C_smooth800_p0` (官方对齐) | ✅ |
+| P0.3 | uc01 重训 (torchrun 8 GPU, ckpt 每 2k, output `xvla_x3c_smooth800_p0`) | 🔄 运行中 (step ~100/60k, rate 1.49it/s, ETA ~11h, loss 107→22) |
+| P0.4 | offline eval (全 ckpt MAE 曲线, 同 1000 val 窗口; **P0 ckpt 自洽**) | ⏳ |
+| P0.5 | ⭐ **真机测试 + 复测 trace 客观判据** | ⏳ |
+
+### §0.NEW.6.3 验收判据 — 真机 trace 客观指标 (对比 30k 基线)
+
+| 指标 | 30k 基线 (失败) | P0 目标 |
+|---|---|---|
+| EE-L y/z 速度 lag1 自相关 | −0.34 / −0.35 (震荡) | → 接近 0 |
+| EE 折返比 (路程/净位移) | 9.1× / 13.1× | → ~2× (smooth 数据级) |
+| 关节方向反转率 | 0.45~0.69 | → ~0.1 |
+| 夹爪开合切换 (200帧) | 16 | → 个位数 |
+| 任务完成 | ❌ 需人干预 | → 自主折叠 |
+
+### §0.NEW.6.4 判定 + 后续
+
+| P0 真机结果 | 结论 + 行动 |
+|---|---|
+| ✅ 显著改善 (判据达标 + 任务自主完成) | **R1 坐实为主因**。推广: X3.A/B 也加归一化重训; 评估 Track X 真机价值 |
+| ⚠️ 部分改善 (震荡减但仍不完成) | R1 是主因之一, 残余查 R2 (IK, EE↔joint 相关仅 0.47) / R3 (步数) |
+| ❌ 无改善 | R1 假说弱化, 重审 R2 (IK 链) / R4 (架构 0.9B 天花板, §0.NEW.2.5b pi05 5× 优) |
+
+> ⚠️ **使用铁律**: P0 ckpt 真机推理**必须** `--imagenet_norm` (train/serve parity); 旧 30k ckpt 用 `--no-imagenet_norm` 且勿再用现 eval (已归一化 → mismatch)。详见 rootcause.md §6.1。
 
 ---
 
