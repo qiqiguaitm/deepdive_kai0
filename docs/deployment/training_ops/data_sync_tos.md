@@ -248,17 +248,27 @@ tos://transfer-shanghai/KAI0/
 - ❌ ~~gf0 → sim01 SSH 反向隧道传 ckpt~~ (改走 TOS)
 - ⚠️ rsync 直连仅用于**临时小文件** (代码 patch / 配置 / 日志), 数据/ckpt **必须走 TOS**
 
-### 6.8 gf0 `vis_base` 自动**完整增量**同步 (cron + tosutil, 每小时) ⭐ (2026-05-28)
+### 6.8 gf0 `vis_base` 自动**完整增量**同步 (cron + tosutil, 每小时) ⭐ (2026-05-28; 2026-06-02 v2/v3 重构)
 
-**目的**: 让 gf0 上的 `kai0/data/Task_A/vis_base/`(vis_v2_* / A_0423_0527 等数据集的 build 源)持续与 TOS 保持最新, 无需手动拉。
+**目的**: 让 gf0 上的 `kai0/data/Task_A/vis_base/v2/`(vis_v2_* / A_0423_0527 等数据集的 build 源)持续与 TOS 保持最新, 无需手动拉。
+
+> 🔀 **2026-06-02 目录重构 — v2/v3 分层** (三机 gf0 / uc-NFS / gf3 已对齐):
+> ```
+> vis_base/
+> ├── v2/  <date>-v2 ×20   # 原始采集 (含 depth), sync DST, build 源
+> └── v3/  <date>-v3 ×20   # 裁投放 (no-release: 裁掉每 ep 开头投放等待静止段), 无 depth, 1956 ep
+> ```
+> - **v3 = v2 经 `build_no_release.py --per-date` 裁投放**: 逐日期裁掉开头静止段 (motion-onset 检测), 保留原 ep 编号, drop depth (RGB-only)。机理见 [`../../training/history/experiments/data_root_cause_probe_results.md`](../../training/history/experiments/data_root_cause_probe_results.md) §4 (policy idling: 演示停顿被 BC 模仿致真机走停)。裁剪比例: 早期日期 ~2% (节奏紧凑), 后期 ~7.5% (投放等待长)。
+> - **sync DST 已从 `vis_base/` 改为 `vis_base/v2/`** —— 历史 build 脚本 (build_vis_v2_full / A_0423_0527 等) 的 SRC_ROOT 也加 `/v2`。
+> - ⚠️ **14k+ self_built 软链** (vis_v2_merged/full 等指向 vis_base 绝对路径) 在 mv 时已批量重指到 `/v2/`。
 
 | 项 | 值 |
 |---|---|
-| 机器 | **仅 gf0**(本机有 `~/tosutil` + `~/.tosutilconfig` 凭据) |
-| 脚本 | `train_scripts/kai/data/sync_vis_base_from_tos.sh` |
-| 频率 | crontab `0 * * * *`(每小时整点) |
-| 传输工具 | **tosutil `cp -r -u`**(原生 TOS 客户端, 多线程, 不依赖 FUSE 挂载; 从 uc01 拷贝二进制装在 gf0) |
-| 源 → 目标 | 逐日期 `tos://transfer-shanghai/KAI0/Task_A/base/<date>-v2/` → `…/vis_base/<date>-v2/` |
+| 机器 | **gf0 + uc-NFS(uc02 cron, uc01/03 共享可见) + gf3**(各机本机有 `~/tosutil` + 凭据) |
+| 脚本 | `train_scripts/kai/data/sync_vis_base_from_tos.sh` (host-aware, 三机通用) |
+| 频率 | crontab `0 * * * *`(gf0) / `17 * * * *`(uc02 错峰) |
+| 传输工具 | **tosutil `cp -r -u`**(原生 TOS 客户端, 多线程, 不依赖 FUSE 挂载) |
+| 源 → 目标 | 逐日期 `tos://transfer-shanghai/KAI0/Task_A/base/<date>-v2/` → `…/vis_base/v2/<date>-v2/` |
 | 排除 | **`-exclude='*top_head_depth*'`**(depth zarr, 见下) |
 | 日志 | `logs/vis_base_sync.log`(>5MB 自动轮转) |
 

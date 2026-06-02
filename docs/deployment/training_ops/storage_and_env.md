@@ -120,7 +120,9 @@ deepdive_kai0/
 │   │   └── pi05_flatten_fold_*/<exp_name>/  # 各训练 exp 的 ckpts
 │   └── data/                          # 数据集入口 (gf0 现已全部真实落盘, 无软链)
 │       └── Task_A/
-│           ├── vis_base/              # 真实本地盘 (2026-05-28: 原 TOS 软链 + vis_base_real 已合并到此), build 源, 按 date; gf0 每小时 cron 从 TOS 增量拉新日期 (见 data_sync_tos.md §6.8)
+│           ├── vis_base/              # build 源; 2026-06-02 v2/v3 分层 (见 data_sync_tos.md §6.8):
+│           │   ├── v2/                 #   原始采集 <date>-v2 ×20 (含 depth), sync DST, cron 拉新; build 脚本 SRC_ROOT 指此
+│           │   └── v3/                 #   裁投放 <date>-v3 ×20 (no-release: 裁 ep 开头投放静止段, 无 depth, 1956 ep)
 │           ├── kai0_base/             # HF 官方 base — 真实目录 (2026-05-28: 原 base 改名而来, 不再是软链)
 │           ├── kai0_dagger/           # HF 官方 dagger — 真实目录 (2026-05-28: 原 dagger 改名而来)
 │           ├── kai0_advantage/        # HF 官方 advantage — 真实目录 (2026-05-28: 自 self_built/advantage 迁回根; 视频软链→kai0_base)
@@ -185,7 +187,7 @@ deepdive_kai0/
 ```
 /data/shared/ubuntu/workspace/deepdive_kai0/kai0/data/Task_A/   # ⭐ 与 gf0/gf3 同规范; uc01 NFS export → uc02/03 共享
     kai0_base/ kai0_dagger/ kai0_advantage/  # HF 官方 (3055/3457/3055) 真实目录 (原 dataset/Kai0_official/Task_A/*)
-    vis_base/                  # 原始自采 base, 仅 -v2 (19 日期), build 源 (原 dataset/KAI0/Task_A/base)
+    vis_base/                  # build 源; 2026-06-02 v2/v3 分层: v2/<date>-v2 ×20 (含depth, sync DST) + v3/<date>-v3 ×20 (裁投放, 无depth)
     vis_dagger/ vis_autonomy/ vis_inference/  # uc 特有: 原始自采 dagger / autonomy(98G) / inference
     self_built/                # 所有构建集: A_new_100_5_16_5_18(+val), A_new_100_5_16_5_19_raw, A_new_pure_200(+val),
                                #   vis_v2_merged(自包含真实)+vis_v2_merged_val, val_kai0_official, eval_val/, xvla_exp1_hard_merged

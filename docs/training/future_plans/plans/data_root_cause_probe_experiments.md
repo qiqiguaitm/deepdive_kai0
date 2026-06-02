@@ -196,6 +196,38 @@ kai0/.venv/bin/python kai0/scripts/compute_norm_stats.py pi05_flatten_fold_A_052
 
 ---
 
+## §2 vis_base v3 — 全量裁投放数据集 (2026-06-02) ⭐ 已就绪
+
+> H1 (投放静止段致走停) 初步成立 (真机 no-release 改善 + 文献机理, 见 [`../../history/experiments/data_root_cause_probe_results.md`](../../history/experiments/data_root_cause_probe_results.md) §4) → **把裁投放从 2 天 PoC 推广到全部 vis_base**, 三机就绪。
+
+### §2.1 产物
+
+| 项 | 值 |
+|---|---|
+| 目录 | `kai0/data/Task_A/vis_base/v3/<date>-v3` (与 `v2/<date>-v2` 并列) |
+| 规模 | **20 日期, 1956 ep, 2.53M frames** (= v2 全量, 每 ep 裁掉开头投放静止段) |
+| 生成 | `build_no_release.py --per-date all` (逐日期独立, 保留原 ep 编号, drop depth RGB-only) |
+| 裁剪比例 | 早期日期 ~2% (节奏紧凑), 后期 ~7.5% (投放等待长) — 印证早期 smooth 数据天然少污染 |
+| 三机 | gf0 ✅ / uc-NFS (uc01/02/03 共享) ✅ / gf3 ✅, 各帧对齐+meta+depth排除全验证, 0 半成品 |
+| 大小 | gf0 19G (veryfast preset) / uc·gf3 61G (ultrafast); 内容 (帧/裁剪) 一致 |
+
+### §2.2 目录重构 (连带)
+
+- vis_base 原扁平 `<date>-v2` → **`vis_base/v2/<date>-v2`** (为 v3 腾位)。
+- **sync_vis_base DST → v2**; 7 个 build 脚本 SRC_ROOT → 加 `/v2`。
+- **14k+ self_built 软链** (vis_v2_merged/full/A_0423_0527 等指向 vis_base 绝对路径) 已批量重指到 `/v2/`。
+- 详见 [`../../../deployment/training_ops/data_sync_tos.md`](../../../deployment/training_ops/data_sync_tos.md) §6.8。
+
+### §2.3 用法 (后续训练)
+
+v3 各日期是独立 lerobot-v2.1 数据集。要训"全量裁投放"模型, 需先 build 合并集 (类似 vis_v2_full 但源用 v3) 或按需选日期。**注意**: v3 是 H1 的全量验证基础, 但严格因果仍需 Exp-1b (raw 对照) 真机并排。
+
+### §2.4 脚本健壮性 (踩坑修复)
+
+`build_no_release.py --per-date` 幂等: dst 有 `meta/info.json`=完整→skip; 无 meta=被 kill 的半成品→自动删除重建 (避免半成品被静默跳过留坏数据)。并行/preset 可配: `BUILD_WORKERS`(用 sched_getaffinity, os.cpu_count 容器误报) / `BUILD_PRESET=ultrafast`(uc/gf3 提速) / `KAI0_REPO_ROOT`(跨机路径)。
+
+---
+
 ## Exp-2+ — 后续实验 (占位, 视 Exp-1 结果展开)
 
 | Exp | 假设 | 数据操作 | 触发条件 |
