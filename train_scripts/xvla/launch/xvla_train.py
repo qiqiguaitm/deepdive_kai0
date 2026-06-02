@@ -148,6 +148,23 @@ CONFIGS = {
         batch_size_per_gpu=8,
         vlm_lr_scale=0.1,
     ),
+    # P0 (2026-06-02): X3.C 修 R1 (ImageNet 归一化, dataset 层无条件生效) + 对齐官方配方.
+    # 官方 finetune 示例: iters=50k warmup=2000 lr=1e-4 wd=0.0 freeze=1000 (X-VLA/README + train.py).
+    # 适配: eff batch 64 (8gpu×8) vs 官方 16; 步数 60k (≈4.3 epoch, 官方 50k 量级 + R1 后视觉
+    # 前端重适应余量); lr schedule 保留 cosine (定长训练比官方 constant 更稳); 加 ColorJitter.
+    "X3C_smooth800_p0": dict(
+        datasets=[
+            dict(root=f"{SB}/A_new_smooth_800", domain_id=20, prompt=PROMPT, weight=1.0),
+        ],
+        steps=60_000,
+        lr=1e-4,            # 对齐官方 (配 vlm_lr_scale=0.1 → VLM lr 1e-5)
+        warmup_steps=2000,  # 对齐官方
+        freeze_steps=1000,  # 对齐官方
+        weight_decay=0.0,   # 对齐官方 (默认 1e-4)
+        batch_size_per_gpu=8,
+        vlm_lr_scale=0.1,
+        image_aug=True,     # 对齐官方 ColorJitter(0.2)
+    ),
     "X3C_smooth800_100k": dict(
         # §0.NEW.5: X3.C vis-only 延长到 100k step (≈7 epoch) 验证 X-VLA 是否欠训。
         # 与 X3C_smooth800 完全相同, 仅 steps 30k→100k (cosine decay 自动拉到 100k)。
@@ -221,7 +238,8 @@ def build_dataset(cfg):
                 domain_id=d["domain_id"], task_prompt=d["prompt"],
             )
         else:
-            ds = LeRobotEE6DDataset(d["root"], domain_id=d["domain_id"], task_prompt=d["prompt"])
+            ds = LeRobotEE6DDataset(d["root"], domain_id=d["domain_id"], task_prompt=d["prompt"],
+                                    image_aug=cfg.get("image_aug", False))
         datasets.append(ds)
         weights.append(d["weight"])
     multi = MultiDomainDataset(datasets)
@@ -297,7 +315,7 @@ def main(args):
     optimizer = torch.optim.AdamW([
         {"params": vlm_params, "lr": cfg["lr"] * cfg["vlm_lr_scale"]},
         {"params": other_params, "lr": cfg["lr"]},
-    ], weight_decay=1e-4, betas=(0.9, 0.95))
+    ], weight_decay=cfg.get("weight_decay", 1e-4), betas=(0.9, 0.95))
     scheduler = get_cosine_schedule_with_warmup(optimizer, cfg["warmup_steps"], cfg["steps"])
 
     # Output dir

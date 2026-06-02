@@ -90,6 +90,7 @@ class LeRobotEE6DDataset(Dataset):
         cam_keys: Optional[List[str]] = None,
         image_size_main: int = 256,
         image_size_wrist: int = 224,
+        image_aug: bool = False,
     ):
         self.root = Path(root)
         self.domain_id = int(domain_id)
@@ -97,6 +98,12 @@ class LeRobotEE6DDataset(Dataset):
         self.action_chunk = action_chunk
         self.image_size_main = image_size_main
         self.image_size_wrist = image_size_wrist
+        # P0: ColorJitter(0.2) 对齐官方 X-VLA dataset.py (训练增强, 真机光照/颜色泛化)
+        self.image_aug = bool(image_aug)
+        self._jitter = None
+        if self.image_aug:
+            from torchvision.transforms import ColorJitter
+            self._jitter = ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.0)
 
         info = json.load(open(self.root / "meta" / "info.json"))
         self.fps = info.get("fps", 30)
@@ -167,8 +174,12 @@ class LeRobotEE6DDataset(Dataset):
                 frame = decode_frame(video_path, f_idx)
                 size = self.image_size_main if i < 2 else self.image_size_wrist
                 frame = resize_pad(frame, size)
-                # (H,W,3) → (3,H,W) [0,1] → ImageNet-normalized (P0)
-                t = imagenet_normalize_chw(torch.from_numpy(frame).permute(2, 0, 1).float() / 255.0)
+                # (H,W,3) → (3,H,W) [0,1] → [ColorJitter] → ImageNet-normalized (P0)
+                # 顺序对齐官方: jitter 在 [0,1], 再归一化 (X-VLA dataset.py: ColorJitter→ToTensor→Normalize)
+                t = torch.from_numpy(frame).permute(2, 0, 1).float() / 255.0
+                if self._jitter is not None:
+                    t = self._jitter(t)
+                t = imagenet_normalize_chw(t)
                 img_dict["observation.images.image" + (str(i+1) if i > 0 else "")] = t
             except Exception as e:
                 # Skip this sample on decode failure
