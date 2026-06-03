@@ -21,8 +21,11 @@ import json
 import os
 import subprocess
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+from lerobot.datasets.compute_stats import compute_episode_stats
+from lerobot.datasets.utils import serialize_dict
 
 CAM_SRC_TO_DST = {
     "top_head": "observation.images.cam_high",
@@ -116,7 +119,35 @@ def rewrite_parquet(pq_path, new_idx, global_frame):
                      pa.array(list(range(global_frame, global_frame + n)), pa.int64()))
     if "task_index" in t.column_names:
         t = t.set_column(t.column_names.index("task_index"), "task_index", pa.array([0] * n, pa.int64()))
+    # 规整 frame_index=0..n-1、timestamp=frame_index/FPS:源(尤其 vis)保留真实采集时间戳
+    # (~30fps 抖动 + 裁段留下的大停顿),会让 lerobot check_timestamps_sync 集内违规、用
+    # pprint 格式化百万项卡死,且 48 帧 action-chunk 按 1/fps 网格取帧失败。统一为固定帧率
+    # 网格(与 kairobot01、info.json 声明的 fps 一致),丢弃的只是采集抖动。
+    if "frame_index" in t.column_names:
+        t = t.set_column(t.column_names.index("frame_index"), "frame_index",
+                         pa.array(list(range(n)), pa.int64()))
+    if "timestamp" in t.column_names:
+        t = t.set_column(t.column_names.index("timestamp"), "timestamp",
+                         pa.array([i / FPS for i in range(n)], pa.float32()))
     return t, n
+
+
+def episode_stats_from_table(t):
+    """从合并后的 parquet 表计算 per-episode 统计(仅 state/action,跳过视频)。
+
+    v2.1 必需 meta/episodes_stats.jsonl;只为数值列算 stats —— 视频列不在 parquet 内,
+    逐集解码代价大,且本项目图像走 Wan VAE/255 归一化、动作走独立 norm_stats_delta.json,
+    都不消费数据集自带的视频 stats。
+    """
+    feats = {
+        "observation.state": {"dtype": "float32", "shape": [14]},
+        "action": {"dtype": "float32", "shape": [14]},
+    }
+    ep_data = {}
+    for k in feats:
+        arr = np.asarray([np.asarray(v) for v in t.column(k).to_pylist()], dtype=np.float32)
+        ep_data[k] = arr.reshape(len(arr), *feats[k]["shape"])
+    return compute_episode_stats(ep_data, feats)
 
 
 def build_info(total_episodes, total_frames):
@@ -158,6 +189,7 @@ def build_embodiment(emb, roots, out_base, limit, vid_mode, transcode_av1):
     os.makedirs(os.path.join(out_root, "meta"), exist_ok=True)
     new_idx, global_frame = 0, 0
     episodes_meta = []
+    episodes_stats_meta = []
     print(f"\n=== {emb}: {len(roots)} source datasets ===")
     for root in roots:
         eps = list_episodes(root)
@@ -170,6 +202,7 @@ def build_embodiment(emb, roots, out_base, limit, vid_mode, transcode_av1):
             out_pq_dir = os.path.join(out_root, "data", f"chunk-{new_chunk:03d}")
             os.makedirs(out_pq_dir, exist_ok=True)
             pq.write_table(t, os.path.join(out_pq_dir, f"episode_{new_idx:06d}.parquet"))
+            episodes_stats_meta.append((new_idx, episode_stats_from_table(t)))
             # videos
             for cam_short, dst_key in CAM_SRC_TO_DST.items():
                 src_mp4 = src_video_path(root, cam_short, src_idx)
@@ -193,6 +226,10 @@ def build_embodiment(emb, roots, out_base, limit, vid_mode, transcode_av1):
             f.write(json.dumps(e) + "\n")
     with open(os.path.join(out_root, "meta", "tasks.jsonl"), "w") as f:
         f.write(json.dumps({"task_index": 0, "task": TASK_TEXT}) + "\n")
+    # v2.1 必需:per-episode 统计(格式同 lerobot write_episode_stats:{episode_index, stats})
+    with open(os.path.join(out_root, "meta", "episodes_stats.jsonl"), "w") as f:
+        for idx, st in episodes_stats_meta:
+            f.write(json.dumps({"episode_index": idx, "stats": serialize_dict(st)}) + "\n")
     print(f"  >> {emb} DONE: {new_idx} episodes, {global_frame} frames -> {out_root}")
     return new_idx, global_frame
 
