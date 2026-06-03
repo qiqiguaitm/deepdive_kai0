@@ -140,7 +140,25 @@ def per_episode_stats(df: pd.DataFrame) -> dict:
     return stats
 
 
-def build_per_date_v3(date_v2: str, dry_run: bool = False) -> dict:
+def _maybe_norm_stats(dst, compute: bool, action_dim: int):
+    """Auto-(re)compute norm_stats.json from the *just-built* dataset. Build success is preserved
+    even if this fails (loud warning + manual fallback)."""
+    manual = f"python {Path(__file__).resolve().parent}/norm_stats_from_dataset.py {dst} --action-dim {action_dim}"
+    if not compute:
+        print(f"  [norm_stats] skipped (--no-norm-stats). Run manually: {manual}", flush=True)
+        return
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from norm_stats_from_dataset import compute_norm_stats
+        print(f"  [norm_stats] auto-computing from built dataset (action_dim={action_dim})...", flush=True)
+        compute_norm_stats(dst, action_dim=action_dim)
+    except Exception as e:
+        print(f"  ⚠️ [norm_stats] AUTO-COMPUTE FAILED: {e}\n"
+              f"     dataset built OK but norm_stats.json NOT written — run manually (kai0 venv):\n"
+              f"     {manual}", flush=True)
+
+
+def build_per_date_v3(date_v2: str, dry_run: bool = False, compute_norm: bool = True, action_dim: int = 32) -> dict:
     """Per-date v3: trim 投放 static head from every episode of vis_base/v2/<date>-v2,
     write vis_base/v3/<date>-v3. PRESERVES original episode_index (no merge/renumber),
     drops depth (RGB-only), per-ep assert video frames == parquet rows.
@@ -237,6 +255,7 @@ def build_per_date_v3(date_v2: str, dry_run: bool = False) -> dict:
     info.pop("depth_path", None)
     (dst / "meta" / "info.json").write_text(json.dumps(info, indent=2))
     print(f"  done → {dst}  (cut median={rep['cut_median']} dropped={rep['dropped_pct']:.1f}%)", flush=True)
+    _maybe_norm_stats(dst, compute_norm and not dry_run, action_dim)
     return rep
 
 
@@ -250,6 +269,9 @@ def main():
     ap.add_argument("--symlink-video", action="store_true",
                     help="raw mode only: symlink videos instead of copy (saves disk)")
     ap.add_argument("--dry-run", action="store_true", help="compute cuts + report, write nothing")
+    ap.add_argument("--action-dim", type=int, default=32, help="norm_stats action_dim to pad to (pi0/pi05=32)")
+    ap.add_argument("--no-norm-stats", action="store_true",
+                    help="skip auto norm_stats after build (default: auto-(re)compute from the built dataset)")
     args = ap.parse_args()
 
     # ---- per-date v3 mode ----
@@ -259,7 +281,8 @@ def main():
         else:
             dates = args.per_date
         print(f"per-date v3: {len(dates)} dates → vis_base/v3/", flush=True)
-        reps = [build_per_date_v3(d, dry_run=args.dry_run) for d in dates]
+        reps = [build_per_date_v3(d, dry_run=args.dry_run,
+                                  compute_norm=not args.no_norm_stats, action_dim=args.action_dim) for d in dates]
         print("\n=== per-date v3 summary ===")
         for r in reps:
             if r.get("skipped"):
@@ -394,7 +417,8 @@ def main():
     (dst / "meta" / "info.json").write_text(json.dumps(info, indent=2))
 
     print(f"done → {dst}")
-    print("  next: register config + run kai0/scripts/compute_norm_stats.py to (re)compute norm_stats")
+    _maybe_norm_stats(dst, not args.no_norm_stats, args.action_dim)
+    print("  next: register config (norm_stats already (re)computed above from the built dataset)")
 
 
 if __name__ == "__main__":

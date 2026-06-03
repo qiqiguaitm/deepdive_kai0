@@ -11,7 +11,9 @@
 
 ## 1. norm_stats — 不自动算, 且脚本/参数易错 ⚠️
 
-- **`train.py` 不算 norm_stats** (只 `shutil.copy`)。提交前必须在**数据所在机器**手动算。
+> ✅ **2026-06-03 起部分缓解**: 构建脚本 `train_scripts/kai/data/build_no_release.py` **构建完成后已自动从刚建好的数据集重算 norm_stats**(helper `norm_stats_from_dataset.py`,与下方 `compute_norm_states_fast.py` 数值一致、config-free,默认开,`--no-norm-stats` 关)。**用该脚本 + kai0 venv 构建的 kai pi0/pi05 数据集无需再手动算**。下述手动流程仍适用于:① 其它未接线的构建脚本;② EE6D/xvla 集(不适用,靠 loss-scale);③ 校验/重算。
+
+- **`train.py` 不算 norm_stats** (只 `shutil.copy`)。提交前必须在**数据所在机器**手动算(或用上面已自动化的构建脚本)。
 - **用 `compute_norm_states_fast.py --config-name <config>`** (带 `_fast`, base_dir 直读绝对路径)。
   - ❌ 不要用 `compute_norm_stats.py` —— 它把绝对 repo_id 当 HF repo → `HFValidationError`。
   - ❌ 不要漏 `--config-name` flag (tyro 要 flag, positional 会打 helptext)。

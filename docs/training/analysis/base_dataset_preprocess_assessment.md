@@ -79,6 +79,8 @@
 
 唯一**值得核实**的点: 训练 config 是否真的**排除了** Class C 黑名单那 129 ep (这是已有预处理可能没生效的环节)。
 
+> **2026-06-03 构建管线更新 — norm_stats 自动化**: 数据集构建脚本(`train_scripts/kai/data/build_no_release.py`)现**在构建完成后自动从刚建好的数据集(re)算 norm_stats**(新 helper `norm_stats_from_dataset.py`,与 `kai0/scripts/compute_norm_states_fast.py` 数值字节级一致、但 config-free)。意义:① 不再需要手动跑 `compute_norm_stats`(消除"忘算"这一头号提交坑,见 `../../deployment/training_ops/submission/training_pitfalls_common.md §1`);② 杜绝误用**源数据集**的旧 norm_stats(裁剪/合并后分布已变)。约束:仅适用 kai pi0/pi05(`--action-dim` 默认 32);EE6D/xvla 集靠 loss-scale 不归一、不适用;构建须用 kai0 venv(openpi 依赖)。`--no-norm-stats` 可关。
+
 ## 5. 净结论
 
 - ❌ 去噪 / 平滑 / 再清洗类预处理 **不值得**: 数据已干净, 且会误伤真实快动作 (04-28) + firm grasp (4-29) + 任务节奏 — 这些都是**信号不是噪声**。
