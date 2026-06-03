@@ -205,22 +205,25 @@ tos://transfer-shanghai/KAI0/
 │   │   ├── 2026-05-08-v2/
 │   │   ├── 2026-05-09-v2/        注: 4 月之前的 date 无 top_head_depth (那时未录 depth);
 │   │   ├── 2026-05-16-v2/             5-06 起所有 date 含完整 depth zarr.
-│   │   ├── 2026-05-18-v2/
-│   │   ├── 2026-05-19-v2/
-│   │   ├── 2026-05-20-v2/
-│   │   ├── 2026-05-21-v2/
+│   │   ├── 2026-05-18-v2/        … (append-only, 持续追加)
 │   │   ├── 2026-05-22-v2/
+│   │   ├── 2026-05-26-v2/
+│   │   ├── 2026-05-27-v2/
+│   │   ├── 2026-05-28-v2/        ← 当前最新 (20 date dirs, 截至 2026-06-03)
+│   │   ├── README.md             ⭐ 数据描述 (per-date 场景表 / 质量评估)
+│   │   ├── analysis/             ⭐ 质量分析 csv (Class C 黑名单 / end-snap 清单 等)
 │   │   └── kai0_official_base/   官方 base 副本 (3055 ep)
 │   ├── autonomy/
 │   │   └── <date-v2>/            自主推理录制数据 (同 base 结构)
-│   └── dagger/
-│       └── <date-v2>/            DAgger 接管数据 (同 base 结构)
+│   └── dagger/                   DAgger 接管数据 (同 base 结构); 本地 → vis_dagger/v2/ 自动同步 (见 §6.9)
+│       ├── 2026-05-29-v2/ (64ep)  2026-06-01-v2/ (32ep)
+│       └── 2026-06-02-v2/ (71ep)  2026-06-03-v2/ (24ep)   ← 4 dates, 截至 2026-06-03
 │
 ├── Task_E/  base/<date-v2>/      扶起倒箱
 ├── Task_H/  base/<date-v2>/      
 ├── Task_HP/ base/<date-v2>/      
 ├── Task_P/  base/<date-v2>/      抓放盒子
-├── Task_PP/ base/<date-v2>/      
+├── Task_PP/ base/<date-v2>/      抓放 (2 dates: 05-09 202ep / 05-25 204ep, 19GB; 2026-06-02 拉到 gf0 本地)
 └── Task_PS/ base/<date-v2>/      
 ```
 
@@ -275,9 +278,9 @@ tos://transfer-shanghai/KAI0/
 
 | 项 | 值 |
 |---|---|
-| 机器 | **gf0 + uc-NFS(uc02 cron, uc01/03 共享可见) + gf3**(各机本机有 `~/tosutil` + 凭据) |
+| 机器 | **gf0 + uc-NFS(uc01 cron, uc02/03 共享可见) + gf3**(各机本机有 `~/tosutil` + 凭据) |
 | 脚本 | `train_scripts/kai/data/sync_vis_base_from_tos.sh` (host-aware, 三机通用) |
-| 频率 | crontab `0 * * * *`(gf0) / `17 * * * *`(uc02 错峰) |
+| 频率 (base) | crontab `0 * * * *`(gf0) / `17 * * * *`(uc01) / `37 * * * *`(gf3) — 三机错峰 |
 | 传输工具 | **tosutil `cp -r -u`**(原生 TOS 客户端, 多线程, 不依赖 FUSE 挂载) |
 | 源 → 目标 | 逐日期 `tos://transfer-shanghai/KAI0/Task_A/base/<date>-v2/` → `…/vis_base/v2/<date>-v2/` |
 | 排除 | **`-exclude='*top_head_depth*'`**(depth zarr, 见下) |
@@ -298,6 +301,30 @@ tos://transfer-shanghai/KAI0/
 > **tosutil 与 rsync-over-FUSE 之别**: tosutil 走 TOS API 原生多线程, 不依赖 `/transfer-shanghai` FUSE 挂载在位, 更快更稳。注意 **tosutil 无 `sync` 子命令**(官方文档确认), 用 `cp -r -u` 实现增量。路径映射: `cp -r .../base/<date>/ vis_base/` 会把末级 `<date>` 落在 `vis_base/<date>/`(实测)。
 >
 > ⚠️ **前置依赖: cron 守护进程必须在运行**。gf0 重装/重启后需 `sudo service cron start`(需 root)。验证: `pgrep -x cron && crontab -l`。tosutil 配置 `~/.tosutilconfig` 内 AK/SK + 路径(从 uc01 拷来后已把 `/home/ubuntu` 改为 `/home/tim`)。
+
+### 6.9 `vis_dagger` 自动同步 (cron + tosutil, 每小时) ⭐ (2026-06-03)
+
+**目的**: DAgger 接管数据 (`TOS Task_A/dagger/`) 持续同步到本地, 与 `vis_base` 同款机制。
+
+**结构 (与 vis_base/v2 对齐)**: TOS dagger 扁平 `dagger/<date>-v2`, 本地按 **v2 数据版本命名空间** 组织:
+```
+vis_dagger/
+└── v2/  <date>-v2    # sync DST; TOS dagger 各日期 → vis_dagger/v2/<date>-v2/
+```
+
+| 项 | 值 |
+|---|---|
+| 机器 | **gf0 + gf3**(2026-06-03; **uc 暂未处理**) |
+| 脚本 | `train_scripts/kai/data/sync_vis_dagger_from_tos.sh` (host-aware, 由 base 脚本派生) |
+| 频率 (dagger) | crontab `7 * * * *`(gf0) / `47 * * * *`(gf3) — 与各机 base cron 错峰 |
+| 源 → 目标 | `tos://transfer-shanghai/KAI0/Task_A/dagger/<date>-v2/` → `…/vis_dagger/v2/<date>-v2/` |
+| 策略 | 同 base: `cp -r -u` 完整增量 (size/crc, 只增不删) + `-exclude='*top_head_depth*'` + `--mirror` 手动传播删除 |
+| host 探测 | 用 `kai0/data/Task_A/vis_base/v2` 存在性判真实 KAI0 根 (gf3 `/vePFS/tim` 空壳排除) |
+| 日志 | `logs/vis_dagger_sync.log` |
+
+**当前 dagger 日期** (2026-06-03, 4 日期 / 2.5G, 三处一致 gf0+gf3+TOS): `2026-05-29-v2` (64 ep) / `2026-06-01-v2` (32) / `2026-06-02-v2` (71) / `2026-06-03-v2` (24)。
+
+> **2026-06-03 重构 SOP** (同 §6.8 v2/v3 教训): 建 `vis_dagger/v2/` → mv 现有 `<date>-v2` 进去 → 改脚本 DST `vis_dagger` → `vis_dagger/v2` (commit `653c655`) → 跑一次追平 (gf0/gf3 各补 06-02 +25 ep & 全新 06-03 24 ep) → 装 cron。**uc 待补**: 同流程 (建 v2 + 装 cron `27 * * * *`)。
 
 ---
 
