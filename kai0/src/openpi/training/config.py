@@ -1552,6 +1552,34 @@ _CONFIGS = [
         inline_eval_every=4,
     ),
 
+    # ===== v2v3 数据时窗实验 (data_window_scaling, plan: future_plans/plans/v2v3_data_window_scaling_experiments.md) =====
+    # Exp-A: v2/2026-05-18 单日 raw (未裁), 201 ep — cnsh 16卡
+    TrainConfig(
+        name="pi05_flatten_fold_A_0518_v2_201",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_0518_v2_201",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/home/tim/local_ckpts/Task_A_init/mixed_1_clean/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6,
+        ),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=16,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
+
     # Dataset = 4-23~5-27 EXCEPT 5-16/18/19/20/21 (校准漂移期, v7 发现).
     # 13 dates / ~1059 ep (排 Class C 107 + End-snap 5 截尾).
     # 用 build_A_0423_0527.py 生成数据, 同 hparams 双 init 对照:
