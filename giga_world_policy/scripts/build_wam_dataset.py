@@ -27,6 +27,10 @@ import pyarrow.parquet as pq
 from lerobot.datasets.compute_stats import compute_episode_stats
 from lerobot.datasets.utils import serialize_dict
 
+from scripts.wam_pipeline.repair_action_spikes import repair_matrix
+
+SPIKE_ABS_THRESHOLD = 10.0  # |state/action 值|>此阈值判为传感器 glitch(关节~3.2/夹爪~0.1)
+
 CAM_SRC_TO_DST = {
     "top_head": "observation.images.cam_high",
     "hand_left": "observation.images.cam_left_wrist",
@@ -129,6 +133,14 @@ def rewrite_parquet(pq_path, new_idx, global_frame):
     if "timestamp" in t.column_names:
         t = t.set_column(t.column_names.index("timestamp"), "timestamp",
                          pa.array([i / FPS for i in range(n)], pa.float32()))
+    # 净化单帧传感器尖刺(kai 源有复发性编码器 glitch,如 1895.83/-292.66,孤立单帧),
+    # 用同维时间近邻插值替换,否则会把某维 norm_stats 的 std 拉到 10+。
+    for col in ("observation.state", "action"):
+        if col in t.column_names:
+            field = t.schema.field(col)
+            M = np.stack(t.column(col).to_pylist()).astype(np.float32)
+            if repair_matrix(M, SPIKE_ABS_THRESHOLD):
+                t = t.set_column(t.schema.get_field_index(col), field, pa.array(list(M), type=field.type))
     return t, n
 
 
