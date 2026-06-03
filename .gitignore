@@ -82,3 +82,4 @@ xvla/ckpts/
 # WAM training outputs (large checkpoints)
 giga_world_policy/runs/
 giga_world_policy/_tmp/
+giga_world_policy/scripts/aihc/workspace/
