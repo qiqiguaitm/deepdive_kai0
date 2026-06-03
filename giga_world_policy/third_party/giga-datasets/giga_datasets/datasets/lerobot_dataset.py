@@ -38,6 +38,8 @@ class LeRobotDataset(BaseDataset):
         t5_cache_size=256,
         meta_name=None,
         embodiment=None,
+        latent_dir=None,
+        latent_cache_size=4,
         **kwargs,
     ):
         super(LeRobotDataset, self).__init__(data_path=data_path)
@@ -53,6 +55,12 @@ class LeRobotDataset(BaseDataset):
         self._t5_cache_order = []
         self.meta_name = meta_name
         self.embodiment = embodiment
+        # VAE latent 缓存(可选):latent_dir 指向 {data_path}/vae_latent;按 episode 文件 LRU 缓存,
+        # 配合 episode-grouped sampler 实现每集只读一次(~0.25MB/样本摊销),跳过 mp4 解码+VAE。
+        self.latent_dir = latent_dir
+        self.latent_cache_size = int(latent_cache_size)
+        self._lat_cache = {}
+        self._lat_order = []
         self.kwargs = kwargs
         self.dataset = None
         self.robotype = None
@@ -182,6 +190,21 @@ class LeRobotDataset(BaseDataset):
                                 if len(self._t5_cache_order) > self.t5_cache_size:
                                     old = self._t5_cache_order.pop(0)
                                     self._t5_cache.pop(old, None)
+        if self.latent_dir is not None:
+            ei = data_dict.get("episode_index", None)
+            fi = data_dict.get("frame_index", None)
+            ei = int(ei.item() if hasattr(ei, "item") else ei)
+            fi = int(fi.item() if hasattr(fi, "item") else fi)
+            ep = self._lat_cache.get(ei)
+            if ep is None:
+                ep = torch.load(os.path.join(self.latent_dir, f"episode_{ei:06d}.pt"), map_location="cpu")
+                self._lat_cache[ei] = ep
+                self._lat_order.append(ei)
+                if len(self._lat_order) > self.latent_cache_size:
+                    self._lat_cache.pop(self._lat_order.pop(0), None)
+            j = ep["starts"].index(fi)
+            data_dict["visual_latents"] = ep["visual"][j]
+            data_dict["ref_latents"] = ep["ref"][j]
         return data_dict
 
 class FastLeRobotDataset(_LeRobotDataset):

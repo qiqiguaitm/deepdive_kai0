@@ -175,33 +175,36 @@ class WATransformsLerobot(WATransforms):
         robotype_embed_id = self._get_robotype_embed_id(data_dict)
         stats_dict = self._get_stats_dict(robotype_embed_id)
  
-        views = []
-        for k in self.view_keys[: self.num_views]:
-            if k not in data_dict:
-                raise KeyError(f"Missing view key: {k}")
-            v = data_dict[k]
-            if isinstance(v, np.ndarray):
-                v = torch.from_numpy(v)
-            if not isinstance(v, torch.Tensor):
-                raise TypeError(f"Unsupported image type for {k}: {type(v)}")
-            v = self._to_nchw_uint8(v)
-            v = self._process_images(v, dst_width=dst_width, dst_height=dst_height)
-            views.append(v)
- 
-        if len(views) == 1:
-            input_images = views[0]
-        else:
-            input_images = torch.cat(views, dim=-1)
- 
-        data_dict["input_images"] = input_images
- 
-        if self.image_cfg is not None:
-            ref_masks, ref_latent_masks = self.mask_generator.get_mask(data_dict["input_images"].shape[0])
-            ref_masks = ref_masks[:, None, None, None]
-            ref_latent_masks = ref_latent_masks[None, :, None, None]
-            ref_images = data_dict["input_images"].clone() * ref_masks
-            data_dict["input_ref_images"] = ref_images
-            data_dict["input_ref_masks"] = ref_latent_masks
+        # latent 缓存模式:dataset 已注入 visual_latents/ref_latents → 跳过解码+图像处理
+        _latent_mode = "visual_latents" in data_dict
+        if not _latent_mode:
+            views = []
+            for k in self.view_keys[: self.num_views]:
+                if k not in data_dict:
+                    raise KeyError(f"Missing view key: {k}")
+                v = data_dict[k]
+                if isinstance(v, np.ndarray):
+                    v = torch.from_numpy(v)
+                if not isinstance(v, torch.Tensor):
+                    raise TypeError(f"Unsupported image type for {k}: {type(v)}")
+                v = self._to_nchw_uint8(v)
+                v = self._process_images(v, dst_width=dst_width, dst_height=dst_height)
+                views.append(v)
+
+            if len(views) == 1:
+                input_images = views[0]
+            else:
+                input_images = torch.cat(views, dim=-1)
+
+            data_dict["input_images"] = input_images
+
+            if self.image_cfg is not None:
+                ref_masks, ref_latent_masks = self.mask_generator.get_mask(data_dict["input_images"].shape[0])
+                ref_masks = ref_masks[:, None, None, None]
+                ref_latent_masks = ref_latent_masks[None, :, None, None]
+                ref_images = data_dict["input_images"].clone() * ref_masks
+                data_dict["input_ref_images"] = ref_images
+                data_dict["input_ref_masks"] = ref_latent_masks
  
         action = data_dict[self.action_key]
         if isinstance(action, np.ndarray):
@@ -292,9 +295,13 @@ class WATransformsLerobot(WATransforms):
  
         out = {}
         out["fps"] = torch.tensor(self.fps, dtype=torch.float32)
-        out["images"] = data_dict["input_images"]
-        out["ref_images"] = data_dict.get("input_ref_images", None)
-        out["ref_masks"] = data_dict.get("input_ref_masks", None)
+        if _latent_mode:
+            out["visual_latents"] = data_dict["visual_latents"]   # 缓存的整 clip latent (C,T,h,w)
+            out["ref_latents"] = data_dict["ref_latents"]         # 缓存的首帧 latent (C,1,h,w)
+        else:
+            out["images"] = data_dict["input_images"]
+            out["ref_images"] = data_dict.get("input_ref_images", None)
+            out["ref_masks"] = data_dict.get("input_ref_masks", None)
         out["prompt_embeds"] = prompt_embeds
         out["action"] = norm_delta
         out["state"] = norm_state
