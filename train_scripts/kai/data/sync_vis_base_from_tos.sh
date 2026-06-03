@@ -72,6 +72,17 @@ flock -n 9 || { echo "[$(ts)] previous run still active, skip" >>"$LOG"; exit 0;
 [ -x "$TOSUTIL" ] || { echo "[$(ts)] ERROR: tosutil missing at $TOSUTIL" >>"$LOG"; exit 1; }
 [ -d "$DST" ]     || { echo "[$(ts)] ERROR: local DST missing $DST" >>"$LOG"; exit 1; }
 
+# 护栏 1 (2026-06-03): DST 必须在 vis_base/v2/ 下 — 防脚本被回退到旧版 DST=vis_base 根, 误把
+#   TOS 数据拉成扁平 <date>-v2 与 v2/ 重复 (gf3/uc 曾因迁移窗口旧 DST 各产生 20 个扁平残留 15G)。
+case "$DST" in */vis_base/v2) : ;; *) echo "[$(ts)] ERROR: DST 不在 vis_base/v2 下 ($DST), 拒绝运行 (防扁平污染)" >>"$LOG"; exit 1 ;; esac
+# 护栏 2: 自愈 — 清理 vis_base 根下不该存在的扁平 <date>-v2 (v2 数据应全在 v2/ 子目录)。
+VB_ROOT="$KAI0_ROOT/kai0/data/Task_A/vis_base"
+for fd in "$VB_ROOT"/2026-*-v2; do
+  [ -d "$fd" ] || continue
+  echo "[$(ts)] WARN 清理 vis_base 根扁平残留: $(basename "$fd") (应在 v2/ 下)" >>"$LOG"
+  rm -rf "$fd"
+done
+
 echo "[$(ts)] sync start (tosutil cp -r -u, full incremental)" >>"$LOG"
 dates=$("$TOSUTIL" ls -d "$SRC/" 2>/dev/null | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}-v[0-9]+/?$' | sed 's#/$##' | sort -u)
 [ -n "$dates" ] || { echo "[$(ts)] ERROR: no dates from TOS (cred/network?)" >>"$LOG"; exit 1; }
