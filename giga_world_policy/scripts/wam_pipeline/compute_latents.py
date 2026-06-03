@@ -70,8 +70,11 @@ def main():
     if not my_eps:
         print(f"DONE shard{args.shard} ({args.emb}): nothing to do", flush=True); return
     windows = []
+    expected = {}
     for i, L in my_eps:
-        for f in range(0, max(1, L - NUM_FRAMES + 1), args.stride):
+        ws = list(range(0, max(1, L - NUM_FRAMES + 1), args.stride))
+        expected[i] = len(ws)
+        for f in ws:
             windows.append((i, f, gstart[i] + f))
     print(f"[{args.emb} shard{args.shard}] {len(my_eps)} eps, {len(windows)} windows", flush=True)
 
@@ -88,21 +91,28 @@ def main():
     dl = DataLoader(WindowDS(root, emb_id, args.stride, gstart, windows), batch_size=args.batch,
                     num_workers=args.workers, collate_fn=lambda b: b)  # list of (epi,f,images,ref)
     buf = {}  # epi -> {"starts":[], "visual":[], "ref":[]}
-    n = 0
+    n = 0; saved = 0
     for batch in dl:
         imgs = torch.stack([x[2] for x in batch]); refs = torch.stack([x[3] for x in batch])
         vz = enc(imgs); rz = enc(refs)
         for k, (epi, f, _, _) in enumerate(batch):
             b = buf.setdefault(epi, {"starts": [], "visual": [], "ref": []})
             b["starts"].append(f); b["visual"].append(vz[k]); b["ref"].append(rz[k])
+            if len(b["starts"]) >= expected[epi]:   # 该 episode 全部窗口完成 → 立即落盘并释放内存
+                tmp = f"{out_dir}/episode_{epi:06d}.pt.tmp"
+                torch.save({"stride": args.stride, "starts": b["starts"],
+                            "visual": torch.stack(b["visual"]), "ref": torch.stack(b["ref"])}, tmp)
+                os.replace(tmp, f"{out_dir}/episode_{epi:06d}.pt")   # 原子落盘
+                del buf[epi]; saved += 1
         n += len(batch)
-        if n % 200 == 0:
-            print(f"[{args.emb} shard{args.shard}] {n}/{len(windows)} windows", flush=True)
-    for epi, b in buf.items():
+        if n % 400 == 0:
+            print(f"[{args.emb} shard{args.shard}] {n}/{len(windows)} windows, {saved} eps saved", flush=True)
+    # 兜底:保存任何残留(理论上 expected 触发后应为空)
+    for epi, b in list(buf.items()):
         torch.save({"stride": args.stride, "starts": b["starts"],
                     "visual": torch.stack(b["visual"]), "ref": torch.stack(b["ref"])},
-                   f"{out_dir}/episode_{epi:06d}.pt")
-    print(f"DONE shard{args.shard} ({args.emb}): {len(buf)} eps, {n} windows -> {out_dir}", flush=True)
+                   f"{out_dir}/episode_{epi:06d}.pt"); saved += 1
+    print(f"DONE shard{args.shard} ({args.emb}): {saved} eps, {n} windows -> {out_dir}", flush=True)
 
 
 if __name__ == "__main__":
