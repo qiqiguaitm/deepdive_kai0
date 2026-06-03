@@ -29,8 +29,19 @@ norm_path = [
 ]
 
 
+# 可复现 held-out:训练只用 train_episode_indices(排除 200 集验证),visrobot01 专用。
+# 见 assets_visrobot01/heldout_visrobot01.json(make_heldout.py 生成,显式 id + sha 指纹)。
+import json as _json
+import os as _os
+
+_HELDOUT = "./assets_visrobot01/heldout_visrobot01.json"
+_VIS_TRAIN_EPS = None
+if _os.path.exists(_HELDOUT):
+    _VIS_TRAIN_EPS = sorted(int(x) for x in _json.load(open(_HELDOUT))["train_episode_indices"])
+
+
 def _entry(emb):
-    return dict(
+    e = dict(
         _class_name="LeRobotDataset",
         data_path=f"{DATA}/{emb}",
         data_size=None,
@@ -42,9 +53,12 @@ def _entry(emb):
         # violate tolerance。设 1e-3:> float32 量化噪声、<< 半帧距 0.0167s,既过检查又不会取错帧。
         tolerance_s=1e-3,
     )
+    if emb == "visrobot01" and _VIS_TRAIN_EPS is not None:
+        e["episodes"] = _VIS_TRAIN_EPS  # 排除 held-out;经 LeRobotDataset(**kwargs)->FastLeRobotDataset
+    return e
 
 
-# visrobot01(目标域 ~2101 ep)上采样 3x 平衡 kairobot01(~6512 ep ≈ 3:1)
+# visrobot01(目标域,train≈1898 集)上采样 3x 平衡 kairobot01(~6512 ep ≈ 3:1)
 data_or_config = [_entry("visrobot01")] * 3 + [_entry("kairobot01")]
 
 config = dict(

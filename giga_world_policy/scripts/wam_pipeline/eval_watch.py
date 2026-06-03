@@ -159,7 +159,9 @@ def main():
     ap.add_argument("--output_dir", required=True, help="训练 project_dir(轮询 checkpoint)")
     ap.add_argument("--model_id", required=True, help="Wan2.2-TI2V-5B-Diffusers(取 vae/config)")
     ap.add_argument("--stats_path", required=True)
-    ap.add_argument("--val_root", required=True, help="held-out 验证集 LeRobot 根目录")
+    ap.add_argument("--val_root", required=True, help="visrobot01 数据集根目录(held-out 子集由 manifest 指定)")
+    ap.add_argument("--heldout_manifest", default="assets_visrobot01/heldout_visrobot01.json",
+                    help="held-out 清单(make_heldout.py 生成);用其 heldout_episode_indices 经 episodes= 取子集")
     ap.add_argument("--t5_pkl", required=True)
     ap.add_argument("--n_clips", type=int, default=50)
     ap.add_argument("--n_mp4", type=int, default=3)
@@ -201,12 +203,19 @@ def main():
         print("SMOKE_OK"); return
 
     from giga_datasets import load_dataset
-    val_ds = load_dataset([dict(_class_name="LeRobotDataset", data_path=args.val_root,
-                                delta_info={"action": args.action_chunk},
-                                delta_frames={k: [0, args.action_chunk // 4, args.action_chunk // 2,
-                                                  3 * args.action_chunk // 4, args.action_chunk]
-                                              for k in ["observation.images.cam_high", "observation.images.cam_left_wrist", "observation.images.cam_right_wrist"]},
-                                embodiment="visrobot01", tolerance_s=1e-3)])
+    heldout_eps = None
+    if args.heldout_manifest and os.path.exists(args.heldout_manifest):
+        heldout_eps = sorted(int(x) for x in json.load(open(args.heldout_manifest))["heldout_episode_indices"])
+        print(f"[eval] held-out: {len(heldout_eps)} episodes from {args.heldout_manifest}")
+    val_entry = dict(_class_name="LeRobotDataset", data_path=args.val_root,
+                     delta_info={"action": args.action_chunk},
+                     delta_frames={k: [0, args.action_chunk // 4, args.action_chunk // 2,
+                                       3 * args.action_chunk // 4, args.action_chunk]
+                                   for k in ["observation.images.cam_high", "observation.images.cam_left_wrist", "observation.images.cam_right_wrist"]},
+                     embodiment="visrobot01", tolerance_s=1e-3)
+    if heldout_eps is not None:
+        val_entry["episodes"] = heldout_eps   # 只评 held-out,绝不碰训练集
+    val_ds = load_dataset([val_entry])
     stats = load_stats(args.stats_path)
     norm = extract_normalization_tensors(stats, device=device, state_dim=args.state_dim, action_dim=args.action_dim)
     t5 = load_t5_embedding_from_pkl(args.t5_pkl, target_len=args.t5_len).to(device=device, dtype=torch.float32)
