@@ -578,6 +578,10 @@ def _show_replay_status(image: np.ndarray, line1: str, line2: str = ''):
 
 def run_replay(args):
     """Replay 阶段: 自动运动 + 稳定后采集"""
+    # 允许 --speed 覆盖默认运动速度 (仅影响 replay 的来回运动)
+    global REPLAY_SPEED_PCT
+    if getattr(args, 'speed', None) is not None:
+        REPLAY_SPEED_PCT = args.speed
     session_dir = os.path.join(os.path.dirname(__file__), 'data', args.session, args.arm)
     pose_file = os.path.join(session_dir, 'pose_list.json')
     if not os.path.exists(pose_file):
@@ -866,6 +870,8 @@ def main():
     parser.add_argument('--camera-serial', type=str, help='RealSense 序列号 (默认按 arm 自动选择)')
     parser.add_argument('--session', type=str, required=True, help='数据保存目录名')
     parser.add_argument('--num-poses', type=int, default=20, help='目标姿态数 (preview)')
+    parser.add_argument('--speed', type=int, default=None,
+                        help='replay 运动速度 %% (默认 30, 调小更慢更稳, 如 --speed 15)')
     parser.add_argument('--teleop', action='store_true',
                         help='preview 时不 disable slave (由外部 master/slave 遥操驱动); '
                              '只对 --phase preview 生效')
