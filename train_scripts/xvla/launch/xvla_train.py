@@ -26,8 +26,8 @@ from lerobot.policies.xvla.modeling_xvla import XVLAPolicy
 
 # ==================== CONFIGS ====================
 DATA_ROOT = "/data/shared/ubuntu/workspace/dataset_ee6d"  # legacy (buggy pipeline) — superseded by SB
-SB = "/data/shared/ubuntu/workspace/deepdive_kai0/xvla/data/self_built"  # X-VLA self-built EE6D (fixed pipeline)
-CKPT_INIT = "/data/shared/ubuntu/workspace/xvla_ckpts"
+SB = os.environ.get("XVLA_SB", "/data/shared/ubuntu/workspace/deepdive_kai0/xvla/data/self_built")  # X-VLA self-built EE6D (fixed pipeline); override via XVLA_SB env for local run
+CKPT_INIT = os.environ.get("XVLA_CKPT_INIT", "/data/shared/ubuntu/workspace/xvla_ckpts")  # base init model; override via XVLA_CKPT_INIT env
 PROMPT = "Flatten and fold the cloth."
 
 CONFIGS = {
@@ -139,7 +139,7 @@ CONFIGS = {
     "X3C_smooth800": dict(
         # X3.C: vis-only (smooth_800).
         datasets=[
-            dict(root=f"{SB}/A_new_smooth_800", domain_id=20, prompt=PROMPT, weight=1.0),
+            dict(root=f"{SB}/A_new_smooth_800_xvla", domain_id=20, prompt=PROMPT, weight=1.0),
         ],
         steps=30_000,
         lr=5e-5,
@@ -154,7 +154,7 @@ CONFIGS = {
     # 前端重适应余量); lr schedule 保留 cosine (定长训练比官方 constant 更稳); 加 ColorJitter.
     "X3C_smooth800_p0": dict(
         datasets=[
-            dict(root=f"{SB}/A_new_smooth_800", domain_id=20, prompt=PROMPT, weight=1.0),
+            dict(root=f"{SB}/A_new_smooth_800_xvla", domain_id=20, prompt=PROMPT, weight=1.0),
         ],
         steps=60_000,
         lr=1e-4,            # 对齐官方 (配 vlm_lr_scale=0.1 → VLM lr 1e-5)
@@ -169,7 +169,7 @@ CONFIGS = {
         # §0.NEW.5: X3.C vis-only 延长到 100k step (≈7 epoch) 验证 X-VLA 是否欠训。
         # 与 X3C_smooth800 完全相同, 仅 steps 30k→100k (cosine decay 自动拉到 100k)。
         datasets=[
-            dict(root=f"{SB}/A_new_smooth_800", domain_id=20, prompt=PROMPT, weight=1.0),
+            dict(root=f"{SB}/A_new_smooth_800_xvla", domain_id=20, prompt=PROMPT, weight=1.0),
         ],
         steps=100_000,
         lr=5e-5,
@@ -183,7 +183,7 @@ CONFIGS = {
         datasets=[
             dict(root=f"{SB}/kai0_base", domain_id=19, prompt=PROMPT, weight=1.0),
             dict(root=f"{SB}/kai0_dagger", domain_id=19, prompt=PROMPT, weight=1.0),
-            dict(root=f"{SB}/A_new_smooth_800", domain_id=20, prompt=PROMPT, weight=7.0),
+            dict(root=f"{SB}/A_new_smooth_800_xvla", domain_id=20, prompt=PROMPT, weight=7.0),
         ],
         steps=30_000,
         lr=5e-5,
@@ -197,7 +197,7 @@ CONFIGS = {
         datasets=[
             dict(root=f"{SB}/kai0_base", domain_id=19, prompt=PROMPT, weight=1.0, type="parquet"),
             dict(root=f"{SB}/kai0_dagger", domain_id=19, prompt=PROMPT, weight=1.0, type="parquet"),
-            dict(root=f"{SB}/A_new_smooth_800", domain_id=20, prompt=PROMPT, weight=7.0, type="parquet"),
+            dict(root=f"{SB}/A_new_smooth_800_xvla", domain_id=20, prompt=PROMPT, weight=7.0, type="parquet"),
             dict(root="/data/shared/ubuntu/workspace/deepdive_kai0/xvla/data/xvla_soft_fold",
                  action_cache_dir=f"{SB}/xvla_soft_fold_action_cache",
                  domain_id=21, prompt=PROMPT, weight=2.0, type="hdf5"),
