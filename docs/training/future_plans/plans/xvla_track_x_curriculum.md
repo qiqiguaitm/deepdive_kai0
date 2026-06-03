@@ -223,7 +223,7 @@ X3.C 自身 MAE (EE6D 20D, final, 1000 窗口):
 |---|---|---|
 | P0.1 | 代码: `multi_domain_dataset.imagenet_normalize_chw` (train) + `serve_policy_xvla --imagenet_norm` (serve, 数值完全一致) + ColorJitter | ✅ commit `f8f7c79`+`0e0775b` |
 | P0.2 | config `X3C_smooth800_p0` (官方对齐) | ✅ |
-| P0.3 | uc01 重训 (torchrun 8 GPU, ckpt 每 2k, output `xvla_x3c_smooth800_p0`) | 🔄 运行中 (step ~100/60k, rate 1.49it/s, ETA ~11h, loss 107→22) |
+| P0.3 | uc01 重训 → **2026-06-03 NFS I/O 争用卡死 (用户删除任务期间 D 态 nfs_wait) + uc 集群回退** → 改走 **volc 8 卡 (§0.NEW.6.6)**;数据+基座已迁本地单卡作备份 | ⏸️ uc 弃 → 迁 volc |
 | P0.4 | offline eval (全 ckpt MAE 曲线, 同 1000 val 窗口; **P0 ckpt 自洽**) | ⏳ |
 | P0.5 | ⭐ **真机测试 + 复测 trace 客观判据** | ⏳ |
 
@@ -253,6 +253,33 @@ X3.C 自身 MAE (EE6D 20D, final, 1000 窗口):
 - ✅ **全对齐无致命错**: action 20D EE6D absolute、xyz 米级、rot6d 正交归一 (col 模长 1.000/点积 0.000)、gripper 二值同阈值、loss scale (XYZ×500/ROT×10/grip×1)、无归一化 (靠 loss scale)、proprio=action[0]、action chunk = 真实未来轨迹 (标签语义正确, pi05 同数据 work 佐证)。
 - 🟡 **D5 (唯一实质差异) — action chunk 时间窗口**: 我们连续 30 帧 = **1.0s** (33ms/点); 官方 qdur=2.0s 插值 30 点 = **2.0s** (67ms/点)。对叠衣慢长程任务, 短规划窗口可能加重长程走停 (但主因仍 R1)。
 - **D5 候选** (P0 后): 若 P0 (R1) 真机仍长程走停, 改 `multi_domain_dataset` 采样为 2 秒窗口 linspace 插值 (对齐官方); 需训练+推理节奏一致, **不进 P0** (单变量), 留作独立实验。
+
+### §0.NEW.6.6 ⭐ X3C_p0 迁 volc 8 卡提交 (2026-06-03) — uc 回退后执行路径
+
+**由来**: uc01 上的 X3C_p0 重训历经 NFS I/O 争用卡死(用户 NFS 删除任务期间,全进程 D 态 `nfs_wait_bit_killable`,根因见 [`../../deployment/training_ops/submission/uc_cluster_jobs.md`](../../deployment/training_ops/submission/uc_cluster_jobs.md))→ 用户决定 **uc 集群回退、不再提交**。X3C_p0 改走 **volc 8 卡单节点**。数据(`A_new_smooth_800_xvla` 189M)+ 基座(`xvla_ckpts` 3.3G)已迁本地作备份单卡路径;volc 提交另需上目标 vePFS。
+
+**8 卡单节点提交规格**:
+| 项 | 值 |
+|---|---|
+| 集群 | ✅ **cnsh robot-task (A100)** — 8 GPU 单节点 (queue `q-20251204185107-fvnpx`, vepfs-cnsh, zone cn-shanghai-a, 无 SubPath) |
+| 镜像 | X-VLA torch 镜像 `visincept-cn-shanghai.cr.volces.com/grasp/h2r:1.0`(cnsh 区,X-VLA Stage1 实测可跑) |
+| Flavor | 单节点 8 GPU(`ml.hpcpni3ln.45xlarge` 类) |
+| Framework | PyTorch(单节点 torchrun 用 `--standalone`,不依赖 MLP 多机 env) |
+| 启动 | `torchrun --standalone --nproc_per_node=8 xvla_train.py --config X3C_smooth800_p0 --output_dir <vePFS>/xvla_x3c_smooth800_p0 --workers 4` |
+| env | `XVLA_SB=<vePFS>/.../xvla/data/self_built` `XVLA_CKPT_INIT=<vePFS>/xvla_ckpts`(代码已 env 可覆盖) |
+| 配置 | 不变(60k / eff batch 64 / lr1e-4 / imagenet_norm / ColorJitter,§0.NEW.6.1) |
+
+**前置(数据/模型上 vePFS)**:
+1. 数据 `A_new_smooth_800_xvla`(189M, 已改名,见 §0.NEW.1) → 目标 vePFS `.../xvla/data/self_built/`;
+2. 基座 `xvla_ckpts`(3.3G) → 目标 vePFS;
+3. vePFS 的 git checkout `pull` 到含 env-override + 数据改名 commit。
+
+**⚠️ 注意**:
+- output_dir 落 **vePFS 大盘**(非节点本地;X-VLA 每 2k 存 ~3.3G,60k≈100G);
+- X-VLA ckpt **只存 model_state、无 optimizer、无 resume**(step 硬编码 0)→ 中断只能从头跑或加 warm-restart(`--init-from`,目前未实现)。volc 上要一气呵成;
+- 真机推理务必 `--imagenet_norm`(train/serve parity,§0.NEW.6.4 铁律)。
+
+**状态**: 📝 规划 — 待选集群 + 数据/基座上 vePFS + 出 YAML 提交。
 
 ---
 

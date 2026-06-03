@@ -1,7 +1,7 @@
 # v2/v3 数据量×时窗 扩展实验 (Data Window Scaling)
 
 > **目的**: 用 3 个 pi05 cloth-fold 训练实验,考察**数据时窗/数量**对真机表现的影响 —— 单日 vs 多日窗口 vs 全量。与 [`data_root_cause_probe_experiments.md`](data_root_cause_probe_experiments.md) 互补(后者查"数据质量/裁剪",本系列查"数据数量/时窗")。
-> **状态**: 📝 规划中 (待数据上 vePFS + config 注册)
+> **状态**: 📝 规划已定稿 (决策见 §7;待 build 数据集 + 注册 config + 提交)
 > **建立**: 2026-06-03
 >
 > ⚠️ **方法学铁律**(沿用本项目一贯结论): **真机为终判, offline MAE 系统性反指**。下面每个实验出 ckpt 后**必须真机测**,MAE 仅用于确认收敛 + 选 best ckpt。
@@ -65,7 +65,7 @@
 | LR | Cosine, warmup=1k, peak=1.5e-5, decay→1.5e-6 |
 | EMA | 0.9999 |
 | batch_size / fsdp_devices | 128 / 16 |
-| **Steps** | A 单日小集 **30k 够**;B/C **50k**(待 inline-eval plateau 微调) |
+| **Steps** | **全部 50k**(用户定) |
 | norm_stats | **各自重算**(`compute_norm_states_fast.py`),不复用 |
 | inline_eval_val_root | `vis_v2_merged_val`(与既往 cross-val 一致,便于横比) |
 
@@ -83,46 +83,40 @@
 5. **提交 16 卡 YAML**(cnsh / cnbj 对应 queue + image + SubPath,详见 [`../../deployment/training_ops/submission/`](../../deployment/training_ops/submission/) + 共性坑 `training_pitfalls_common.md`)。
 6. **验证**: log 出 `Generating train split` + `Step N: loss` + 熬过第一次 ckpt save。
 
-> **Exp-C 顺序触发**: Exp-B 在 cnbj 完成(50k + final save)后,再提交 Exp-C(同 cnbj 16 卡)。可挂 watcher 监 Exp-B 终态自动提交,或手动。
+> **Exp-C 顺序触发(手动)**: Exp-B 在 cnbj 完成(50k + final save)后,**手动**提交 Exp-C(同 cnbj 16 卡)。
 
 ---
 
-## 4. ⚠️ 关键前置 — 数据上 vePFS(uc 即将回退!)
+## 4. 数据定位(已澄清:master 在 vePFS,uc 回退无影响)
 
-raw `vis_base/v2,v3` 当前**只确认在 uc**(323G)。uc **正在回退**,且 volc 训练需数据在 **cnsh/cnbj vePFS**。**必须先确认/搬运**:
+✅ **`vis_base` 是 gf0/vePFS 的软链接,raw 实际落盘在 vePFS** —— 数据 master 不在 uc,uc 回退**不影响**本系列。uc 上看到的 323G 只是经软链接访问 vePFS 的视图。
 
-| 待确认 | 动作 |
+| 项 | 状态 / 动作 |
 |---|---|
-| vis_base v2/v3 在 gf0(cnsh)vePFS 有无副本? | 有 → 直接 build;无 → **uc 回退前** rsync/TOS 搬 5-18-v2(25G)+ v3(61G)到 cnsh/cnbj vePFS |
-| cnbj vePFS 有无 v3? | 同上,Exp-B/C 需 v3 在 cnbj |
-| build 在哪做 | 建议在数据落地的 vePFS 机器(gf0/gf3)本地 build,避免跨集群读 |
-
-> 🔴 **最高优先级**: 在 uc 回退前把这两块 raw(共 ~86G:5-18-v2 25G + v3 61G)确保有 vePFS/本地副本,否则实验无源。
+| Exp-A 源 (cnsh) | ✅ `vis_base/v2/2026-05-18-v2` 在 gf0/cnsh vePFS,**直接 build** |
+| Exp-B/C 源 (cnbj) | ⚠️ v3 需在 **cnbj vePFS**(vePFS-North-E)。cnsh 有 → 若 cnbj 没有,按既往做法 **TOS 跨区同步**(参考 A_0423_0527 迁 cnbj 流程);build 在 gf3 本地做 |
+| build 位置 | 在数据落地的 vePFS 机器本地 build(cnsh→gf0、cnbj→gf3),避免跨集群读 |
 
 ---
 
 ## 5. 注意事项 / 待决
 
-1. **v2 vs v3 版本混用**: Exp-A 用 v2、B/C 用 v3。若想干净对比"单日 vs 窗口",理想应同版本。**待确认**: 是否把 Exp-A 也换 v3 的 5-18(v3 也有 201ep),以消除版本混淆?(当前按你给的 v2 路径写。)
+1. **v2 vs v3 版本混用(已定:Exp-A 保持 v2)**: Exp-A 用 v2/5-18、B/C 用 v3 → 跨版本。因此 Exp-A **不与 B/C 构成严格"单日 vs 窗口"同版本对比**;Exp-A 是 v2-单日的独立基线,窗口效应的干净对比在 **Exp-B vs Exp-C(同 v3)** 之间。
 2. **早期数据增益方向**: Exp-C vs Exp-B 的差(加 4-23~5-10 的 985ep)是本系列核心对比 → 真机判定"早期数据帮忙/稀释"。
 3. **5-16 排除**: 仅 16ep/3.3M,残缺,排除无争议。
-4. **steps**: A 单日 201ep 用 50k 会重过拟,建议 30k;B/C 50k。最终看 inline-eval plateau。
+4. **steps(已定:全部 50k)**: ⚠️ Exp-A 单日 201ep 在 50k 大概率过拟 → inline-eval 选 best ckpt 时取中段(参考 no_release ~20k 触底,见 [`../../history/experiments/data_root_cause_probe_results.md`](../../history/experiments/data_root_cause_probe_results.md))。
 
 ---
 
-## 6. 关联 XVLA 8 卡 volc 任务(并行轨,另行细化)
-
-另需"通过 volc 提交 8 卡 XVLA 训练任务队列"——与本 pi05 系列独立。X-VLA(torch DDP, 非 JAX)在 volc 提交要点:
-- Framework 需给 torchrun env;8 卡 = 单节点 8 GPU(`ml.hpcpni3ln.45xlarge` 类);
-- 数据 = `A_new_smooth_800_xvla`(已改名)等 EE6D 集,需上目标 vePFS;
-- init = `xvla_ckpts`(3.3G)上 vePFS;
-- 详细 YAML + 提交在本 plan 批准后单独出(见 待办)。
+## 6. 关联 XVLA 8 卡 volc 任务
+X-VLA 的 volc 8 卡训练规划写在 [`xvla_track_x_curriculum.md`](xvla_track_x_curriculum.md)(本 pi05 系列之外的独立轨)。
 
 ---
 
-## 7. 待你拍板
-- [ ] **§4 数据搬运**: 确认 vis_base v2/v3 在 vePFS 有无副本;无则授权我 uc 回退前搬运。
-- [ ] **§5.1 v2/v3**: Exp-A 保持 v2 单日,还是改 v3 的 5-18 以同版本?
-- [ ] config 名 / steps(A=30k? B/C=50k?)是否按建议。
-- [ ] Exp-C 顺序触发要自动(watcher)还是手动。
-- [ ] XVLA 8 卡 volc 是否本轮一起细化提交。
+## 7. 决策记录(2026-06-03 已定)
+- ✅ **数据**: vis_base 软链接→vePFS,master 在 vePFS,uc 回退无影响(§4)。
+- ✅ **Exp-A 版本**: 保持 v2/5-18,不改 v3(§5.1)。
+- ✅ **steps**: 全部 50k。
+- ✅ **Exp-C 触发**: 手动(Exp-B 完成后)。
+- ✅ **XVLA**: 细化提交,规划落 `xvla_track_x_curriculum.md`。
+- ⏳ 仍需: cnbj vePFS 确认/同步 v3(§4);config 注册 + 数据 build。
