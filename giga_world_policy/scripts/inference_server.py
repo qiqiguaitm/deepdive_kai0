@@ -15,6 +15,7 @@ from world_action_model.pipeline.utils import (
     load_stats,
     load_t5_embedding_from_pkl,
     normalize_state,
+    resolve_view,
 )
 from world_action_model.pipeline.wa_pipeline import WAPipeline
 from diffusers.models import AutoencoderKLWan
@@ -72,10 +73,11 @@ def get_policy(args: argparse.Namespace):
             state = state.unsqueeze(0)
         state = state.to(device=device, dtype=torch.float32)
 
+        # 兼容 cam_* 与 top_head/hand_* 两种相机命名
         images = {
-            "observation.images.cam_high": observation["observation.images.cam_high"],
-            "observation.images.cam_left_wrist": observation["observation.images.cam_left_wrist"],
-            "observation.images.cam_right_wrist": observation["observation.images.cam_right_wrist"],
+            "observation.images.cam_high": resolve_view(observation, "observation.images.cam_high"),
+            "observation.images.cam_left_wrist": resolve_view(observation, "observation.images.cam_left_wrist"),
+            "observation.images.cam_right_wrist": resolve_view(observation, "observation.images.cam_right_wrist"),
         }
         for k, v in list(images.items()):
             if not isinstance(v, torch.Tensor):

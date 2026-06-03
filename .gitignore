@@ -20,6 +20,7 @@ env/
 # ===== Project-specific large files =====
 # Model checkpoints (22GB+)
 kai0/checkpoints
+checkpoints/
 
 # ===== Caches =====
 openpi_cache/
@@ -31,6 +32,7 @@ kai0/cache
 logs/
 logs
 log/
+temp/
 kai0/wandb/
 kai0/dagger_stage_viz
 kai0/label_sanity_viz

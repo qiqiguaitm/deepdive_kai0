@@ -37,6 +37,7 @@ class LeRobotDataset(BaseDataset):
         t5_embedding_key="t5_embedding",
         t5_cache_size=256,
         meta_name=None,
+        embodiment=None,
         **kwargs,
     ):
         super(LeRobotDataset, self).__init__(data_path=data_path)
@@ -51,6 +52,7 @@ class LeRobotDataset(BaseDataset):
         self._t5_cache = {}
         self._t5_cache_order = []
         self.meta_name = meta_name
+        self.embodiment = embodiment
         self.kwargs = kwargs
         self.dataset = None
         self.robotype = None
@@ -94,11 +96,15 @@ class LeRobotDataset(BaseDataset):
             if info is None:
                 raise FileNotFoundError(f"missing meta/info.(json|yaml|yml) under {self.data_path}")
 
-            robotype = None
-            for k in ("robotype", "robot_type", "robot", "robot_name", "robot_model"):
-                if k in info:
-                    robotype = info[k]
-                    break
+            if self.embodiment is not None:
+                # config 显式指定的本体标识优先(用于 WAM 多-embodiment 路由),不依赖 info.json
+                robotype = self.embodiment
+            else:
+                robotype = None
+                for k in ("robotype", "robot_type", "robot", "robot_name", "robot_model"):
+                    if k in info:
+                        robotype = info[k]
+                        break
             if robotype is None:
                 raise KeyError(f"missing robotype in meta/info.* under {self.data_path}, keys={list(info.keys())}")
             if isinstance(robotype, str):

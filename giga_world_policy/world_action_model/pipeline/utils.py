@@ -17,6 +17,24 @@ NormMode = Literal["minmax", "zscore"]
 RefMode = Literal["cat_width", "three_views"]
 
 
+# 相机视图键别名:兼容 WAM 标准命名(cam_*)与机器人原生命名(top_head / hand_*)。
+# 推理时无论上游传哪种命名都能取到正确视图。
+CAM_VIEW_ALIASES: Dict[str, Tuple[str, ...]] = {
+    "observation.images.cam_high": ("observation.images.cam_high", "observation.images.top_head"),
+    "observation.images.cam_left_wrist": ("observation.images.cam_left_wrist", "observation.images.hand_left"),
+    "observation.images.cam_right_wrist": ("observation.images.cam_right_wrist", "observation.images.hand_right"),
+}
+
+
+def resolve_view(images: Dict[str, torch.Tensor], canonical: str) -> torch.Tensor:
+    """按别名取相机视图,兼容 cam_* 与 top_head/hand_* 两种命名。"""
+    candidates = CAM_VIEW_ALIASES.get(canonical, (canonical,))
+    for key in candidates:
+        if key in images:
+            return images[key]
+    raise KeyError(f"none of {candidates} present; available keys: {list(images.keys())}")
+
+
 def pad_t5_embedding(t5_embedding: torch.Tensor, target_len: int) -> torch.Tensor:
     if t5_embedding.ndim != 2:
         raise ValueError(f"t5_embedding must be 2D [seq, dim], got {t5_embedding.shape}")
@@ -94,9 +112,9 @@ def build_ref_image(
     crop_mode: Literal["center", "random"] = "center",
 ) -> Image.Image:
 
-    high = tensor_chw01_to_pil_rgb(images["observation.images.cam_high"])
-    left = tensor_chw01_to_pil_rgb(images["observation.images.cam_left_wrist"])
-    right = tensor_chw01_to_pil_rgb(images["observation.images.cam_right_wrist"])
+    high = tensor_chw01_to_pil_rgb(resolve_view(images, "observation.images.cam_high"))
+    left = tensor_chw01_to_pil_rgb(resolve_view(images, "observation.images.cam_left_wrist"))
+    right = tensor_chw01_to_pil_rgb(resolve_view(images, "observation.images.cam_right_wrist"))
     dst_width, dst_height = dst_size
     single_w = dst_width // 3
     single_dst = (single_w, dst_height)

@@ -150,25 +150,17 @@ def serialize_json(norm_stats: dict[str, NormStats]) -> str:
 
 
 class GetEmbodimentId:
-    """Get embodiment id from `data['meta'].info['robot_type']`."""
+    """Assign a fixed embodiment id (passed via --embodiment_id).
 
-    valid_embodiment_ids = {
-        0: 'agilex',
-        1: 'agibot_g1',
-        2: 'agibot_world',
-    }
+    每次只对单一数据集跑 norm_stats,embodiment_id 由调用方显式指定,不再从
+    info['robot_type'] 查表(避免 robot_type 命名不在映射表里时 KeyError)。
+    """
 
-    robot_type_mapping = {
-        'agilex_cobot_magic': 0,
-        'agibot_g1': 1,
-        'agibot_world': 2,
-    }
+    def __init__(self, embodiment_id: int):
+        self.embodiment_id = int(embodiment_id)
 
     def __call__(self, data: dict[str, Any]) -> dict[str, Any]:
-        robot_type = data['meta'].info['robot_type']
-        embodiment_id = self.robot_type_mapping[robot_type]
-
-        data['embodiment_id'] = embodiment_id
+        data['embodiment_id'] = self.embodiment_id
         return data
 
 
@@ -181,6 +173,8 @@ def compute_norm_stats(
     action_chunk: int = 50,
     action_dim: int = 32,
     num_workers: int = 64,
+    tolerance_s: float = 1e-3,
+    batch_size: int = 256,
 ) -> None:
     """Compute normalization statistics and write them to JSON.
 
@@ -197,6 +191,10 @@ def compute_norm_stats(
         action_chunk: Temporal window size used when computing action deltas.
         action_dim: Expected action dimensionality used for padding.
         num_workers: Number of PyTorch DataLoader worker processes to use.
+        tolerance_s: Allowed deviation (s) from 1/fps in lerobot's timestamp sync check
+            and action-chunk gather. Default 1e-3 (>float32 量化误差@~3600s 长 episode,
+            且 <<半帧距 0.0167s,不会取错帧)。规整后的网格本应恰为 1/fps,此值只吸收
+            float32 存储噪声。
     """
 
     delta_masks: dict[int, list[int] | None] = {embodiment_id: delta_mask}
@@ -209,13 +207,14 @@ def compute_norm_stats(
             ),
             meta_name='meta',
             skip_video_decoding=True,
+            tolerance_s=tolerance_s,
         )
         for data_path in data_paths
     ]
     dataset = load_dataset(data_or_config)
 
     data_transforms = [
-        GetEmbodimentId(),
+        GetEmbodimentId(embodiment_id),
         DeltaActions(mask=delta_masks),
         PadStatesAndActions(action_dim=action_dim),
     ]
@@ -226,20 +225,36 @@ def compute_norm_stats(
     num_frames = int(sample_rate * len(dataset))
 
     transform_dataset = TransformDataset(dataset, data_transforms, keys)
+    # 全量(sample_rate>=1)时每帧都要过,shuffle 只会让 Arrow 随机访问、缓存失效拖慢数据
+    # 生产(实测瓶颈在 worker 取数而非主循环);顺序访问快得多,且 mean/std 与顺序无关、
+    # q01/q99 在全量下顺序依赖可忽略。只有抽样(<1)时才需 shuffle 取无偏随机子集。
+    shuffle = sample_rate < 1.0
     dataloader = DataLoader(
         transform_dataset,
-        batch_size=1,
-        shuffle=True,
+        batch_size=batch_size,
+        shuffle=shuffle,
         num_workers=num_workers,
         pin_memory=False,
-        persistent_workers=True,
+        persistent_workers=num_workers > 0,
     )
 
-    for batch_idx, batch_data in tqdm(enumerate(dataloader), total=num_frames):
-        if batch_idx >= num_frames:
-            break
+    # 批量喂入 RunningStats: 每个样本 state=(1,dim)/action=(chunk,dim) 形状固定,默认
+    # collate 堆成 (B, rows, dim);reshape 成 (B*rows, dim) 后一次 update,摊薄 batch_size=1
+    # 时逐帧 Python/直方图调用的开销(实测 ~300 it/s → 批量后快 1~2 个数量级)。
+    # mean/std 与逐帧完全等价;q01/q99 为直方图近似,与逐帧/shuffle 一样有微小顺序依赖。
+    # 末批可能令处理帧数略超 num_frames(<batch_size),对统计无影响。
+    seen = 0
+    pbar = tqdm(total=num_frames)
+    for batch_data in dataloader:
+        bsz = batch_data[keys[0]].shape[0]
         for key in keys:
-            stats[key].update(batch_data[key][0].numpy())
+            arr = batch_data[key].numpy()
+            stats[key].update(arr.reshape(-1, arr.shape[-1]))
+        seen += bsz
+        pbar.update(bsz)
+        if seen >= num_frames:
+            break
+    pbar.close()
 
     norm_stats = {key: stats.get_statistics() for key, stats in stats.items()}
 

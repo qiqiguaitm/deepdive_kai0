@@ -240,9 +240,12 @@ class WATransformsLerobot(WATransforms):
         if action.shape[-1] < d:
             action = torch_F.pad(action, (0, d - int(action.shape[-1])), value=0.0)
  
+        # 14维 piper(左臂6 + 右臂6 + 双夹爪):关节 delta,夹爪(index 6/13)绝对值。
+        # visrobot01=embed_id 0, kairobot01=embed_id 1 同为双臂 piper,mask 相同。
+        _piper14 = np.array([True] * 6 + [False] + [True] * 6 + [False], dtype=bool)
         delta_mask_templates = {
-            0: np.array([True, True, True, True, True, True, False, True, True, True, True, True, True, False], dtype=bool),
-            1: np.array([True, True, True, True, True, True, True, False, True, True, True, True, True, True, True, False], dtype=bool),
+            0: _piper14,
+            1: _piper14,
         }
         base = delta_mask_templates.get(robotype_embed_id, None)
         assert base is not None, f"robotype_embed_id {robotype_embed_id} not found in delta_mask_templates"
