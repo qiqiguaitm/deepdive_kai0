@@ -4,7 +4,7 @@
   "jobFramework": "pytorch",
   "jobSpec": {
     "command": "bash /mnt/pfs/p46h4f/cosmos/deepdive_kai0/giga_world_policy/scripts/aihc/run_train_aihc.sh",
-    "image": "ccr-249evs6f-vpc.cnc.bj.baidubce.com/visrobot/cosmos:v3.0_QHcnix_20260531063553_QHcnix_20260601033953",
+    "image": "ccr-249evs6f-vpc.cnc.bj.baidubce.com/visrobot/cosmos:v4.0_QHcnix_20260531063553_QHcnix_20260603200802",
     "imageConfig": { "username": "", "password": "" },
     "replicas": 4,
     "resources": [
