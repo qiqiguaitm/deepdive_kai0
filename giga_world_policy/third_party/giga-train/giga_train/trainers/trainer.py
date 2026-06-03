@@ -525,11 +525,20 @@ class Trainer:
             batch_sampler = ParallelBatchSampler(batch_sampler, data_parallel_size=self.data_parallel_size)
         collator = data_config.get('collator', {})
         collator = DefaultCollator(**collator)
+        _nw = data_config.num_workers
+        _dl_extra = {}
+        if _nw and _nw > 0:
+            _pf = data_config.get('prefetch_factor', None)
+            if _pf is not None:
+                _dl_extra['prefetch_factor'] = int(_pf)
+            if data_config.get('persistent_workers', False):
+                _dl_extra['persistent_workers'] = True
         dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_sampler=batch_sampler,
             collate_fn=collator,
-            num_workers=data_config.num_workers,
+            num_workers=_nw,
+            **_dl_extra,
         )
         if self.distributed_type == DistributedType.DEEPSPEED:
             # Configure DeepSpeed micro batch size per GPU

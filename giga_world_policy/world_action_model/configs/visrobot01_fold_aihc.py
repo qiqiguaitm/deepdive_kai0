@@ -17,6 +17,8 @@ config["dataloaders"]["train"]["batch_size_per_gpu"] = 2
 # num_workers 是 per-rank;每节点 8 rank × 124 核 → 每 rank ~12(×8≈96/节点,留余量给主进程+VAE)。
 # 设 32-48/rank 会 256-384 进程/节点严重超核 → 反而更慢。根治在 #1 latent 缓存(读小 latent 而非解 mp4)。
 config["dataloaders"]["train"]["num_workers"] = 12
+config["dataloaders"]["train"]["prefetch_factor"] = 6        # 加深预取队列(每 worker 预取 6 批)
+config["dataloaders"]["train"]["persistent_workers"] = True  # 不在 epoch 间重启 worker
 config["train"].update(
     dict(
         max_steps=50000,
