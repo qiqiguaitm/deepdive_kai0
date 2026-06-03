@@ -262,6 +262,17 @@ tos://transfer-shanghai/KAI0/
 > - **sync DST 已从 `vis_base/` 改为 `vis_base/v2/`** —— 历史 build 脚本 (build_vis_v2_full / A_0423_0527 等) 的 SRC_ROOT 也加 `/v2`。
 > - ⚠️ **14k+ self_built 软链** (vis_v2_merged/full 等指向 vis_base 绝对路径) 在 mv 时已批量重指到 `/v2/`。
 
+> 🔒 **重构/迁移 SOP — 必须先停 sync (2026-06-03 复盘教训)**: 任何动 vis_base 目录结构 (如本次 v2/v3 分层) 的操作, **必须严格按此顺序**, 否则迁移窗口内 cron 会用旧 DST 拉数据造成残留:
+> ```
+> ① 停 sync cron        (注释/移除 crontab 行; 各机的 cron 在哪台都要停 — gf0 本机 / uc 在 uc02 / gf3 本机 root)
+> ② mv 数据 → v2/        (含批量修复 self_built 指向 vis_base 的绝对路径软链)
+> ③ build v3            (build_no_release.py --per-date all, 从 v2 裁投放)
+> ④ 改同步脚本 DST → v2  (+ 护栏: DST 必须含 /v2; 自愈清理根扁平残留)
+> ⑤ 验证                (帧对齐 / 软链 0 断裂 / 顶层只剩 v2 v3 无扁平)
+> ⑥ 重启 sync cron      (此时 DST 已对, 安全)
+> ```
+> **本次踩坑**: gf0 做对了 (①先停 cron); 但 gf3/uc 漏了①, 迁移时它们的 cron 用旧 DST=`vis_base` 根拉出 **20 个扁平 `<date>-v2` ×15G 重复残留** (无 depth/无软链引用=纯重复), 事后手动删除 + 给 sync 脚本加护栏 (DST 校验 + 根扁平自愈清理, commit `772152b`)。**核心: ①和⑥把整个迁移包在 "sync 停止" 窗口内。**
+
 | 项 | 值 |
 |---|---|
 | 机器 | **gf0 + uc-NFS(uc02 cron, uc01/03 共享可见) + gf3**(各机本机有 `~/tosutil` + 凭据) |
