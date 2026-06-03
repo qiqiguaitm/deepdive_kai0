@@ -1634,6 +1634,61 @@ _CONFIGS = [
         inline_eval_every=4,
     ),
 
+    # ===== dagger 有效性 + 训练方式对比 (plan: future_plans/plans/dagger_validity_and_finetune_comparison.md) =====
+    # Exp-A (D1): smooth800全量 + dagger全量 (~1033 ep, 从头重训) — cnbj 16卡
+    TrainConfig(
+        name="pi05_flatten_fold_A_smooth800_dagger_full",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_smooth800_dagger_full",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS-North-E/vis_robot/shared_ckpt/Task_A/mixed_1_clean/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6,
+        ),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=16,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root="/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
+
+    # Exp-B (D2): smooth800抽样 + dagger 1:1 (~454 ep), best ckpt step40000 微调 20k — cnsh 8卡
+    TrainConfig(
+        name="pi05_flatten_fold_A_smooth800_dagger_1to1_ft",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_smooth800_dagger_1to1",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS/tim/shared_ckpt/Task_A/smooth800_step40000/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=20_000, decay_lr=1.5e-6,
+        ),
+        ema_decay=0.9999,
+        num_train_steps=20_000,
+        keep_period=5_000,
+        save_interval=2_000,
+        num_workers=16,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
+
     # Dataset = 4-23~5-27 EXCEPT 5-16/18/19/20/21 (校准漂移期, v7 发现).
     # 13 dates / ~1059 ep (排 Class C 107 + End-snap 5 截尾).
     # 用 build_A_0423_0527.py 生成数据, 同 hparams 双 init 对照:
