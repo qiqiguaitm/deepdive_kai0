@@ -129,3 +129,4 @@ gmon.out
 
 # WAM finetune scratch (logs, ad-hoc scripts)
 .wam_run/
+runs/

@@ -1,0 +1,115 @@
+# GigaWorld-Policy (WAM) visrobot01 叠衣服微调 —— Volc 双节点 2×8 = 16 GPU
+#
+#   Model:   CasualWorldActionTransformer (Wan2.2-TI2V-5B backbone), DeepSpeed ZeRO-2
+#   Config:  world_action_model.configs.visrobot01_fold_16gpu.config
+#   Data:    ../kai0/data/wam_fold_v1/{visrobot01,kairobot01}(双 embodiment, 已体检/净化/规整)
+#   Init:    ../checkpoints/Wan2.2-TI2V-5B-Diffusers
+#   并行:    2 host × 8 GPU,每节点各自 accelerate launch(--deepspeed_multinode_launcher standard,
+#            无 PDSH/SSH,以 MLP_ROLE_INDEX 作 machine_rank,MLP_WORKER_0_HOST 作 rendezvous),
+#            跑 giga_train 的 run_task.py;run_task 只 build Trainer 不再 re-launch,deepspeed 由
+#            accelerate 注入(Trainer 的 Accelerator 依赖 accelerate-launch 的 deepspeed_plugin)。
+#
+# 提交(cnbj 必须 VOLC_REGION=cn-beijing):
+#   source ~/.volc_creds && VOLC_REGION=cn-beijing \
+#     python train_scripts/kai/volc/submit_yaml.py train_scripts/kai/volc/wam_visrobot01_fold_2node_16gpu.yaml
+#
+# ⚠ 提交前确认(<<<CONFIRM):①镜像含 CUDA 且能 source WAM venv ②WAM venv 已在 vepfs 上
+#   (torch2.6 + giga-* editable + av1)③整个 deepdive_kai0 树(giga_world_policy + kai0/data/
+#   wam_fold_v1 + checkpoints/Wan2.2-TI2V-5B-Diffusers)已同步到 vepfs。
+
+TaskName: "wam-visrobot01-fold-2node-16gpu"
+Description: "WAM visrobot01 叠衣服微调: 2-host×8 H20=16GPU, DeepSpeed ZeRO-2, accelerate per-node (standard launcher)"
+Tags: []
+
+ImageUrl: "visincept-cn-beijing.cr.volces.com/grasp/h2r:1.0"   # <<<CONFIRM 复用含 CUDA 的镜像;WAM venv 从 vepfs source(见 Entrypoint)
+ResourceQueueName: "Robot-North-H20"
+Framework: "PyTorch"          # 注入 MLP_WORKER_0_HOST / MLP_ROLE_INDEX / MLP_WORKER_NUM
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 2
+    Flavor: "ml.hpcpni3ln.45xlarge"   # 8× H20-SXM5-96GB per host × 2 = 16 GPU
+
+ActiveDeadlineSeconds: 172800         # 48h
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnbj875793a96d6b"
+    MountPath: "/vePFS-North-E/vis_robot"
+    SubPath: "/vis_robot"
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+  - Name: HF_DATASETS_OFFLINE
+    Value: "1"
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+  - Name: TOKENIZERS_PARALLELISM
+    Value: "false"
+  - Name: OMP_NUM_THREADS
+    Value: "8"
+  - Name: NCCL_DEBUG
+    Value: "INFO"                      # 首跑用 INFO 确诊跨机 NCCL;稳定后可降 WARN
+  - Name: NCCL_IB_DISABLE
+    Value: "0"                          # H20 HPC 实例走 IB;若跨机 NCCL 卡住改 "1" 退回 TCP 并设 NCCL_SOCKET_IFNAME
+
+Entrypoint: |
+  set -uo pipefail
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  LOG_DIR=/vePFS-North-E/vis_robot/logs
+  mkdir -p "$LOG_DIR"
+  LOG="$LOG_DIR/wam_visrobot01_fold_${STAMP}_node${MLP_ROLE_INDEX:-0}.log"
+  exec >> "$LOG" 2>&1
+  echo "=== entrypoint start $(date) node=${MLP_ROLE_INDEX:-0}/${MLP_WORKER_NUM:-1} ==="
+  set -ex
+  echo "[multinode] host0=${MLP_WORKER_0_HOST} num=${MLP_WORKER_NUM} idx=${MLP_ROLE_INDEX}"
+  nvidia-smi -L
+
+  # ---- 路径(<<<CONFIRM 同步到 vepfs 后的实际位置)----
+  GWP_HOME=/vePFS-North-E/vis_robot/workspace/deepdive_kai0/giga_world_policy
+  GWP_VENV=/vePFS-North-E/vis_robot/workspace/deepdive_kai0/giga_world_policy/.venv   # <<<CONFIRM WAM venv 位置
+  cd "$GWP_HOME"
+  source "$GWP_VENV/bin/activate"
+  python -c "import torch,accelerate,deepspeed,giga_train; print('torch',torch.__version__,'accelerate',accelerate.__version__,'ds',deepspeed.__version__,'cuda',torch.cuda.is_available(),'gpus',torch.cuda.device_count())"
+
+  # ---- sanity:数据 / norm_stats / Wan 权重 / run_task 就位(路径相对 GWP_HOME)----
+  [ -f ../kai0/data/wam_fold_v1/visrobot01/meta/episodes_stats.jsonl ] || { echo "FATAL: vis 数据缺失/未体检" >&2; exit 13; }
+  [ -f ../kai0/data/wam_fold_v1/kairobot01/meta/episodes_stats.jsonl ] || { echo "FATAL: kai 数据缺失/未体检" >&2; exit 13; }
+  [ -f assets_visrobot01/norm_stats_vis.json ] && [ -f assets_visrobot01/norm_stats_kai.json ] || { echo "FATAL: norm_stats 缺失" >&2; exit 13; }
+  [ -d ../checkpoints/Wan2.2-TI2V-5B-Diffusers ] || { echo "FATAL: Wan2.2 Diffusers 权重缺失" >&2; exit 13; }
+  RUN_TASK="$GWP_HOME/third_party/giga-train/giga_train/distributed/run_task.py"
+  ZERO2="$GWP_HOME/third_party/giga-train/giga_train/distributed/accelerate_configs/zero2.json"
+  [ -f "$RUN_TASK" ] && [ -f "$ZERO2" ] || { echo "FATAL: giga_train run_task/zero2 缺失" >&2; exit 13; }
+  echo "[$(date)] data + norm_stats + Wan ckpt + run_task 校验通过"
+
+  # ---- 多机 rendezvous 参数(每节点各自 accelerate launch)----
+  GPUS_PER_NODE=$(nvidia-smi -L | wc -l)
+  NMACH=${MLP_WORKER_NUM:-2}
+  RANK=${MLP_ROLE_INDEX:-0}
+  NPROC=$(( GPUS_PER_NODE * NMACH ))
+  MASTER=${MLP_WORKER_0_HOST}
+  PORT=29500
+  echo "[launch] machines=$NMACH rank=$RANK gpus/node=$GPUS_PER_NODE num_processes=$NPROC master=$MASTER:$PORT"
+
+  exec accelerate launch \
+    --use_deepspeed \
+    --deepspeed_config_file "$ZERO2" \
+    --deepspeed_multinode_launcher standard \
+    --zero_stage 2 \
+    --num_machines "$NMACH" \
+    --machine_rank "$RANK" \
+    --main_process_ip "$MASTER" \
+    --main_process_port "$PORT" \
+    --num_processes "$NPROC" \
+    --num_cpu_threads_per_process 8 \
+    "$RUN_TASK" --config world_action_model.configs.visrobot01_fold_16gpu.config
+
+RetryOptions:
+    EnableRetry: false
+    MaxRetryTimes: 0
+
+AccessType: "Public"
