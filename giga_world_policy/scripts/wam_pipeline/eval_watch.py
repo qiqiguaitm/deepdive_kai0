@@ -71,6 +71,31 @@ def video_metrics(pred_thwc: np.ndarray, gt_thwc: np.ndarray, lpips_fn=None, dev
     return out
 
 
+# ----------------------------- window-index enumeration -----------------------------
+def build_window_indices(val_root: str, coverage: str, stride: int, action_chunk: int, exec_horizon: int = 8):
+    """枚举 held-out 全部 episode 的窗口全局索引(与 LatentEpisodeSampler/dataset 同一映射:
+    global_idx = 累计长度 gs + 集内起始 s)。集内起始按 stride 取,stride 由 coverage 决定:
+      coverage='episode'(A): stride=action_chunk(48)  → 非重叠块,全集覆盖(~6k 窗口,~5min/ckpt)。
+      coverage='exec'(C,默认): stride=exec_horizon(默认8) → **部署实际执行步长**:机器人每执行
+                               ~8 步就重规划/接新块,按此步长采样 = 复现部署 query 节奏,每窗口误差≈每次
+                               推理误差(默认 8→~3.7万窗口~33min/ckpt;RTC 16/V1 12 更省)。
+      coverage='frames'(B):  stride=1                 → 每帧一窗口,全量(~29 万,仅终评 ~4h)。
+    起始上限取 L-action_chunk(保证有完整 action_chunk 步未来 GT,不触发 padding)。
+    返回 (sorted global indices, gs_total) —— gs_total 应等于 len(val_ds)。
+    """
+    eps = [json.loads(l) for l in open(os.path.join(val_root, "meta", "episodes.jsonl")) if l.strip()]
+    eps = sorted(eps, key=lambda e: int(e["episode_index"]))  # jsonl 顺序即 dataset 帧顺序
+    _auto = {"episode": action_chunk, "exec": exec_horizon, "frames": 1}.get(coverage, exec_horizon)
+    st = stride if stride and stride > 0 else _auto
+    idxs, gs = [], 0
+    for e in eps:
+        L = int(e["length"])
+        last = max(1, L - action_chunk)            # 需要 action_chunk 步未来
+        idxs.extend(gs + s for s in range(0, last, st))
+        gs += L
+    return idxs, gs
+
+
 # ----------------------------- checkpoint discovery -----------------------------
 def list_checkpoints(output_dir: str):
     found = []
@@ -88,7 +113,11 @@ def list_checkpoints(output_dir: str):
 
 
 # ----------------------------- one checkpoint eval -----------------------------
-def eval_checkpoint(transformer_dir, args, val_ds, norm, t5, lpips_fn, delta_mask, device, dtype):
+def eval_checkpoint(transformer_dir, args, val_ds, clip_idxs, norm, t5, lpips_fn, delta_mask, device, dtype):
+    """评 clip_idxs(全局窗口索引列表)上的全部指标,返回 (sums, counts, n_done):
+    sums[metric]=Σ value、counts[metric]=#samples(逐指标,horizon 因 L 不同可能缺项)。
+    上层(单机或聚合器)用 Σ/Σcount 得均值 —— 这样分片可无损合并。
+    """
     from world_action_model.models.transformer_wa_casual import CasualWorldActionTransformer
     from world_action_model.pipeline.wa_pipeline import WAPipeline
     from world_action_model.pipeline.utils import add_state_to_action, build_ref_image, denormalize_action, normalize_state
@@ -102,10 +131,10 @@ def eval_checkpoint(transformer_dir, args, val_ds, norm, t5, lpips_fn, delta_mas
     pipe = WAPipeline.from_pretrained(args.model_id, vae=vae, transformer=transformer, torch_dtype=dtype).to(device)
 
     view_keys = ["observation.images.cam_high", "observation.images.cam_left_wrist", "observation.images.cam_right_wrist"]
-    agg = {}
-    n = min(args.n_clips, len(val_ds))
-    for i in range(n):
-        d = val_ds[i]
+    sums, counts = {}, {}
+    import numpy as _np
+    for i, gi in enumerate(clip_idxs):
+        d = val_ds[int(gi)]
 
         def _chw01(t):  # 原始帧 -> CHW [0,1](build_ref_image 期望;若为 [0,255] 则归一)
             t = t.float()
@@ -142,12 +171,13 @@ def eval_checkpoint(transformer_dir, args, val_ds, norm, t5, lpips_fn, delta_mas
             if h <= L:
                 m[f"mae@{h}"] = float(ae[h - 1].mean())
         for k, v in m.items():
-            agg.setdefault(k, []).append(v)
+            sums[k] = sums.get(k, 0.0) + float(v)
+            counts[k] = counts.get(k, 0) + 1
         if args.save_mp4 and i < args.n_mp4:
             _save_side_by_side(pred, gt, os.path.join(args.vis_dir, f"clip{i:03d}.mp4"), fps=args.fps)
     del pipe, transformer, vae
     torch.cuda.empty_cache()
-    return {k: float(np.mean(v)) for k, v in agg.items()}
+    return sums, counts, len(clip_idxs)
 
 
 def _save_side_by_side(pred_thwc, gt_thwc, path, fps=5):
@@ -161,6 +191,48 @@ def _save_side_by_side(pred_thwc, gt_thwc, path, fps=5):
         print(f"[eval] mp4 save failed: {e}")
 
 
+# ----------------------------- sharding / aggregation -----------------------------
+def _means(sums: dict, counts: dict) -> dict:
+    return {k: sums[k] / counts[k] for k in sums if counts.get(k, 0) > 0}
+
+
+def _shard_path(output_dir, step, shard_id):
+    return os.path.join(output_dir, "eval_shards", f"step_{step}", f"shard_{shard_id:02d}.json")
+
+
+def write_record(output_dir, step, ckdir, metrics, extra, tb=None):
+    rec = {"step": step, "ckpt": ckdir, **extra, **metrics}
+    with open(os.path.join(output_dir, "eval_log.jsonl"), "a") as f:
+        f.write(json.dumps(rec) + "\n")
+    if tb is not None:
+        for k, v in metrics.items():
+            tb.add_scalar(f"eval/{k}", v, step)
+    return rec
+
+
+def aggregate_shards(output_dir, step, expect=None, tb=None):
+    """合并 eval_shards/step_<step>/shard_*.json(各含 sums/counts/n)→ 均值记录写 eval_log.jsonl。
+    expect=期望 shard 数(不足则报警但仍合并已有)。返回 (rec, n_shards)。"""
+    sdir = os.path.join(output_dir, "eval_shards", f"step_{step}")
+    files = sorted(glob.glob(os.path.join(sdir, "shard_*.json")))
+    if not files:
+        return None, 0
+    sums, counts, n_tot, cov, ckdir = {}, {}, 0, None, None
+    for fp in files:
+        s = json.load(open(fp))
+        cov = cov or s.get("coverage"); ckdir = ckdir or s.get("ckpt")
+        n_tot += int(s.get("n", 0))
+        for k, v in s.get("sums", {}).items():
+            sums[k] = sums.get(k, 0.0) + float(v)
+        for k, v in s.get("counts", {}).items():
+            counts[k] = counts.get(k, 0) + int(v)
+    if expect and len(files) < expect:
+        print(f"[agg] WARNING step {step}: only {len(files)}/{expect} shards present")
+    rec = write_record(output_dir, step, ckdir, _means(sums, counts),
+                        {"coverage": cov, "n_windows": n_tot, "n_shards": len(files)}, tb=tb)
+    return rec, len(files)
+
+
 # ----------------------------- main loop -----------------------------
 def main():
     ap = argparse.ArgumentParser()
@@ -170,7 +242,24 @@ def main():
     ap.add_argument("--val_root", required=True,
                     help="held-out 验证集根目录(visrobot01_val,split_heldout.py 切出的自洽 200 集)")
     ap.add_argument("--t5_pkl", required=True)
-    ap.add_argument("--n_clips", type=int, default=50)
+    ap.add_argument("--coverage", choices=["episode", "exec", "frames", "sample"], default="exec",
+                    help="C=exec(默认,部署RTC执行步长16采样~1.8万窗口~16min); A=episode(非重叠块~6k~5min); "
+                         "B=frames(每帧~29万,仅终评~4h); sample=跨全集均匀取 n_clips 个(便宜单卡监控)")
+    ap.add_argument("--exec_horizon", type=int, default=8,
+                    help="coverage=exec 的采样步长=部署实际执行步长(默认 8;RTC execute_horizon 16/V1 12,"
+                         "min_smooth_steps=8。取 8 更细→~3.7万窗口~33min/ckpt)")
+    ap.add_argument("--stride", type=int, default=0,
+                    help="集内窗口步长(0=按 coverage 自动:episode→48, exec→exec_horizon, frames→1)")
+    ap.add_argument("--n_clips", type=int, default=200,
+                    help="仅 coverage=sample 用:跨全部 held-out 集均匀取样的窗口数(≈1/episode)")
+    # ---- 分布式分片(b1+b2 16 卡):worker 评一个 shard 写 partial;aggregate 合并 ----
+    ap.add_argument("--ckpt_subdir", default=None, help="worker 模式:只评这个 transformer 目录(配 --step)")
+    ap.add_argument("--step", type=int, default=-1, help="worker/aggregate 模式的 ckpt step")
+    ap.add_argument("--shard_id", type=int, default=0)
+    ap.add_argument("--num_shards", type=int, default=1, help=">1 时为分片 worker;窗口按 shard_id::num_shards 取")
+    ap.add_argument("--aggregate", action="store_true", help="聚合模式:合并 eval_shards/step_<step>/shard_*.json")
+    ap.add_argument("--list", action="store_true",
+                    help="列出未评估的 ckpt(每行 'step<TAB>transformer_subdir'),供 orchestrator 分发;无需 GPU")
     ap.add_argument("--n_mp4", type=int, default=3)
     ap.add_argument("--height", type=int, default=192)
     ap.add_argument("--width", type=int, default=768)
@@ -191,6 +280,30 @@ def main():
     ap.add_argument("--fps", type=int, default=5)
     args = ap.parse_args()
     args.vis_dir = args.vis_dir or os.path.join(args.output_dir, "eval_vis")
+
+    # ---- 聚合模式:无需 GPU/模型,合并分片 partial → eval_log.jsonl(由 orchestrator 在 16 worker 完成后调) ----
+    if args.aggregate:
+        try:
+            from torch.utils.tensorboard import SummaryWriter
+            tb = SummaryWriter(os.path.join(args.output_dir, "eval_tb"))
+        except Exception:
+            tb = None
+        rec, n = aggregate_shards(args.output_dir, args.step, expect=args.num_shards, tb=tb)
+        print(f"[agg] step {args.step}: merged {n} shards -> {rec}" if rec else f"[agg] step {args.step}: no shards")
+        return
+
+    # ---- 列表模式:打印未评估 ckpt(step<TAB>subdir),供 orchestrator 分发;无需 GPU ----
+    if args.list:
+        log_path = os.path.join(args.output_dir, "eval_log.jsonl")
+        done = set()
+        if os.path.exists(log_path):
+            for l in open(log_path):
+                try: done.add(int(json.loads(l)["step"]))
+                except Exception: pass
+        for step, ckdir, subdir in list_checkpoints(args.output_dir):
+            if step not in done:
+                print(f"{step}\t{subdir}")
+        return
 
     device = "cuda"; dtype = torch.bfloat16
     from world_action_model.pipeline.utils import extract_normalization_tensors, load_stats, load_t5_embedding_from_pkl
@@ -225,6 +338,34 @@ def main():
                               device=device, dtype=torch.bool)
     assert delta_mask.numel() == args.action_dim, f"delta_mask {delta_mask.numel()} != action_dim {args.action_dim}"
 
+    # ---- 构建窗口索引(coverage 决定 stride),按需取本 shard ----
+    all_idxs, gs_total = build_window_indices(args.val_root, args.coverage, args.stride,
+                                              args.action_chunk, args.exec_horizon)
+    if gs_total != len(val_ds):
+        print(f"[eval] WARNING: cum-length {gs_total} != len(val_ds) {len(val_ds)} (索引映射可能错位)")
+    if args.coverage == "sample":     # 便宜单卡监控:跨全集均匀取 n_clips 个
+        n = min(args.n_clips, len(all_idxs))
+        all_idxs = [all_idxs[i] for i in np.unique(np.linspace(0, len(all_idxs) - 1, n).astype(int))]
+    my_idxs = all_idxs[args.shard_id::args.num_shards] if args.num_shards > 1 else all_idxs
+    print(f"[eval] coverage={args.coverage} total_windows={len(all_idxs)} "
+          f"shard {args.shard_id}/{args.num_shards} -> {len(my_idxs)} windows")
+
+    # ---- worker 模式:只评一个 ckpt 的本 shard,写 partial(sums/counts/n),由聚合器合并 ----
+    if args.ckpt_subdir is not None:
+        t0 = time.time()
+        sums, counts, n = eval_checkpoint(args.ckpt_subdir, args, val_ds, my_idxs,
+                                          norm, t5, lpips_fn, delta_mask, device, dtype)
+        sp = _shard_path(args.output_dir, args.step, args.shard_id)
+        os.makedirs(os.path.dirname(sp), exist_ok=True)
+        tmp = sp + ".tmp"
+        json.dump({"step": args.step, "shard_id": args.shard_id, "num_shards": args.num_shards,
+                   "coverage": args.coverage, "ckpt": os.path.dirname(args.ckpt_subdir),
+                   "n": n, "secs": round(time.time() - t0, 1), "sums": sums, "counts": counts}, open(tmp, "w"))
+        os.replace(tmp, sp)
+        print(f"[eval] shard {args.shard_id} step {args.step} done: {n} windows, {round(time.time()-t0,1)}s -> {sp}")
+        return
+
+    # ---- 单卡 watch 模式(num_shards=1):轮询新 ckpt,本机评全部 my_idxs,本地聚合写记录 ----
     log_path = os.path.join(args.output_dir, "eval_log.jsonl")
     try:
         from torch.utils.tensorboard import SummaryWriter
@@ -237,7 +378,7 @@ def main():
             try: done.add(int(json.loads(l)["step"]))
             except Exception: pass
 
-    print(f"[eval] watching {args.output_dir} (poll={args.poll}s, n_clips={args.n_clips})")
+    print(f"[eval] watching {args.output_dir} (poll={args.poll}s, coverage={args.coverage})")
     while True:
         cks = [c for c in list_checkpoints(args.output_dir) if c[0] not in done]
         if not cks and args.once:
@@ -246,16 +387,12 @@ def main():
             t0 = time.time()
             print(f"[eval] step {step}: {subdir}")
             try:
-                metrics = eval_checkpoint(subdir, args, val_ds, norm, t5, lpips_fn, delta_mask, device, dtype)
+                sums, counts, n = eval_checkpoint(subdir, args, val_ds, my_idxs, norm, t5, lpips_fn, delta_mask, device, dtype)
             except Exception as e:
                 print(f"[eval] step {step} FAILED: {e}"); done.add(step); continue
-            rec = {"step": step, "ckpt": ckdir, "secs": round(time.time() - t0, 1), **metrics}
-            with open(log_path, "a") as f:
-                f.write(json.dumps(rec) + "\n")
-            if tb:
-                for k, v in metrics.items():
-                    tb.add_scalar(f"eval/{k}", v, step)
-            print(f"[eval] step {step} -> {metrics}")
+            write_record(args.output_dir, step, ckdir, _means(sums, counts),
+                         {"coverage": args.coverage, "n_windows": n, "secs": round(time.time() - t0, 1)}, tb=tb)
+            print(f"[eval] step {step} -> {_means(sums, counts)}")
             done.add(step)
         if args.once:
             break
