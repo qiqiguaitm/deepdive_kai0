@@ -110,7 +110,7 @@ class CasualWATrainer(Trainer):
         noisy_action = action_noise * action_sigma + action * (1 - action_sigma)
         # loss
         prompt_embeds = prompt_embeds.to(self.dtype)
-        if 'ref_images' in batch_dict:
+        if 'ref_images' in batch_dict or use_latent_cache:
             if not self.expand_timesteps:
                 ref_images = batch_dict['ref_images']
                 ref_latents = self.forward_vae(ref_images)

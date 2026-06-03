@@ -26,7 +26,7 @@ from .evaluators import (
     PSNREvaluator,
     SSIMEvaluator,
 )
-from .samplers import AspectRatioSampler, BucketBatchSampler, BucketSampler, DefaultSampler, SpecialDatasetSampler
+from .samplers import AspectRatioSampler, BucketBatchSampler, BucketSampler, DefaultSampler, LatentEpisodeSampler, SpecialDatasetSampler
 from .structures import (
     BaseStructure,
     Boxes,
