@@ -6,8 +6,9 @@
 #   - 增量: tosutil `cp -r -u` 按 size/crc 跳过未变文件, 只拉新/变更, 从不删除本地。
 #   - 默认不删除: cp 永不删本地多余文件 → 保护指向 vis_dagger 的软链 (如有)。
 #   - 排除 depth zarr (top_head_depth): 训练只用 RGB 三路, depth 不被下游消费且对象数巨大。
-# 与 base 脚本的差异: SRC=dagger / DST=vis_dagger; dagger 暂无 README/analysis, 故不拉那部分。
-# 路径映射: `cp -r .../dagger/<date>/ <DST>/` → tosutil 把末级 <date> 落在 DST 下 = <DST>/<date>/.
+# 与 base 脚本的差异: SRC=dagger / DST=vis_dagger/v2; dagger 暂无 README/analysis, 故不拉那部分。
+# 路径映射: `cp -r .../dagger/<date>/ <DST>/` → tosutil 把末级 <date> 落在 DST 下 = vis_dagger/v2/<date>/.
+#   (TOS dagger 扁平 <date>-v2; 本地按 vis_base 同样的 v2/ 数据版本命名空间组织, 2026-06-03 起)
 #
 # 运行环境 (host-aware, 支持 gf0 / gf3 / uc01-03 任一机): 按文件系统探测 KAI0 工作根 + tosutil 路径。
 #   各机都需本机 ~/.tosutilconfig 凭据 (cn-shanghai AK/SK) + 可写 tosutil 二进制。
@@ -30,7 +31,7 @@ ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
 # ---- host-aware: KAI0_ROOT + TOSUTIL 自动探测 ----
 #   探测顺序: North-E / data-shared 优先于 /vePFS/tim (gf3 上 /vePFS/tim 是空壳树, 须用真实数据路径校验)。
-_VB=kai0/data/Task_A/vis_base   # 用 vis_base 存在性判定真实 KAI0 根 (各机都有)
+_VB=kai0/data/Task_A/vis_base/v2   # 用 vis_base/v2 存在性判定真实 KAI0 根 (gf3 上 /vePFS/tim 空壳不含)
 if   [ -d /vePFS-North-E/vis_robot/workspace/deepdive_kai0/$_VB ];  then
   KAI0_ROOT=/vePFS-North-E/vis_robot/workspace/deepdive_kai0
 elif [ -d /data/shared/ubuntu/workspace/deepdive_kai0/$_VB ];      then
@@ -44,7 +45,7 @@ if   [ -x "$HOME/tosutil" ];        then TOSUTIL="$HOME/tosutil"
 elif command -v tosutil >/dev/null; then TOSUTIL="$(command -v tosutil)"
 else echo "[$(ts)] ERROR: tosutil not found (~/tosutil or PATH)" >&2; exit 1
 fi
-DST="$KAI0_ROOT/kai0/data/Task_A/vis_dagger"
+DST="$KAI0_ROOT/kai0/data/Task_A/vis_dagger/v2"   # 2026-06-03: dagger v2 数据归入 vis_dagger/v2/ 子目录 (与 vis_base/v2 对齐)
 LOG="$KAI0_ROOT/logs/vis_dagger_sync.log"
 mkdir -p "$KAI0_ROOT/logs" "$DST" 2>/dev/null || true
 
