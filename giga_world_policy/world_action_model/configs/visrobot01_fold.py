@@ -29,21 +29,18 @@ norm_path = [
 ]
 
 
-# 可复现 held-out:训练只用 train_episode_indices(排除 200 集验证),visrobot01 专用。
-# 见 assets_visrobot01/heldout_visrobot01.json(make_heldout.py 生成,显式 id + sha 指纹)。
-import json as _json
-import os as _os
-
-_HELDOUT = "./assets_visrobot01/heldout_visrobot01.json"
-_VIS_TRAIN_EPS = None
-if _os.path.exists(_HELDOUT):
-    _VIS_TRAIN_EPS = sorted(int(x) for x in _json.load(open(_HELDOUT))["train_episode_indices"])
+# 可复现 held-out:用 visrobot01_train(1898,已排除 200 集验证)。
+# 注意:不用 lerobot 的 episodes= 子集 —— 它与 delta_frames 不兼容(_get_query_indices 用原始
+# episode_index 索引被缩到子集长度的 episode_data_index → IndexError)。改为 split_heldout.py
+# 物理切出自洽重编号的 visrobot01_train / visrobot01_val(硬链接),delta_frames 正常工作。
+# 切分由 assets_visrobot01/heldout_visrobot01.json(显式 id + sha 指纹)驱动,可复现。
+_DATA_PATH = {"visrobot01": f"{DATA}/visrobot01_train", "kairobot01": f"{DATA}/kairobot01"}
 
 
 def _entry(emb):
-    e = dict(
+    return dict(
         _class_name="LeRobotDataset",
-        data_path=f"{DATA}/{emb}",
+        data_path=_DATA_PATH[emb],
         data_size=None,
         embodiment=emb,  # 本体标识 → WAM 路由 norm_stats / delta_mask
         delta_info={"action": num_frames},
@@ -53,12 +50,9 @@ def _entry(emb):
         # violate tolerance。设 1e-3:> float32 量化噪声、<< 半帧距 0.0167s,既过检查又不会取错帧。
         tolerance_s=1e-3,
     )
-    if emb == "visrobot01" and _VIS_TRAIN_EPS is not None:
-        e["episodes"] = _VIS_TRAIN_EPS  # 排除 held-out;经 LeRobotDataset(**kwargs)->FastLeRobotDataset
-    return e
 
 
-# visrobot01(目标域,train≈1898 集)上采样 3x 平衡 kairobot01(~6512 ep ≈ 3:1)
+# visrobot01_train(目标域 1898 集)上采样 3x 平衡 kairobot01(~6512 ep ≈ 3:1)
 data_or_config = [_entry("visrobot01")] * 3 + [_entry("kairobot01")]
 
 config = dict(

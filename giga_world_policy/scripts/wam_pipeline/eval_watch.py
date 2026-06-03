@@ -106,10 +106,15 @@ def eval_checkpoint(transformer_dir, args, val_ds, norm, t5, lpips_fn, delta_mas
     n = min(args.n_clips, len(val_ds))
     for i in range(n):
         d = val_ds[i]
-        # GT 帧(5,3,H,W)->ref 空间(stitched 768x192)
-        imgs0 = {k: d[k][0] for k in view_keys}  # 首帧作 ref
-        ref = build_ref_image(images=imgs0, dst_size=(args.width, args.height), crop_mode="center")
-        state = d["observation.state"].float().unsqueeze(0)
+
+        def _chw01(t):  # 原始帧 -> CHW [0,1](build_ref_image 期望;若为 [0,255] 则归一)
+            t = t.float()
+            return t / 255.0 if float(t.max()) > 1.5 else t
+
+        # 首帧 3 视角拼接成 ref(PIL,768x192)喂给 pipe
+        ref = build_ref_image(images={k: _chw01(d[k][0]) for k in view_keys},
+                              dst_size=(args.width, args.height), crop_mode="center")
+        state = d["observation.state"].float().unsqueeze(0).to(device)   # norm 张量在 cuda,state 须同设备
         nstate = normalize_state(state, norm, mode="zscore").to(device=device, dtype=dtype)
         with torch.no_grad():
             imgs, action = pipe(height=args.height, width=args.width, action_chunk=args.action_chunk,
@@ -117,9 +122,12 @@ def eval_checkpoint(transformer_dir, args, val_ds, norm, t5, lpips_fn, delta_mas
                                 num_inference_steps=args.steps, image=ref, action_only=False,
                                 return_dict=False, prompt_embeds=t5.unsqueeze(0).to(device=device, dtype=torch.float32))
         pred = _to_uint8_thwc(imgs[0])
-        # GT: 同样 stitched 768x192,取 num_frames 帧
-        gt_ref = build_ref_image(images={k: d[k] for k in view_keys}, dst_size=(args.width, args.height), crop_mode="center")
-        gt = _to_uint8_thwc(gt_ref if gt_ref.ndim == 4 else gt_ref.unsqueeze(0))
+        # GT: 逐帧把 3 视角拼成 768x192(与 pred 同空间),堆成 (T,H,W,C) uint8
+        nf = d[view_keys[0]].shape[0]
+        import numpy as _np
+        gt = _np.stack([_np.array(build_ref_image(images={k: _chw01(d[k][f]) for k in view_keys},
+                                                  dst_size=(args.width, args.height), crop_mode="center"))
+                        for f in range(nf)], axis=0)
         m = video_metrics(pred, gt, lpips_fn=lpips_fn, device=device)
         # action:反归一化 + add_state(与 inference_server 一致)-> 真实单位,再算逐 horizon MAE
         pred_act = denormalize_action(action[0].float(), norm, mode="zscore")
@@ -159,9 +167,8 @@ def main():
     ap.add_argument("--output_dir", required=True, help="训练 project_dir(轮询 checkpoint)")
     ap.add_argument("--model_id", required=True, help="Wan2.2-TI2V-5B-Diffusers(取 vae/config)")
     ap.add_argument("--stats_path", required=True)
-    ap.add_argument("--val_root", required=True, help="visrobot01 数据集根目录(held-out 子集由 manifest 指定)")
-    ap.add_argument("--heldout_manifest", default="assets_visrobot01/heldout_visrobot01.json",
-                    help="held-out 清单(make_heldout.py 生成);用其 heldout_episode_indices 经 episodes= 取子集")
+    ap.add_argument("--val_root", required=True,
+                    help="held-out 验证集根目录(visrobot01_val,split_heldout.py 切出的自洽 200 集)")
     ap.add_argument("--t5_pkl", required=True)
     ap.add_argument("--n_clips", type=int, default=50)
     ap.add_argument("--n_mp4", type=int, default=3)
@@ -203,18 +210,13 @@ def main():
         print("SMOKE_OK"); return
 
     from giga_datasets import load_dataset
-    heldout_eps = None
-    if args.heldout_manifest and os.path.exists(args.heldout_manifest):
-        heldout_eps = sorted(int(x) for x in json.load(open(args.heldout_manifest))["heldout_episode_indices"])
-        print(f"[eval] held-out: {len(heldout_eps)} episodes from {args.heldout_manifest}")
+    # val_root 指向 visrobot01_val(已是自洽重编号的 held-out 200 集),无需 episodes= 子集。
     val_entry = dict(_class_name="LeRobotDataset", data_path=args.val_root,
                      delta_info={"action": args.action_chunk},
                      delta_frames={k: [0, args.action_chunk // 4, args.action_chunk // 2,
                                        3 * args.action_chunk // 4, args.action_chunk]
                                    for k in ["observation.images.cam_high", "observation.images.cam_left_wrist", "observation.images.cam_right_wrist"]},
                      embodiment="visrobot01", tolerance_s=1e-3)
-    if heldout_eps is not None:
-        val_entry["episodes"] = heldout_eps   # 只评 held-out,绝不碰训练集
     val_ds = load_dataset([val_entry])
     stats = load_stats(args.stats_path)
     norm = extract_normalization_tensors(stats, device=device, state_dim=args.state_dim, action_dim=args.action_dim)

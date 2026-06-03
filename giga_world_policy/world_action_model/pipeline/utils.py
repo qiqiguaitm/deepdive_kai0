@@ -144,15 +144,23 @@ class NormalizationTensors:
 
 
 def extract_normalization_tensors(stats: Dict, device: torch.device, state_dim: int, action_dim: int) -> NormalizationTensors:
-    state_mean = torch.tensor(stats["norm_stats"]["observation.state"]["mean"])[..., :state_dim].to(device=device)
-    state_std = torch.tensor(stats["norm_stats"]["observation.state"]["std"])[..., :state_dim].to(device=device)
-    state_min = torch.tensor(stats["norm_stats"]["observation.state"]["min"])[..., :state_dim].to(device=device)
-    state_max = torch.tensor(stats["norm_stats"]["observation.state"]["max"])[..., :state_dim].to(device=device)
+    # compute_norm_stats 只输出 mean/std/q01/q99(无 raw min/max)。zscore 模式只用 mean/std;
+    # minmax 模式用 min/max —— 缺失时回退到 q01/q99(1%/99% 分位,比 raw min/max 更稳,常用作 minmax 区间)。
+    def _col(key):
+        s = stats["norm_stats"][key]
+        return s["mean"], s["std"], s.get("min", s.get("q01")), s.get("max", s.get("q99"))
 
-    action_mean = torch.tensor(stats["norm_stats"]["action"]["mean"][:action_dim])[..., :action_dim].to(device=device)
-    action_std = torch.tensor(stats["norm_stats"]["action"]["std"][:action_dim])[..., :action_dim].to(device=device)
-    action_min = torch.tensor(stats["norm_stats"]["action"]["min"][:action_dim])[..., :action_dim].to(device=device)
-    action_max = torch.tensor(stats["norm_stats"]["action"]["max"][:action_dim])[..., :action_dim].to(device=device)
+    s_mean, s_std, s_min, s_max = _col("observation.state")
+    a_mean, a_std, a_min, a_max = _col("action")
+    state_mean = torch.tensor(s_mean)[..., :state_dim].to(device=device)
+    state_std = torch.tensor(s_std)[..., :state_dim].to(device=device)
+    state_min = torch.tensor(s_min)[..., :state_dim].to(device=device)
+    state_max = torch.tensor(s_max)[..., :state_dim].to(device=device)
+
+    action_mean = torch.tensor(a_mean[:action_dim])[..., :action_dim].to(device=device)
+    action_std = torch.tensor(a_std[:action_dim])[..., :action_dim].to(device=device)
+    action_min = torch.tensor(a_min[:action_dim])[..., :action_dim].to(device=device)
+    action_max = torch.tensor(a_max[:action_dim])[..., :action_dim].to(device=device)
 
     return NormalizationTensors(
         state_mean=state_mean,

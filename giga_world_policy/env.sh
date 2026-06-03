@@ -41,6 +41,20 @@ export GWP_DATA="$(cd "$GWP_HOME/.." && pwd)/kai0/data/wam_fold_v1"
 # 归一化统计输出目录 (compute_norm_stats 生成 norm_stats_{vis,kai}.json)
 export GWP_NORM="$GWP_HOME/assets_visrobot01"
 
+# ---------- CUDA toolkit (nvcc) ----------
+# uv venv 无 CUDA toolkit;DeepSpeed import 时会探测 nvcc 版本(无则 FileNotFoundError)。
+# 复用 dreamzero conda 环境里的 nvcc(在共享 PFS,b2 与 AIHC pod 都可见)。ZeRO-2 + CAME 优化器
+# 不实际编译 op,只需满足版本探测。仅追加 $CUDA_HOME/bin 到 PATH 末尾,不影响 venv 的 python。
+if [ -x /mnt/pfs/p46h4f/cosmos/miniconda3/envs/dreamzero/bin/nvcc ]; then
+    export CUDA_HOME=/mnt/pfs/p46h4f/cosmos/miniconda3/envs/dreamzero
+    export PATH="$PATH:$CUDA_HOME/bin"
+    # 兜底:DeepSpeed/torch 子进程的 CUDA_HOME 传递不可靠,会回退到硬编码 /usr/local/cuda/bin/nvcc。
+    # 直接把 dreamzero 的 nvcc 软链到该路径,彻底绕开 env 传递问题(幂等;容器内 root 可写)。
+    if [ ! -x /usr/local/cuda/bin/nvcc ] && [ -w /usr/local/cuda 2>/dev/null -o -w /usr/local 2>/dev/null ]; then
+        mkdir -p /usr/local/cuda/bin 2>/dev/null && ln -sf "$CUDA_HOME/bin/nvcc" /usr/local/cuda/bin/nvcc 2>/dev/null || true
+    fi
+fi
+
 cd "$GWP_HOME" || return
 echo "[GigaWorld-Policy @ deepdive_kai0] $(python --version 2>&1) @ $GWP_VENV"
 python - <<'PY' 2>/dev/null
