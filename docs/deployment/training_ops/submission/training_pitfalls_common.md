@@ -29,6 +29,7 @@
 ## 3. 自建数据集构建 — 两个必检 ⚠️
 
 - **视频目录命名用 feature key, 不用裸 cam 名**: lerobot `video_path` 模板是 `videos/chunk-000/{video_key}/...`, `video_key = observation.images.top_head`。若 build 脚本写成裸 `top_head/` → lerobot `get_episodes_file_paths()` 的文件存在 assert 失败 → 回退 HF → `OfflineModeIsEnabled`。(build_no_release.py commit `89f43f5` 已修)。
+- **`info.json` 的 `total_episodes`/`total_videos`/`splits` 必须 = 实际写入 ep 数, 不是请求数** ⚠️: build 脚本若**跳过坏视频 ep**(如 vis_base restructure 留下的 broken symlink), 写入数 < 请求数。若 info 用请求数(pre-skip)→ 多出幽灵尾索引 `episode_00045X` → 同上 lerobot 文件 assert 失败 → `get_safe_version → list_repo_refs` 打 HF hub → `OfflineModeIsEnabled` 崩 (与上一条**同症不同因**)。判据: `info.total_episodes` vs `wc -l meta/episodes.jsonl` vs `ls data/chunk-000/*.parquet | wc -l` **三者必须一致**。修复无需重建: 按 `episodes.jsonl` 行数 patch info.json 的三字段即可 (files 本就连续 0..N-1)。(build_smooth800_dagger.py commit `0daee64` 已修: 用 `new_idx` 非 `len(all_eps)`)。
 - **`.kai0_ts_validated` marker**: kai0 patch 的 lerobot 靠它跳过 timestamp 校验。自建集没有 → 首次 load 会做 timestamp 检查 (慢但不致命)。可 `touch .kai0_ts_validated` 跳过 (确认数据对齐后)。
 - 其它 (parquet 7 标准列 / episode meta 完整) 见 `uc_cluster_jobs.md §12.8`。
 
@@ -70,12 +71,30 @@
 - **修复**: 多机一律显式 `--checkpoint-base-dir <真共享 FS>`(uc: workspace NFS `/data/shared/ubuntu/workspace/multinode_ckpts`; volc: vePFS 本就是共享, 默认 `kai0/checkpoints` 即可)。
 - **稳定判据(关键)**: `Step N: loss` 同步下降**只证明 NCCL/前反向通, 不证明能落盘**。多机真正过关 = **熬过第一次 ckpt save**(看到 finalized `<step>/` 目录、非 `*.orbax-checkpoint-tmp-*`, 且训练继续)。详见 [`uc_cluster_jobs.md §12.11 坑 9`](uc_cluster_jobs.md)。
 
+## 10. 任务"实例异常结束"但**无 entrypoint 日志** = 死在 pod 启动层 ⚠️
+
+- 现象: volc job `Failed`, Message `worker-N 共 X 实例异常结束`, **`StartTime` 空, 且 vePFS 上无该 STAMP 的训练日志文件**。意味着 entrypoint 在 `exec >> "$LOG"` 重定向**之前**就死了 → 不是数据/config/代码问题(那些在重定向之后, 会写进日志), 而是**镜像拉取 / vePFS 挂载 race / 调度** 层(尤其队列拥挤时)。
+- **API 取不到 pod stdout**(`GetJob` 只有 `Status`; `mlp` CLI 多数机器没装)。所以要**自证**: entrypoint 第一步(redirect 前)写一个 **vePFS breadcrumb** `echo ... > $LOG_DIR/preflight_<exp>_${STAMP}.txt`(跳板机可读)。复跑后 breadcrumb 在 = 挂载 OK、死在更后; breadcrumb 也没有 = 挂载/pod-init 层。
+- **缓解**: `RetryOptions: {EnableRetry: true, MaxRetryTimes: 1}` 让瞬时节点/挂载故障自愈; 多 worker 时每个 worker 用 `_node${NODE}` 区分日志名(别全复用一个名)。(2026-06-04 cnbj 3 任务 H20 队列拥挤时全栽于此, 硬化后复跑即 Deploying→Running)。
+
+## 11. 被 import 的 working-tree 文件含 **git 冲突标记** → 全任务 `SyntaxError` ⚠️
+
+- volc/单机任务直接 `cd <repo> && python scripts/train.py` 跑的是**共享盘上的活 working tree**。若该 tree 里某个被 import 的 .py(如 `config.py`)留有未解决的 `<<<<<<< / ======= / >>>>>>>` 冲突标记 → **所有**导入它的任务 `SyntaxError: invalid syntax` 秒崩。
+- 来源: `git stash pop` / merge 冲突没收尾。**gf3/uc 是 cron `reset --hard` 所以自愈; 但 gf0/cnsh 是 main 源、working tree 会留冲突**。
+- 判据/防范: 提交任务前 `grep -rnE "^(<<<<<<<|>>>>>>>)" <import 到的关键文件>` 必须空; `git status` 无 `both modified`。stash pop 后务必收尾。(2026-06-04 dagger-B 实例; 冲突来自一个早已并入 HEAD 的冗余 stash, 直接 `git checkout HEAD -- config.py` + `stash drop`)。
+
+## 12. HF_HUB_OFFLINE + `from_pretrained("hub-id")` 缓存缺失 (迁 venv 不迁 HF cache) ⚠️
+
+- 离线节点设 `HF_HUB_OFFLINE=1 / TRANSFORMERS_OFFLINE=1`。若代码 `AutoTokenizer/AutoModel.from_pretrained("facebook/bart-large")` 这种 **hub repo-id** 而本地 HF cache 没有 → `LocalEntryNotFoundError` / `OSError: couldn't connect to huggingface.co` 崩。
+- **跨集群迁 venv 时 HF cache (`~/.cache/huggingface`) 不会跟着走**: 老集群(uc)首跑时联网下过, 缓存在 uc home; 只把 `.venv` 搬到 cnsh vePFS → 新节点离线找不到。
+- **修复**: 跳板机有代理时, **curl 小文件**直接拉到 vePFS 本地目录(hub metadata HEAD 走 huggingface_hub 常被代理挡, 但 `curl https://hf-mirror.com/<repo>/resolve/main/<file>` 能过)。X-VLA 只用 bart-large 的 **tokenizer**(config.json/vocab.json/merges.txt/tokenizer.json, 不要 1.6G 权重)。然后让路径 **env 可配**(`XVLA_BART_TOK`, 默认仍 hub-id), YAML 指到 vePFS 本地目录 + 加离线 load 预检。(2026-06-04 XVLA X3C_p0 实例, commit `638b5a5`; tokenizer 落在 `xvla/assets/bart-large-tokenizer/`)。
+
 ---
 
 ## 速查: 一个新数据集 → 提交训练的完整前置链
 
 ```
-1. build 数据集 (视频目录用 feature key 命名 §3) → self_built/<name>/
+1. build 数据集 (视频目录用 feature key 命名 §3; info.total_episodes == episodes.jsonl == parquet 数 §3) → self_built/<name>/
 2. compute_norm_states_fast.py --config-name <config>  (§1, 数据所在机)
 3. 加 config 到 config.py + git commit && push  (§8)
 4. init ckpt 在位 + size 校验完整 (§4)
