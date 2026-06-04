@@ -8,6 +8,8 @@
 >
 > **最近更新**: 2026-05-22 (Stage 1 76d44 step 2000 ckpt mu PASS 验证, Soft Prompt 实现端到端正确; Hard Prompt exp1 完成 step 49999)
 >
+> ⛔ **2026-06-04 停止**: **Hard Prompt + Soft Prompt 实验线整体关闭** —— Hard Prompt 真机效果微乎其微; Soft Prompt (pi05 移植) 不再推进 (Track B Stage 2/3 等待执行项**全部作废**)。pi05 上 conditioning 只保留 **Action Head Cond (Track C)** 作可选增强 (且必须走预合并单源, 不走 broken datasets_yaml)。pi05 跨本体主线改为「知识-本体解耦」(R1/R2), 见 [`../../../deployment/strategy/cross_embodiment_strategy.md`](../../../deployment/strategy/cross_embodiment_strategy.md) §0。官方 soft prompt 留在 Track X (`xvla_track_x_curriculum.md`)。本文档以下内容仅作历史记录。
+>
 > **关联文档**:
 > - `docs/deployment/strategy/cross_embodiment_strategy.md` — 跨本体战略 + Tri-track (A/C/X) + 假说 H1-H4 + 决策点
 > - `docs/deployment/strategy/cross_embodiment_strategy.md` §5.2 — Conditioning 选项 (Hard / Soft / Action Head)

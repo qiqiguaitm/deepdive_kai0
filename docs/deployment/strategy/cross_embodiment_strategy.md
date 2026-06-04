@@ -1,8 +1,41 @@
 # Cross-Embodiment 战略与数据分析
 
-> **范围**: 3 异构机器人 (KAI0 / vis / XVLA-Soft-Fold) 数据复用、conditioning 设计、跨数据集 norm-stats / operator / 混训策略实证分析、tri-track (A/C/X) 训练架构、决策点。
-> **状态**: 持续更新 (此文档替代原 `cross_embodiment_data_reuse_plan.md`, 抽离了状态表与具体训练计划, 后者迁入 `docs/training/future_plans/` 与 `docs/training/history/`)。
-> **最近更新**: 2026-05-25。
+> **范围**: **专门探索如何在 pi05 架构上充分利用跨本体数据集** —— 让 pi05 学到 KAI0 官方数据的复杂操作知识, 同时保留 vis 数据对部署本体动作的良好适配。含 embodiment gap 实测、norm-stats/operator/混训分析、知识-本体解耦训练路线、Action Head Cond (Track C)、决策点。
+> **不含**: Track X (X-VLA 官方架构, Florence2 + SoftPromptedTransformer) 已**分离**到 [`../../training/future_plans/plans/xvla_track_x_curriculum.md`](../../training/future_plans/plans/xvla_track_x_curriculum.md), 本文档不再涵盖。
+> **状态**: 持续更新 (此文档替代原 `cross_embodiment_data_reuse_plan.md`, 抽离了状态表与具体训练计划)。
+> **最近更新**: 2026-06-04 (**重定向**: 停 Hard/Soft prompt, 主线改为"pi05 上知识-本体解耦"; Track X 分离)。
+
+---
+
+## 0. 战略定位与核心问题 (2026-06-04 重定向)
+
+### 0.1 已停止的方向 (prompt-based conditioning)
+- **Hard Prompt** (`"[D405 wrist] ..."` 前缀): 之前已试, **真机效果微乎其微** (信号沿 LLM attention 隐式传播, 不显式 gate) → **停止**。
+- **Soft Prompt** (X-VLA 式 VLM-input learnable soft token 移植到 pi05): **停止** (Track B 早已废弃, soft-prompt 实验线整体关闭)。
+- → 下文 §5.2 Hard/Soft 行、§7 原 tri-track 的 Track X 部分、以及相关 plan 规划**均作废**。
+- ⚠️ **Action Head Cond (Track C, action expert 端 domain token) 不在停止之列** —— 它是可行方案之一 (见 §5.3 / R3)。
+
+### 0.2 ⭐ 核心问题 (本文档主线)
+**如何在 pi05 模型基础上, 让模型同时:**
+1. **学到 KAI0 官方数据中复杂的操作知识** —— 复杂多步叠衣、丰富场景 (KAI0 base+dagger ~6.5k ep 的真正价值);
+2. **保留 vis 数据对部署本体动作的良好适配性** —— vis 的 D405 相机 + 该本体关节映射 + R 腕 21° 姿态 (部署本体的**低层动作保真**)。
+
+> **本质 = 「知识 vs 本体」解耦**:
+> - KAI0 的价值在**高层任务/视觉/语义知识** —— 主要落在 **VLM / representation**。
+> - vis 的价值在**低层本体动作映射** —— 主要落在 **action expert + 输出动作分布**。
+> - 直接 naive 混训会因 kai/vis **同观测下 action 双峰** (21° 腕姿配对偏移, §1.3 / §2.1) 制造真机抖动。
+> - 所以要 **decouple**: **知识层吃 kai+vis, 本体层只认 vis**。
+
+### 0.3 候选路线 (pi05 上, 非 prompt)
+| 路线 | 做法 | 解耦机制 | 文档 |
+|---|---|---|---|
+| **R1 数据两阶段** | 预合并 kai+vis co-train (vis 加权) → **轻量 vis-only finetune** | 末段 vis-only 把策略 re-snap 回本体分布, 压掉残余双峰 | [`corrected_plan_a_conditioning_premerge.md`](../../training/future_plans/plans/corrected_plan_a_conditioning_premerge.md) |
+| **R2 模块冻结解耦** ⭐ | Stage1 co-train kai+vis (VLM 学知识); Stage2 **冻 VLM, 只训 action expert on vis** | knowledge insulation: kai 的 action 模式被 Stage2 从 motor 端擦掉, VLM 保留 kai 知识 | §5.4 (待建 plan) |
+| **R3 Action Head Cond** (Track C) | action expert 端 domain token 区分 kai/vis, 推理固定 vis | 显式 token 拆双峰, 推理走 vis 模式 | §5.3 + corrected_plan_a |
+| **R4 数据筛选** | 只取 kai0 里 vis 缺的**复杂任务** ep, 去掉与 vis 重复的简单动作 | 减少 action 冲突, 只保留新知识 | §5.5 |
+| (R0 SSL visual) | kai+vis+xvla 进 visual SSL (无 action loss) → 喂 pi05 backbone | 视觉知识 embodiment-invariant, 完全不碰 action | [`ssl_phase_pretrain_pipeline.md`](../../training/future_plans/plans/ssl_phase_pretrain_pipeline.md) |
+
+> **关系**: R1/R2 是数据/训练流程解耦 (最直接); R3 是模型端显式区分 (可与 R1/R2 叠加); R4 是数据侧降冲突 (可与任意叠加); R0 是上游表示预训练 (独立大工程, 单独 plan)。**优先 R2 (最贴"知识 vs 本体") + R4 (低成本降冲突)**, R1 作 baseline, R3 作可选增强。
 
 ---
 
@@ -98,7 +131,7 @@ B/A motion range: median 1.07, mean 1.11, [0.88, 1.48]
 |---|---|:-:|:-:|:-:|:-:|
 | A. Naive joint norm | 合并算单一 norm_stats | ❌ | ❌ | ❌ | 0.5 day |
 | **B. Per-dataset norm + Single model** | 每数据集 own norm, 同模型 | ⚠️ 90.7% | ⚠️ 90.7% | ✅ | 1 day |
-| **C. Soft Prompt + Per-DS norm** | 显式 routing (X-VLA) | ✅ | ✅ | ✅ | 0 (代码就绪) |
+| ~~C. Soft Prompt + Per-DS norm~~ **已停** | 显式 routing | — | — | — | — (§0.1; domain 区分改 R3 Action Head Cond) |
 | D. Curriculum (A pretrain → B finetune) | 现有 mixed_1 → smooth_800 | ✅ B finetune | ✅ | ✅ | 1 day |
 | E. SSL Decoupled | A 进 visual SSL, B 进 policy | 不参与 | 不参与 | 不参与 | 9 week |
 | F. EE-based action | delta EE pose | ✅ **天然消除** | ⚠️ | ⚠️ | 3 day |
@@ -109,7 +142,7 @@ B/A motion range: median 1.07, mean 1.11, [0.88, 1.48]
 
 **推荐 Layered Combination**:
 - L1 Visual: 方案 E (SSL decoupled, A+B+C all in, no action loss)
-- L2 Policy: 方案 C (Soft Prompt + Per-DS norm) + 方案 D (curriculum)
+- L2 Policy: 方案 D (curriculum / 两阶段, = R1/R2) + 方案 B (per-DS norm)。~~方案 C (Soft Prompt)~~ 已停 (§0.1); domain 区分改用 R3 Action Head Cond (可选)
 - L3 Ablation: 方案 F (EE-based, paper 对照)
 
 ---
@@ -159,33 +192,62 @@ B/A motion range: median 1.07, mean 1.11, [0.88, 1.48]
 
 | 方式 | 实现复杂度 | 本地代码状态 | 推荐度 |
 |---|---|---|---|
-| Hard prompt (`"[D405 wrist] ..."`) | 极低 (0 改 model) | ✅ 任意 config 可用 | ⭐⭐ 弱 (信号沿 LLM attention 隐式传播) |
-| **Soft prompt (X-VLA 官方原生)** | 低 (Track X 走官方 `SoftPromptedTransformer`) | ✅ `lerobot/xvla-base` ckpt | ⭐⭐⭐⭐ **主线 (Track X)** |
-| **Action Head Embedding** (Track C 方案 A) | 极低 (action expert input concat 1 token) | ✅ 已实现 (`pi0.py:action_head_cond_hub`) | ⭐⭐⭐ paper 对照 |
+| ~~Hard prompt~~ | 极低 | ✅ | ❌ **停止 (2026-06-04)** — 真机效果微乎其微 |
+| ~~Soft prompt (VLM-input soft token, 移植 pi05)~~ | 低 | — | ❌ **停止 (2026-06-04)** — soft-prompt 实验线关闭 (官方 soft prompt 留在 Track X 文档, 与本 pi05 文档分离) |
+| **Action Head Cond (Track C 方案 A)** | 极低 (action expert input concat 1 domain token) | ✅ 已实现 (`pi0.py:action_head_cond_hub`, dataset_id 透传已修) | ⭐⭐⭐ **保留** — pi05 上唯一在用的 conditioning (= R3) |
+
+> **pi05 上 conditioning 只剩 Action Head Cond (Track C)**: 在 **action expert 输入端** concat 1 个 domain token (paligemma 不知 domain), 推理固定 vis token → 拆 kai/vis 双峰、走 vis 模式。⚠️ 历史 Track C 训练全 collapse 是因为走了 broken 的 `datasets_yaml` 复制路径, **不是 conditioning 本身失败** —— 必须走预合并单源路径重试, 见 [`corrected_plan_a_conditioning_premerge.md`](../../training/future_plans/plans/corrected_plan_a_conditioning_premerge.md) 与 [`../../training/history/experiments/conditioning_vs_action_representation_ablation.md`](../../training/history/experiments/conditioning_vs_action_representation_ablation.md) §4.4。
 
 ### 5.3 Action Head Cond (Track C, 方案 A) — 设计要点
 
-**动机**: Soft Prompt 在 **VLM 输入端**注入 domain (24 层 PaliGemma + cross-attn); 方案 A 在 **action expert 输入端**直接 concat domain token (paligemma 完全不知 domain)。形成 "VLM 端 vs Action expert 端" 1:1 对照。
+**动机**: 在 **action expert 输入端** concat 1 个 domain token (paligemma 完全不知 domain), 让 action expert 按 domain 区分 denoise → 推理固定 vis token, 拆掉 kai/vis 双峰、走 vis 模式。这正好服务"本体层只认 vis"的目标 (§0.2)。
 
 ```
-Soft Prompt (Track X 官方):
-  d → SoftPromptedTransformer.soft_prompts[d] (B,32,1024)
-    → 拼到 Florence2-VLM input → 24 层 SoftPromptedTransformer → DomainAwareLinear → action
-
 方案 A (Track C):
   d → action_head_cond_hub[d] (B,1,1024) → 拼到 action expert input (与 noise_action_token 同级)
     → action expert self-attn (4-8 层) → action  [paligemma 完全不知 domain]
 ```
 
-**关键差异**: Soft Prompt 控制 *VLM 如何看世界* (domain-specific perception); 方案 A 控制 *action expert 如何 denoise* (domain-specific motor)。互不竞争, paper E3.7 vs E3.8 验证 "perception vs motor" 注入点选择。
+**与 R1/R2 的关系**: R3 (本节) 用**显式 token** 在 motor 端区分 domain; R2 (§5.4) 用**冻结调度**在 motor 端只喂 vis 数据。两者都让 action expert 偏向 vis 本体, 可叠加 (token + 末段 vis-only finetune)。
 
-**为什么单阶段而非 curriculum**: Soft Prompt 信号路径 24 层 (改 image 编码), 需 stage 2 freeze-backbone 保护; 方案 A 只影响 4-8 层 action expert (不改 image 编码), stage 2 价值边际低 → 单阶段 joint balanced (vis ×7) 50k step。
+> ⚠️ **训练路径必须改**: 历史 Track C "单阶段 joint balanced (vis ×7) via `datasets_yaml`" **全 collapse** —— 真因是 `datasets_yaml`/ConcatDataset 代码路径本身 broken (**不是 conditioning 失败**, 见 [`conditioning_vs_action_representation_ablation.md`](../../training/history/experiments/conditioning_vs_action_representation_ablation.md) §4.4)。**必须改走物理预合并单源路径** (corrected Plan A): domain_id 逐帧带入, 推理固定 vis。
 
 **代码改造点**:
 - `pi0_config.py`: 加 `action_head_cond_num_domains: int = 0`
 - `pi0.py.__init__`: 加 `self.action_head_cond_hub = nnx.Embed(num_domains, action_expert_width)` (init N(0, 0.02))
 - `pi0.py` action expert forward: `domain_token = self.action_head_cond_hub(obs.dataset_id)[:, None, :]; action_input = jnp.concat([domain_token, action_input], axis=1)`
 - `transforms.py`: dataset_id 透传 ✓ (已修)
+
+---
+
+### 5.4 ⭐ R2 — 模块冻结解耦 (知识 vs 本体, 最贴核心问题)
+
+**思路**: pi05 = VLM backbone (paligemma, 感知/语义/任务知识) + action expert (flow-matching, 本体动作映射)。把两者**分阶段、分数据**训练:
+
+| Stage | 数据 | 训练谁 | 冻结谁 | 作用 |
+|---|---|---|---|---|
+| **S1 知识注入** | kai+vis 预合并 (vis 加权) | VLM (+ 可选 action expert) | — | VLM 吸收 **kai0 复杂任务 + vis** 的视觉/语义知识 |
+| **S2 本体对齐** | **vis-only** (轻量, 低 lr) | **仅 action expert** | **冻 VLM** | action expert re-snap 到 vis 本体动作分布; **kai 的 action 模式从 motor 端被擦掉**, 而 VLM 里的 kai 知识被冻结保留 |
+
+> **为什么有效**: S1 让 kai 知识进了 VLM (representation); S2 冻住 VLM (锁住知识) 只在 vis 上重训 action expert → 输出动作纯 vis 本体, **不带 kai 的 21° 腕姿双峰** → 真机不抖。这正是 §0.2「知识层吃 kai+vis, 本体层只认 vis」的直接实现, 也是官方 Knowledge Insulation 的精神 (梯度/参数隔离 motor 与 knowledge)。
+
+**实现** (openpi 已有机制):
+- `TrainConfig.freeze_filter` (nnx filter) —— S2 设为"冻结除 action expert 外全部" (类似已有 `freeze_filter=nnx.Not(nnx_utils.PathRegex(".*action_head_cond_hub.*"))` 的写法, 改成匹配 action expert 参数路径)。⚠️ **需核对 pi0.py 里 action expert 的参数 path 命名** 写对 PathRegex。
+- 或用 lerobot pi05 的 `train_expert_only=true` (冻 VLM 只训 action expert + projection) 做 S2。
+- S1 数据走**预合并单源**路径 (不走 broken datasets_yaml, 见 R1/corrected Plan A)。
+
+**与 R1 区别**: R1 的 S2 是"全参数轻量 vis finetune"; R2 的 S2 是"**只**训 action expert + 冻 VLM" —— R2 更外科, 显式保护 VLM 里的 kai 知识不被 vis finetune 冲掉。**建议先跑 R2**。
+
+> 📋 待建 plan: `docs/training/future_plans/plans/` 下补一个 "pi05 module-decoupled kai-knowledge + vis-body" 实验 plan (S1/S2 超参 + freeze_filter 核对 + 对照 R1 全参 finetune + vis-only baseline + 真机)。
+
+### 5.5 R4 — 数据筛选 (降 action 冲突, 保留新知识)
+
+kai0 6.5k ep 里, 与 vis 重叠的**简单动作** (平移、对折) 是 action 双峰冲突的主要来源, 而**复杂多步操作 / 罕见场景**才是 vis 缺的新知识。
+
+- **做法**: 对 kai0 episode 按"复杂度 / 与 vis 分布差异"打分, 只取**高复杂度 + vis 覆盖不足**的子集进 co-train; 丢弃与 vis 高度重复的简单 ep。
+- **收益**: 同样吸收 kai 复杂知识, 但减少同观测下的 action 模式冲突 → 降低对 S2/conditioning 的依赖。
+- **可与 R1/R2/R3 任意叠加**。低成本预处理, 不改模型。
+- ⚠️ 复杂度打分方式 (action 方差 / 轨迹长度 / 任务阶段数 / 视觉新颖度) 待定, 需小实验标定。
 
 ---
 
@@ -260,50 +322,39 @@ def compute_loss(rng, obs, actions, *, max_delay=10):
 
 ---
 
-## 7. Tri-Track 训练架构 (M2 主线)
+## 7. pi05 跨本体训练路线图 (本文档主线)
 
-> **2026-05-22 战略转向**: 放弃 pi0.5 + 移植 soft prompt (Track B 已废弃), 改用 X-VLA 官方完整架构 (Track X) + Action Head Cond (Track C) + SSL Pretrain (Track A)。
+> **2026-06-04 重定向**: 原 tri-track (Track A SSL / Track C cond / **Track X X-VLA**) 中, **Track X 已分离** → [`xvla_track_x_curriculum.md`](../../training/future_plans/plans/xvla_track_x_curriculum.md) (独立 X-VLA 架构, 不在本 pi05 文档范围)。Soft/Hard prompt 已停 (§0.1)。本文档聚焦 **pi05 上的「知识-本体解耦」**。
 
 ```
-┌─────────────────────────────────────┐
-│   Track A: SSL Visual Pretrain      │
-│   (uc02 + Robot-North-H20)          │
-│   ├── Phase 0 Pseudo-labels         │
-│   ├── Phase 1 V-JEPA + track + flow │
-│   ├── Phase 2 Dynamics + Embodiment │
-│   └── Phase 3 Policy + Ablation     │
-├─────────────────────────────────────┤
-│   Track C: Action Head Cond Emb     │
-│   (Action expert 端 cond, paper     │
-│    ablation 对照, 16 GPU)           │
-│   └── 单阶段 balanced joint training│
-├─────────────────────────────────────┤
-│   Track X: X-VLA 官方架构 ⭐ 主线    │
-│   (Florence2 + SoftPromptedXformer, │
-│    EE6D 20D action, 16 GPU)         │
-│   ├── X3.A: 3-domain (A+B+C)        │
-│   └── X3.B: 2-domain (A+B, no XVLA) │
-└─────────────────┬───────────────────┘
-                  ↓
-       ┌──── Final Merge ────┐
-       │ SSL Backbone +      │
-       │ X-VLA 官方 ckpt +   │
-       │ Dynamics-cond head  │
-       └─────────────────────┘
+pi05 跨本体数据利用 (本文档)
+┌──────────────────────────────────────────────────────────┐
+│ 数据侧 (必做): kai+vis 物理预合并单源 + 合并/per-source     │
+│   norm + vis 加权  ── 绕开 broken datasets_yaml/ConcatDS  │
+├──────────────────────────────────────────────────────────┤
+│ 训练路线 (§0.3):                                          │
+│   R2 模块冻结解耦 ⭐  S1 VLM 学 kai+vis → S2 冻 VLM 只训   │
+│                       action expert on vis (保本体)       │
+│   R1 两阶段全参    co-train → 轻量 vis-only finetune       │
+│   R3 Action Head Cond  domain token 拆双峰 (可叠加, 预合并)│
+│   R4 数据筛选      只取 kai0 复杂任务 ep (降冲突, 可叠加)   │
+├──────────────────────────────────────────────────────────┤
+│ 上游独立: R0 SSL visual pretrain (kai+vis+xvla, 无 action) │
+│   → 喂 pi05 backbone (ssl_phase_pretrain_pipeline.md)     │
+└────────────────────────┬─────────────────────────────────┘
+                         ↓  vis 真机为终判 (抖动 + 成功率)
 ```
 
-**资源分配**:
-- Track A: uc02 (Phase 0) + Robot-North-H20 (Phase 1-3)
-- Track C: cn-shanghai / cn-beijing 跑 paper ablation 对照
-- Track X (主线): uc01+uc02 16 A800 — X3.A / X3.B 顺序执行
+**文档边界**:
+- **本文档**: pi05 上如何用 kai+vis 数据 (R1–R4 + R0 指针)。
+- **Track X (X-VLA)**: [`xvla_track_x_curriculum.md`](../../training/future_plans/plans/xvla_track_x_curriculum.md) —— 独立模型/架构线 (Florence2 + 官方 soft prompt + EE6D 20D + domain 槽 warm-init)。
+- **数据预合并 + conditioning 实验**: [`corrected_plan_a_conditioning_premerge.md`](../../training/future_plans/plans/corrected_plan_a_conditioning_premerge.md) (R1/R3 落地)。
+- **R0 SSL 预训练**: [`ssl_phase_pretrain_pipeline.md`](../../training/future_plans/plans/ssl_phase_pretrain_pipeline.md)。
 
-**Milestone**:
-- **M1 (1-2 周)**: 短期真机修复 — 已 deprioritize
-- **M2 (~9 周)**: Multi-track 训练 ⭐ 主线 (本表全部)
-- **M3 (M2 之后)**: Merge SSL + X-VLA 官方 ckpt + Dynamics-cond head + 真机大规模 (60-100 ep/abl) + Paper
-- **M4 (long-tail)**: ATOM Policy 扩展 (跨任务: Task B 检索, Task C 挂衣)
-
-**具体 plan/状态**: 详见 `docs/training/future_plans/plans/ssl_phase_pretrain_pipeline.md` (Track A) + `xvla_track_x_curriculum.md` (Track X) + `pytorch_native_vis_v2_full.md` (R1/R2)。
+**Milestone (pi05 线)**:
+- **M-now**: R1/R2 预合并 + 两阶段实验 → vis 真机 vs **vis-only baseline** (要超越的对象)。
+- **M-next**: R3 (Action Head Cond, 预合并路径) / R4 (数据筛选) 作增强 ablation。
+- **远期**: R0 SSL backbone 注入 + 跨任务扩展 (Task B 检索 / Task C 挂衣)。
 
 ---
 
@@ -331,22 +382,21 @@ def compute_loss(rng, obs, actions, *, max_delay=10):
 - L2 (policy): ❌ 不引入 (抖动 +62%, 污染 action prior)
 - L3 (aux): ⚠️ 可选 (作为 inverse dynamics 目标)
 
-### 决策点 2: Embodiment conditioning 实现方式? ✅ (2026-05-22 二次更新)
-- ~~Hard prompt only~~ (信号沿 LLM attention 隐式传播, 不显式 gate)
-- ✅ **Soft Prompt (X-VLA 官方原生)** — Track X, VLM input 端
-- ⭐ **Action Head Cond Token (方案 A)** — Track C, action expert input 端
-- ~~方案 B (FiLM) / C (adaLN) / D (Cross-attn)~~ 暂搁置
-- ~~终态 E3.9 双端 Soft + Action Cond~~ 暂搁置 — 待单端结果再决定
-- 真机评估: 全部 Track C/X 终态在 vis (B 真机) 测试
+### 决策点 2: Embodiment conditioning 实现方式? (2026-06-04 三次更新)
+- ❌ **Hard prompt — 停** (真机效果微乎其微)
+- ❌ **Soft prompt — 停** (pi05 移植实验线关闭; 官方 soft prompt 留在 Track X 独立文档)
+- ✅ **Action Head Cond Token (Track C, 方案 A) — 保留** (pi05 上唯一 conditioning, = R3; **必须走预合并单源, 不走 broken datasets_yaml**)
+- pi05 主线已转向**非 conditioning 的 R2 模块解耦 / R1 两阶段** (§0.3); conditioning (R3) 作可叠加增强, 非主路径
+- 真机评估: 全部终态在 vis (B 真机) 测试
 
 ### 决策点 3: EE-relative action 是否启用? ❌ 已 deprioritize (2026-05-22)
 - ~~Phase 0 E0.5 EE-relative preprocessing~~ 取消
 - ~~Phase 3 E3.4 / E3.8 delta EE~~ 取消
-- 理由: R 腕 21° paired shift 由 Soft Prompt + Action Head Cond 处理, 工程量更低 + 无 IK 不连续风险
+- 理由: R 腕 21° paired shift 由 R2 模块解耦 (S2 vis-only 重训 action expert) + R3 Action Head Cond 处理, 工程量更低 + 无 IK 不连续风险
 - 保留作为远期 backup
 
 ### 决策点 4: 是否回看 M1 短期方案?
-- 触发条件: Phase 1 SSL + Track C / Track X 首轮 ablation 完成, 如 E3.1 / E3.7 / E3.8 已超过 baseline → M1 不需要
+- 触发条件: pi05 R1/R2 (或 R3 Action Head Cond) 首轮实验完成且**真机超过 vis-only baseline** → M1 不需要
 - 否则: 回看 B oversample 修复抖动 (EE-relative 不再回看)
 
 ### 决策点 5: 采纳 TAC 作为 Phase 3 ablation 新维度 ✅
