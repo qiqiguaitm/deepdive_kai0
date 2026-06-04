@@ -75,7 +75,8 @@
 
 - 现象: volc job `Failed`, Message `worker-N 共 X 实例异常结束`, **`StartTime` 空, 且 vePFS 上无该 STAMP 的训练日志文件**。意味着 entrypoint 在 `exec >> "$LOG"` 重定向**之前**就死了 → 不是数据/config/代码问题(那些在重定向之后, 会写进日志), 而是**镜像拉取 / vePFS 挂载 race / 调度** 层(尤其队列拥挤时)。
 - **API 取不到 pod stdout**(`GetJob` 只有 `Status`; `mlp` CLI 多数机器没装)。所以要**自证**: entrypoint 第一步(redirect 前)写一个 **vePFS breadcrumb** `echo ... > $LOG_DIR/preflight_<exp>_${STAMP}.txt`(跳板机可读)。复跑后 breadcrumb 在 = 挂载 OK、死在更后; breadcrumb 也没有 = 挂载/pod-init 层。
-- **缓解**: `RetryOptions: {EnableRetry: true, MaxRetryTimes: 1}` 让瞬时节点/挂载故障自愈; 多 worker 时每个 worker 用 `_node${NODE}` 区分日志名(别全复用一个名)。(2026-06-04 cnbj 3 任务 H20 队列拥挤时全栽于此, 硬化后复跑即 Deploying→Running)。
+- **缓解**: `RetryOptions: {EnableRetry: true, MaxRetryTimes: 1}` 让瞬时节点/挂载故障自愈; 多 worker 时每个 worker 用 `_node${NODE}` 区分日志名(别全复用一个名)。
+- ⚠️ **真凶常是"镜像在节点上没缓存 → 冷拉把 2 节点 gang staging wedge 住"**(2026-06-04 cnbj 实测确认): 控制台 `State: Staging` + `UpdateTime` 冻结 1h+ + `异常事件 0` + `0/2 实例` = 卡在平台备容器层, 既不报错也不前进; `RoleMinReplicas:2` gang 要两个 worker 同时起来, 冷拉镜像时极易卡死(单节点 job 无此问题, 所以 cnsh 单机几秒就 Running)。**判据**: Staging 态 + UpdateTime 长时间不变 + 无 entrypoint breadcrumb。**修复**: 换一个**该集群节点上已缓存/更小的镜像**——h2r:1.0(visincept registry)换成 `dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1` 后, canary submit→Running **20 秒**(原镜像卡 1h22m)。镜像只提供基础 OS/CUDA(venv 在 vePFS), 故换镜像零成本。同源解释了第一轮"实例异常结束无日志"(冷拉 backoff 到超时变 Failed)。先单任务验证再全量 stop+重提(commit `3782b06`)。
 
 ## 11. 被 import 的 working-tree 文件含 **git 冲突标记** → 全任务 `SyntaxError` ⚠️
 
