@@ -28,6 +28,7 @@ from lerobot.policies.xvla.modeling_xvla import XVLAPolicy
 DATA_ROOT = "/data/shared/ubuntu/workspace/dataset_ee6d"  # legacy (buggy pipeline) — superseded by SB
 SB = os.environ.get("XVLA_SB", "/data/shared/ubuntu/workspace/deepdive_kai0/xvla/data/self_built")  # X-VLA self-built EE6D (fixed pipeline); override via XVLA_SB env for local run
 CKPT_INIT = os.environ.get("XVLA_CKPT_INIT", "/data/shared/ubuntu/workspace/xvla_ckpts")  # base init model; override via XVLA_CKPT_INIT env
+BART_TOK = os.environ.get("XVLA_BART_TOK", "facebook/bart-large")  # text-encoder tokenizer; point to a local dir on offline (HF_HUB_OFFLINE) nodes
 PROMPT = "Flatten and fold the cloth."
 
 CONFIGS = {
@@ -279,7 +280,7 @@ def main(args):
         )
 
     # Tokenizer
-    tok = AutoTokenizer.from_pretrained("facebook/bart-large")
+    tok = AutoTokenizer.from_pretrained(BART_TOK)
 
     fixed_prompt = "Flatten and fold the cloth."
     cached_tokens = tok([fixed_prompt], padding="max_length", max_length=50, truncation=True, return_tensors="pt")["input_ids"][0]

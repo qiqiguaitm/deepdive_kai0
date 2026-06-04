@@ -56,11 +56,15 @@ Entrypoint: |
   mkdir -p "$OUT"
   export XVLA_SB="$XVLA_SB_DIR"
   export XVLA_CKPT_INIT="$INIT"
+  # bart-large tokenizer: nodes are HF_HUB_OFFLINE; point to a local vePFS copy (cached 2026-06-04)
+  export XVLA_BART_TOK=/vePFS/tim/workspace/deepdive_kai0/xvla/assets/bart-large-tokenizer
 
-  # preflight: venv works in image + data/init present
+  # preflight: venv works in image + data/init/tokenizer present
   "$VENV/bin/python" -c "import torch; from lerobot.policies.xvla.modeling_xvla import XVLAPolicy; print('venv OK torch', torch.__version__, 'cuda', torch.cuda.is_available(), 'ngpu', torch.cuda.device_count())"
   [ -f "$XVLA_SB_DIR/A_new_smooth_800_xvla/norm_stats.json" ] || { echo "FATAL: data missing" >&2; exit 13; }
   [ -f "$INIT/config.json" ]                                  || { echo "FATAL: init missing" >&2; exit 13; }
+  [ -f "$XVLA_BART_TOK/tokenizer.json" ]                      || { echo "FATAL: bart tokenizer missing $XVLA_BART_TOK" >&2; exit 13; }
+  "$VENV/bin/python" -c "import os; from transformers import AutoTokenizer; AutoTokenizer.from_pretrained(os.environ['XVLA_BART_TOK']); print('bart tokenizer offline OK')"
   echo "[$(date)] preflight OK"
 
   cd /vePFS/tim/workspace/deepdive_kai0/train_scripts/xvla/launch
@@ -70,7 +74,7 @@ Entrypoint: |
     --workers 4
 
 RetryOptions:
-    EnableRetry: false
-    MaxRetryTimes: 0
+    EnableRetry: true
+    MaxRetryTimes: 1
 
 AccessType: "Public"
