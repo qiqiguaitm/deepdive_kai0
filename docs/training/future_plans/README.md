@@ -63,6 +63,12 @@
 |---|---|---|
 | Task E master plan | [task_e_master_plan.md](plans/task_e_master_plan.md) | Phase 0 baseline + Phase 1 差异化 2×2 + Phase 1-FT + Phase 2 vision LoRA. ⭐ Task E 系列总入口 |
 
+### WAM (τ₀ / GigaWorld) 叠衣服系列
+
+| 计划 | 文件 | 备注 |
+|---|---|---|
+| τ₀-WM 叠衣服微调 (关节空间 · visrobot01) | [tau0_fold_visrobot01_joint_finetune.md](plans/tau0_fold_visrobot01_joint_finetune.md) | 📝 待评审. 在 tau0 框架内真·复用预训练 (复用 action_blocks+视频主干, 仅重置 14 维投影), 关节空间 P1 暖启→P2 专精, visrobot01 关节直控免 FK/IK. P1 ablation 为 go/no-go 分水岭 (否则退 GigaWorld 关节-14) |
+
 ---
 
 ## 何时新加 plan? 何时移到 history?
