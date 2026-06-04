@@ -56,11 +56,16 @@ Envs:
 Entrypoint: |
   set -uo pipefail
   STAMP=$(date -u +%Y%m%d_%H%M%S)
+  NODE=${MLP_ROLE_INDEX:-0}
+  # --- preflight: prove pod-init + vePFS mount reached (breadcrumb file is readable from gf3) ---
+  echo "=== PREFLIGHT $(date) node=$NODE host=$(hostname) ==="
+  ls -ld /vePFS-North-E/vis_robot 2>&1 || echo "MOUNT-MISSING"
   LOG_DIR=/vePFS-North-E/vis_robot/logs
-  mkdir -p "$LOG_DIR"
-  LOG="$LOG_DIR/v3_0518_0528_${STAMP}_node${MLP_ROLE_INDEX:-0}.log"
+  mkdir -p "$LOG_DIR" 2>&1 || echo "MKDIR-FAILED"
+  echo "preflight node=$NODE $(date)" > "$LOG_DIR/preflight_smooth800_dagger_full_${STAMP}_node${NODE}.txt" 2>&1 || echo "BREADCRUMB-WRITE-FAILED"
+  LOG="$LOG_DIR/smooth800_dagger_full_${STAMP}_node${NODE}.log"
   exec >> "$LOG" 2>&1
-  echo "=== entrypoint start $(date) node=${MLP_ROLE_INDEX:-0}/${MLP_WORKER_NUM:-1} ==="
+  echo "=== entrypoint start $(date) node=$NODE/${MLP_WORKER_NUM:-1} ==="
   set -ex
   echo "[multinode] host0=${MLP_WORKER_0_HOST} num=${MLP_WORKER_NUM} idx=${MLP_ROLE_INDEX}"
   nvidia-smi -L
@@ -89,7 +94,7 @@ Entrypoint: |
     --overwrite
 
 RetryOptions:
-    EnableRetry: false
-    MaxRetryTimes: 0
+    EnableRetry: true
+    MaxRetryTimes: 1
 
 AccessType: "Public"
