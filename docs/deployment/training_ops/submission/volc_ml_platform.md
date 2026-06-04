@@ -185,9 +185,10 @@ python train_scripts/kai/volc/submit_yaml.py train_scripts/kai/volc/gf3_cluster_
 
 ### V2. 镜像缓存决定部署速度 (换镜像有代价) ⚠️
 
-- **kai0-gf1 镜像** (`dvs-cr-cn-beijing.../kai:kai0-gf1`): cnbj 节点**已缓存** (A_0423/X-VLA 跑过) → 部署秒级。但**多机 JAX 会崩 "Logging error"** at distributed.initialize (该镜像 jax/日志环境问题)。
-- **h2r 镜像** (`visincept-cn-beijing.../grasp/h2r:1.0`): 文档实测**能多机** (2026-05-21 X-VLA Stage1), 但 cnbj 节点**没缓存** → 首拉 ~30min+, 甚至卡死。
-- → 换镜像修一个问题会引入另一个 (缓存)。**多机优先用已验证能多机 + 尽量已缓存的镜像**; 首次拉取慢要耐心 (看 `UpdateTime` 是否推进区分慢拉 vs 卡死)。
+- **kai0-gf1 镜像** (`dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1`) — ⭐ **cnbj(beijing)标准镜像,以后 beijing 任务都用它**: cnbj 节点**已缓存** → 部署秒级 (canary submit→Running **20s**)。**2026-06-04 实测 Exp-B 多机过 Step 0**——此前"distributed.initialize Logging error 崩"的结论**未复现,作废**。
+  - ⚠️ **代价 = 部署太快跑赢 Cloudfs 懒加载**: 冷 worker 首访数据集文件可能瞬时 `ENOENT` → lerobot 文件存在 assert 失败 → `get_safe_version` 打 HF hub → `OfflineModeIsEnabled` 崩(常只崩 worker-1,数据其实完整)。**多机 / 大数据集务必在 entrypoint 加 stat-only cache-warm 预热**: `find -L "$TRAIN/data" "$TRAIN/videos" -type f -print0 | xargs -0 -P16 stat >/dev/null`(见 `v3_all_no0516` / `smooth800_dagger_full` yaml)。旧 h2r 的 30min 慢拉恰好掩盖了这个 race。
+- **h2r 镜像** (`visincept-cn-beijing.../grasp/h2r:1.0`): cnbj 节点**没缓存** → 冷拉把 **2 节点 gang staging wedge 死**(2026-06-04 卡 1h22m 不报错不前进,见 [pitfalls §10](training_pitfalls_common.md))。**cnbj 弃用**。
+- → **beijing: `kai:kai0-gf1` + cache-warm 预热; shanghai(cnsh): 仍用 `visincept-cn-shanghai.../grasp/h2r:1.0`**(cn-shanghai registry 该区已缓存,单机几秒起,无需换)。kai0-gf1 是 **cn-beijing registry 专用**,别拿到 cnsh 用(跨区拉取慢)。
 - 镜像 URL 拼写: `cn-beijing` 别写成 `bejing` (DNS 不解析 → 卡 Deploying 25min+ 自动失败)。`curl -sI https://<cr>/v2/` 应返回 401 = endpoint 存在。
 
 ### V3. 提交命令的坑

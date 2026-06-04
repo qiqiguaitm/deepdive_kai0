@@ -5,7 +5,7 @@
 #   Hosts:    2  × ml.hpcpni3ln.45xlarge  (each = 8× H20-SXM5-96GB + RDMA)
 #   GPUs:     16 (FSDP=16)
 #   Storage:  vepfs-cnbj875793a96d6b  → /vePFS-North-E
-#   Image:    visincept-cn-beijing.cr.volces.com/grasp/h2r:1.0
+#   Image:    dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1
 #
 #   Config:   pi05_flatten_fold_a_new_pure_1200  (tracked variant; dataset shape identical to _200)
 #   Init:     pi05_base/params  (already extracted on /vePFS-North-E from TOS pi05_base.tar)
@@ -22,7 +22,7 @@ Tags: []
 UserCodePath: ""
 RemoteMountCodePath: ""
 
-ImageUrl: "visincept-cn-beijing.cr.volces.com/grasp/h2r:1.0"
+ImageUrl: "dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1"
 
 ResourceQueueName: "Robot-North-H20"
 
