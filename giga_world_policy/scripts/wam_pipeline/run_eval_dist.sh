@@ -23,7 +23,9 @@ export VAL_ROOT=${VAL_ROOT:-../kai0/data/wam_fold_v1/visrobot01_val}
 export T5_PKL=${T5_PKL:-../kai0/data/wam_fold_v1/visrobot01_val/t5_embedding/episode_000000.pt}
 export COVERAGE=${COVERAGE:-exec}
 export EXEC_HORIZON=${EXEC_HORIZON:-8}
-NUM_SHARDS=${NUM_SHARDS:-16}
+SHARDS_PER_GPU=${SHARDS_PER_GPU:-2}   # 每 GPU 并发 worker 数:>1 时一片在 CPU(mp4解码/GT构建)阶段,
+                                      # 另一片占住 GPU(去噪+VAE+GPU度量)→ 重叠 CPU/GPU,GPU 接近满载
+NUM_SHARDS=${NUM_SHARDS:-$((16 * SHARDS_PER_GPU))}   # 16 GPU × 每卡片数
 POLL=${POLL:-90}
 ONCE=${ONCE:-0}
 LATEST_ONLY=${LATEST_ONLY:-1}   # 1=每轮只评最新未评 ckpt(跳过积压;88min/ckpt 远超 cadence 时保持最新)
@@ -40,13 +42,16 @@ run_step () {
   local STEP=$1 SUBDIR=$2
   local sdir="$OUTPUT_DIR/eval_shards/step_$STEP"
   mkdir -p "$sdir/logs"
-  echo "[orch $(date +%H:%M:%S)] step $STEP coverage=$COVERAGE: 16 shards (b2 0-7, b1 8-15) <- $SUBDIR"
-  # b2 本地 shard 0-7(setsid 脱离本进程组 → orchestrator 崩溃/退出不连带杀掉 worker)
+  echo "[orch $(date +%H:%M:%S)] step $STEP coverage=$COVERAGE: $NUM_SHARDS shards (16 GPU × ${SHARDS_PER_GPU}/GPU) <- $SUBDIR"
+  # b2 本地:gpu g 跑 shard {g + r*16}(setsid 脱离进程组 → orchestrator 崩溃不连带杀 worker)
   for g in 0 1 2 3 4 5 6 7; do
-    setsid bash "$W" "$g" "$g" "$NUM_SHARDS" "$STEP" "$SUBDIR" > "$sdir/logs/b2_shard_$g.log" 2>&1 &
+    for r in $(seq 0 $((SHARDS_PER_GPU-1))); do
+      sid=$((g + r*16))
+      setsid bash "$W" "$g" "$sid" "$NUM_SHARDS" "$STEP" "$SUBDIR" > "$sdir/logs/b2_g${g}_s${sid}.log" 2>&1 &
+    done
   done
-  # b1 远程 shard 8-15(local gpu 0-7);单条 ssh 后台拉起 8 个 worker 即返回
-  $B1 "cd $REPO && $PASSENV bash -c 'for g in 0 1 2 3 4 5 6 7; do nohup bash $W \$g \$((8+g)) $NUM_SHARDS $STEP \"$SUBDIR\" > $sdir/logs/b1_shard_\$g.log 2>&1 & done; sleep 1'" \
+  # b1 远程:gpu g 跑 shard {8+g + r*16};单条 ssh 后台拉起即返回
+  $B1 "cd $REPO && $PASSENV SHARDS_PER_GPU=$SHARDS_PER_GPU bash -c 'for g in 0 1 2 3 4 5 6 7; do for r in \$(seq 0 \$((SHARDS_PER_GPU-1))); do sid=\$((8+g + r*16)); nohup bash $W \$g \$sid $NUM_SHARDS $STEP \"$SUBDIR\" > $sdir/logs/b1_g\${g}_s\${sid}.log 2>&1 & done; done; sleep 1'" \
     > "$sdir/logs/b1_dispatch.log" 2>&1 &
   # 等齐 16 片 partial
   local t=0 n=0

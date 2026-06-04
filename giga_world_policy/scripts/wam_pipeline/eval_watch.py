@@ -71,6 +71,51 @@ def video_metrics(pred_thwc: np.ndarray, gt_thwc: np.ndarray, lpips_fn=None, dev
     return out
 
 
+def _to_thwc_gpu(vid: torch.Tensor, device) -> torch.Tensor:
+    """pipeline 视频输出 -> (T,H,W,C) float[0,255],**留在 GPU**(不落 CPU)。(C,T,H,W)/(T,C,H,W) 皆可。"""
+    v = vid.detach().to(device=device, dtype=torch.float32)
+    if v.ndim == 4 and v.shape[0] in (1, 3):      # (C,T,H,W)
+        v = v.permute(1, 2, 3, 0)
+    elif v.ndim == 4 and v.shape[1] in (1, 3):    # (T,C,H,W)
+        v = v.permute(0, 2, 3, 1)
+    if float(v.min()) < -0.01:                     # [-1,1] -> [0,1]
+        v = (v + 1.0) / 2.0
+    return (v.clamp(0, 1) * 255.0)
+
+
+def _gauss_win(ws, sigma, device, dtype):
+    c = torch.arange(ws, device=device, dtype=dtype) - (ws - 1) / 2.0
+    g = torch.exp(-(c ** 2) / (2 * sigma ** 2)); g = g / g.sum()
+    return g[:, None] * g[None, :]
+
+
+def video_metrics_gpu(pred_thwc: torch.Tensor, gt_thwc: torch.Tensor, lpips_fn=None, device="cuda") -> dict:
+    """全 GPU 视频指标(替代 skimage CPU 路径,消除 SSIM 的 CPU 瓶颈)。
+    pred_thwc/gt_thwc: (T,H,W,C) float[0,255] GPU 张量。PSNR=逐帧 MSE→dB;
+    SSIM=高斯 11x11 窗(Wang et al,与 skimage gaussian_weights=True 同式,略异于其默认 uniform-7);
+    temporal=帧间绝对差比。全部 conv2d/逐元素在 GPU 上,GPU 不再因 CPU 度量而空转。"""
+    import torch.nn.functional as F
+    T = min(pred_thwc.shape[0], gt_thwc.shape[0])
+    p = pred_thwc[:T].permute(0, 3, 1, 2).contiguous()   # (T,C,H,W)
+    g = gt_thwc[:T].permute(0, 3, 1, 2).contiguous()
+    C = p.shape[1]
+    mse = ((p - g) ** 2).mean(dim=(1, 2, 3)).clamp_min(1e-10)
+    out = {"psnr": float((10.0 * torch.log10((255.0 ** 2) / mse)).mean().item())}
+    ws = 11; w = _gauss_win(ws, 1.5, device, p.dtype).expand(C, 1, ws, ws); pad = ws // 2
+    cv = lambda x: F.conv2d(x, w, padding=pad, groups=C)
+    mu1, mu2 = cv(p), cv(g); mu1s, mu2s, mu12 = mu1 * mu1, mu2 * mu2, mu1 * mu2
+    s1, s2, s12 = cv(p * p) - mu1s, cv(g * g) - mu2s, cv(p * g) - mu12
+    C1, C2 = (0.01 * 255) ** 2, (0.03 * 255) ** 2
+    out["ssim"] = float((((2 * mu12 + C1) * (2 * s12 + C2)) / ((mu1s + mu2s + C1) * (s1 + s2 + C2))).mean().item())
+    if T >= 2:
+        pd = (p[1:] - p[:-1]).abs().mean(); gd = (g[1:] - g[:-1]).abs().mean()
+        out["temporal_absdiff_ratio"] = float((pd / (gd + 1e-6)).item())
+    if lpips_fn is not None:
+        with torch.no_grad():
+            out["lpips"] = float(lpips_fn(p / 127.5 - 1.0, g / 127.5 - 1.0).mean().item())
+    return out
+
+
 # ----------------------------- window-index enumeration -----------------------------
 def build_window_indices(val_root: str, coverage: str, stride: int, action_chunk: int, exec_horizon: int = 8):
     """枚举 held-out 全部 episode 的窗口全局索引(与 LatentEpisodeSampler/dataset 同一映射:
@@ -150,14 +195,15 @@ def eval_checkpoint(transformer_dir, args, val_ds, clip_idxs, norm, t5, lpips_fn
                                 state=nstate, num_frames=args.num_frames, guidance_scale=0.0,
                                 num_inference_steps=args.steps, image=ref, action_only=False,
                                 return_dict=False, prompt_embeds=t5.unsqueeze(0).to(device=device, dtype=torch.float32))
-        pred = _to_uint8_thwc(imgs[0])
-        # GT: 逐帧把 3 视角拼成 768x192(与 pred 同空间),堆成 (T,H,W,C) uint8
+        pred_t = _to_thwc_gpu(imgs[0], device)          # (T,H,W,C) float[0,255] 留 GPU
+        # GT: 逐帧把 3 视角拼成 768x192(与 pred 同空间,PIL 保证与 pred 对齐),堆 (T,H,W,C) uint8 → 推 GPU
         nf = d[view_keys[0]].shape[0]
         import numpy as _np
         gt = _np.stack([_np.array(build_ref_image(images={k: _chw01(d[k][f]) for k in view_keys},
                                                   dst_size=(args.width, args.height), crop_mode="center"))
                         for f in range(nf)], axis=0)
-        m = video_metrics(pred, gt, lpips_fn=lpips_fn, device=device)
+        gt_t = torch.from_numpy(gt).to(device=device, dtype=torch.float32)
+        m = video_metrics_gpu(pred_t, gt_t, lpips_fn=lpips_fn, device=device)   # PSNR/SSIM/temporal 全 GPU
         # action:反归一化 + add_state(与 inference_server 一致)-> 真实单位,再算逐 horizon MAE
         pred_act = denormalize_action(action[0].float(), norm, mode="zscore")
         pred_act = add_state_to_action(pred_act, state[0].float().to(pred_act.device),
@@ -173,8 +219,9 @@ def eval_checkpoint(transformer_dir, args, val_ds, clip_idxs, norm, t5, lpips_fn
         for k, v in m.items():
             sums[k] = sums.get(k, 0.0) + float(v)
             counts[k] = counts.get(k, 0) + 1
-        if args.save_mp4 and i < args.n_mp4:
-            _save_side_by_side(pred, gt, os.path.join(args.vis_dir, f"clip{i:03d}.mp4"), fps=args.fps)
+        if args.save_mp4 and i < args.n_mp4:           # 仅存图时才把 pred 落 CPU(np uint8)
+            pred_np = pred_t.round().clamp(0, 255).to(torch.uint8).cpu().numpy()
+            _save_side_by_side(pred_np, gt, os.path.join(args.vis_dir, f"clip{i:03d}.mp4"), fps=args.fps)
     del pipe, transformer, vae
     torch.cuda.empty_cache()
     return sums, counts, len(clip_idxs)
