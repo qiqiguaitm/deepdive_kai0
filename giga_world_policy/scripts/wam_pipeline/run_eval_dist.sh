@@ -23,8 +23,8 @@ export VAL_ROOT=${VAL_ROOT:-../kai0/data/wam_fold_v1/visrobot01_val}
 export T5_PKL=${T5_PKL:-../kai0/data/wam_fold_v1/visrobot01_val/t5_embedding/episode_000000.pt}
 export COVERAGE=${COVERAGE:-exec}
 export EXEC_HORIZON=${EXEC_HORIZON:-8}
-SHARDS_PER_GPU=${SHARDS_PER_GPU:-2}   # 每 GPU 并发 worker 数:>1 时一片在 CPU(mp4解码/GT构建)阶段,
-                                      # 另一片占住 GPU(去噪+VAE+GPU度量)→ 重叠 CPU/GPU,GPU 接近满载
+SHARDS_PER_GPU=${SHARDS_PER_GPU:-1}   # 实测:2/GPU 反而更慢(两份全量 diffusion 抢同一 GPU,
+                                      # 单窗 2.35→5s)。1/GPU+帧缓存=1.78s/窗最优。保持 1。
 NUM_SHARDS=${NUM_SHARDS:-$((16 * SHARDS_PER_GPU))}   # 16 GPU × 每卡片数
 POLL=${POLL:-90}
 ONCE=${ONCE:-0}
