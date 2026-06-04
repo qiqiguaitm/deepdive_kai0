@@ -26,7 +26,8 @@ export EXEC_HORIZON=${EXEC_HORIZON:-8}
 NUM_SHARDS=${NUM_SHARDS:-16}
 POLL=${POLL:-90}
 ONCE=${ONCE:-0}
-TIMEOUT=${TIMEOUT:-3600}        # 单 ckpt 等齐 16 片的超时(秒)
+LATEST_ONLY=${LATEST_ONLY:-1}   # 1=每轮只评最新未评 ckpt(跳过积压;88min/ckpt 远超 cadence 时保持最新)
+TIMEOUT=${TIMEOUT:-7200}        # 单 ckpt 等齐 16 片的超时(秒;exec_horizon=8 实测 ~88min/片)
 B1=${B1:-"ssh -p 429 -o ConnectTimeout=10 -o StrictHostKeyChecking=no root@120.48.99.93"}
 W=scripts/wam_pipeline/_eval_worker.sh
 PASSENV="OUTPUT_DIR='$OUTPUT_DIR' MODEL_ID='$MODEL_ID' STATS_PATH='$STATS_PATH' VAL_ROOT='$VAL_ROOT' T5_PKL='$T5_PKL' COVERAGE='$COVERAGE' EXEC_HORIZON='$EXEC_HORIZON'"
@@ -40,9 +41,9 @@ run_step () {
   local sdir="$OUTPUT_DIR/eval_shards/step_$STEP"
   mkdir -p "$sdir/logs"
   echo "[orch $(date +%H:%M:%S)] step $STEP coverage=$COVERAGE: 16 shards (b2 0-7, b1 8-15) <- $SUBDIR"
-  # b2 本地 shard 0-7
+  # b2 本地 shard 0-7(setsid 脱离本进程组 → orchestrator 崩溃/退出不连带杀掉 worker)
   for g in 0 1 2 3 4 5 6 7; do
-    nohup bash "$W" "$g" "$g" "$NUM_SHARDS" "$STEP" "$SUBDIR" > "$sdir/logs/b2_shard_$g.log" 2>&1 &
+    setsid bash "$W" "$g" "$g" "$NUM_SHARDS" "$STEP" "$SUBDIR" > "$sdir/logs/b2_shard_$g.log" 2>&1 &
   done
   # b1 远程 shard 8-15(local gpu 0-7);单条 ssh 后台拉起 8 个 worker 即返回
   $B1 "cd $REPO && $PASSENV bash -c 'for g in 0 1 2 3 4 5 6 7; do nohup bash $W \$g \$((8+g)) $NUM_SHARDS $STEP \"$SUBDIR\" > $sdir/logs/b1_shard_\$g.log 2>&1 & done; sleep 1'" \
@@ -56,7 +57,7 @@ run_step () {
     sleep 15; t=$((t+15))
   done
   echo "[orch $(date +%H:%M:%S)] step $STEP: $n/$NUM_SHARDS shards -> aggregate"
-  agg
+  agg "$STEP"
 }
 
 echo "[orch] watch $OUTPUT_DIR  coverage=$COVERAGE exec_horizon=$EXEC_HORIZON shards=$NUM_SHARDS poll=${POLL}s once=$ONCE"
@@ -69,7 +70,8 @@ while :; do
     run_step "$STEP" "$SUB"; break
   fi
   mapfile -t LINES < <(python -m scripts.wam_pipeline.eval_watch --list --output_dir "$OUTPUT_DIR" --model_id "$MODEL_ID" \
-                         --stats_path "$STATS_PATH" --val_root "$VAL_ROOT" --t5_pkl "$T5_PKL" 2>/dev/null)
+                         --stats_path "$STATS_PATH" --val_root "$VAL_ROOT" --t5_pkl "$T5_PKL" 2>/dev/null | sort -n)
+  [ "$LATEST_ONLY" = "1" ] && [ "${#LINES[@]}" -gt 0 ] && LINES=("${LINES[-1]}")  # 只评最新
   for line in "${LINES[@]}"; do
     [ -z "$line" ] && continue
     run_step "${line%%$'\t'*}" "${line#*$'\t'}"
