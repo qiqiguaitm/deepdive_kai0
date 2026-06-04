@@ -144,7 +144,32 @@ def get_mem_detail() -> str:
         ca, cr = torch.cuda.memory_allocated() / g, torch.cuda.memory_reserved() / g
     except Exception:
         ca = cr = -1
-    return f', procRSS: {rss:.1f}G, shm: {shm:.2f}G, cuda: {ca:.1f}/{cr:.1f}G'
+    # host /proc/meminfo 分项(kB): 区分 page cache / slab / 匿名 —— 定位节点级内存爬升源
+    try:
+        mi = {}
+        with open('/proc/meminfo') as f:
+            for ln in f:
+                k, _, v = ln.partition(':')
+                mi[k] = int(v.split()[0])  # kB
+        kb = 1024 ** 2  # kB -> GiB
+        h_cache, h_slab, h_anon = mi.get('Cached', 0) / kb, mi.get('Slab', 0) / kb, mi.get('AnonPages', 0) / kb
+    except Exception:
+        h_cache = h_slab = h_anon = -1
+    # cgroup(pod OOM 真正判据): memory.current + file(可回收)/anon(不可回收)
+    try:
+        cg_cur = int(open('/sys/fs/cgroup/memory.current').read()) / g  # v2
+        st = {p[0]: int(p[1]) for p in (ln.split() for ln in open('/sys/fs/cgroup/memory.stat'))}
+        cg_file, cg_anon = st.get('file', 0) / g, st.get('anon', 0) / g
+    except Exception:
+        try:
+            cg_cur = int(open('/sys/fs/cgroup/memory/memory.usage_in_bytes').read()) / g  # v1
+            st = {p[0]: int(p[1]) for p in (ln.split() for ln in open('/sys/fs/cgroup/memory/memory.stat')) if len(p) >= 2 and p[1].isdigit()}
+            cg_file, cg_anon = st.get('total_cache', st.get('cache', 0)) / g, st.get('total_rss', st.get('rss', 0)) / g
+        except Exception:
+            cg_cur = cg_file = cg_anon = -1
+    return (f', procRSS: {rss:.1f}G, shm: {shm:.2f}G, cuda: {ca:.1f}/{cr:.1f}G'
+            f', host[cache {h_cache:.1f} slab {h_slab:.1f} anon {h_anon:.1f}]'
+            f', cg[cur {cg_cur:.1f} file {cg_file:.1f} anon {cg_anon:.1f}]')
 
 
 def load_state_dict(weight_path: str, weights_only: bool = True):
