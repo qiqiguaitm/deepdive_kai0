@@ -54,7 +54,7 @@ def main():
     ap.add_argument("--grad_accum", type=int, default=4)
     ap.add_argument("--lambda_v", type=float, default=0.0)   # action-focused FT by default
     ap.add_argument("--lambda_a", type=float, default=1.0)
-    ap.add_argument("--ckpt_dir", default="/mnt/pfs/p46h4f/cosmos/deepdive_kai0/runs/tau0_fold_p1")
+    ap.add_argument("--ckpt_dir", default="/mnt/pfs/p46h4f/cosmos/deepdive_kai0/tau-0-wm/runs/tau0_fold_p1")
     ap.add_argument("--ckpt_interval", type=int, default=1000)
     ap.add_argument("--log_interval", type=int, default=20)
     ap.add_argument("--resume", default="")
@@ -62,6 +62,8 @@ def main():
     ap.add_argument("--vis_upsample", type=int, default=3)
     ap.add_argument("--no_kai", action="store_true")
     ap.add_argument("--random_init", action="store_true", help="skip pretrained load (infra test only)")
+    ap.add_argument("--warmup_steps", type=int, default=0, help=">0 enables warmup-cosine LR")
+    ap.add_argument("--cosine_steps", type=int, default=0, help="cosine decay horizon (default=max_steps)")
     args = ap.parse_args()
 
     from accelerate import Accelerator
@@ -95,7 +97,21 @@ def main():
 
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad],
                             lr=args.lr, weight_decay=1e-2)
-    model, opt, dl = accel.prepare(model, opt, dl)
+    sched = None
+    if args.warmup_steps > 0:
+        import math as _m
+        cos_T = args.cosine_steps or args.max_steps
+        def lr_lambda(s):
+            if s < args.warmup_steps:
+                return (s + 1) / args.warmup_steps
+            p = min(1.0, (s - args.warmup_steps) / max(1, cos_T - args.warmup_steps))
+            return 0.5 * (1 + _m.cos(_m.pi * p))   # cosine decay 1 -> 0
+        sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda)
+        log(f"warmup-cosine LR: warmup={args.warmup_steps} cosine_T={cos_T} peak={args.lr}")
+    prepared = accel.prepare(model, opt, dl, *( [sched] if sched is not None else [] ))
+    model, opt, dl = prepared[0], prepared[1], prepared[2]
+    if sched is not None:
+        sched = prepared[3]
     raw = accel.unwrap_model(model)
     tr = TauFlowTrainer(raw, dev, lambda_v=args.lambda_v, lambda_a=args.lambda_a)
     model.train()
@@ -120,24 +136,28 @@ def main():
             loss, parts = tr.forward_step(z0, a0, state, ctx, ref=ref)
             accel.backward(loss)
             opt.step()
+            if sched is not None and accel.sync_gradients:
+                sched.step()
             opt.zero_grad()
         running += parts["a_loss"]
         if accel.sync_gradients:
             step += 1
             if step % args.log_interval == 0:
                 sps = step / (time.time() - t0)
+                cur_lr = opt.param_groups[0]["lr"]
                 log(f"step {step}/{args.max_steps}  a_loss={running/args.log_interval/args.grad_accum:.4f}  "
-                    f"{sps:.2f} step/s")
+                    f"lr={cur_lr:.2e}  {sps:.2f} step/s")
                 running = 0.0
             if is_main and step % args.ckpt_interval == 0:
-                sd = {k: v for k, v in accel.unwrap_model(model).state_dict().items()
-                      if k.startswith(("action_proj_in", "action_head", "action_blocks",
-                                       "action_time"))}
+                full = accel.unwrap_model(model).state_dict()
+                sd = full if args.phase == "all" else {k: v for k, v in full.items()
+                      if k.startswith(("action_proj_in", "action_head", "action_blocks", "action_time"))}
                 path = os.path.join(args.ckpt_dir, f"step_{step}.pt")
                 torch.save(sd, path)
                 log(f"saved {path} ({len(sd)} tensors)")
     if is_main:
-        sd = {k: v for k, v in accel.unwrap_model(model).state_dict().items()
+        full = accel.unwrap_model(model).state_dict()
+        sd = full if args.phase == "all" else {k: v for k, v in full.items()
               if k.startswith(("action_proj_in", "action_head", "action_blocks", "action_time"))}
         torch.save(sd, os.path.join(args.ckpt_dir, "final.pt"))
         log("done.")

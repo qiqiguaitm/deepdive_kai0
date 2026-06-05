@@ -28,7 +28,8 @@ from finetune.model_joint import build_joint_wanmodel, set_trainable  # noqa: E4
 # tau0 deployment config (configs/deployment/wan_pretrain_rela_eef6d.yaml)
 IMG_H, IMG_W = 192, 256
 N_VIEWS = 3
-CHUNK = 5            # video frames -> T_lat=2, matches reused GigaWorld latent cache
+# video frames -> T_lat=(CHUNK-1)//4+1. 5->2 (reused GigaWorld cache); 9->3 (tau0 native, P3).
+CHUNK = int(os.environ.get("TAU0_CHUNK", "5"))
 ACTION_CHUNK = 33
 ACTION_DIM = 14     # joint
 VAE_SP, VAE_T = 16, 4

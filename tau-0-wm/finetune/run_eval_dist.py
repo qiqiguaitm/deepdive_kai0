@@ -33,7 +33,7 @@ def main():
     ap.add_argument("--random_trunk", action="store_true", help="control: random-init trunk")
     ap.add_argument("--windows_per_ep", type=int, default=8)
     ap.add_argument("--seeds", type=int, default=3)
-    ap.add_argument("--out", default="/mnt/pfs/p46h4f/cosmos/deepdive_kai0/runs/eval_report.json")
+    ap.add_argument("--out", default="/mnt/pfs/p46h4f/cosmos/deepdive_kai0/tau-0-wm/runs/eval_report.json")
     ap.add_argument("--tag", default="p1")
     args = ap.parse_args()
 

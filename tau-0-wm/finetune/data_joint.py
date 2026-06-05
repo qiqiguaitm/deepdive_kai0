@@ -106,7 +106,7 @@ class LatentJointDataset(Dataset):
       t5            [L,4096]
     Episode-grouped (one window/episode per draw); LRU-cached episode tensors.
     """
-    def __init__(self, data_path, stats_path, action_chunk=33, embed_id=0, lru=8):
+    def __init__(self, data_path, stats_path, action_chunk=33, embed_id=0, lru=8, latent_subdir=None):
         self.data_path = data_path
         self.stats = _load_stats(stats_path)
         self.H = action_chunk
@@ -114,7 +114,8 @@ class LatentJointDataset(Dataset):
         self.lru = lru
         self._cache = {}
         self._order = []
-        lat_dir = os.path.join(data_path, "vae_latent")
+        latent_subdir = latent_subdir or os.environ.get("TAU0_LATENT_DIR", "vae_latent")
+        lat_dir = os.path.join(data_path, latent_subdir)
         self.lat_files = sorted(glob.glob(os.path.join(lat_dir, "episode_*.pt")))
         # map episode index -> (parquet, t5) by filename stem
         self.entries = []
