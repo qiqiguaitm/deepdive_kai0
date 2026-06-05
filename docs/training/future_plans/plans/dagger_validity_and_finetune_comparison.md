@@ -1,7 +1,7 @@
 # Dagger 数据有效性验证 + 训练方式对比 (smooth800 + dagger)
 
 > **目的**: 验证自采 dagger 数据 (`vis_dagger/v2`, 210 ep) 的有效性, 并对比两种把 dagger 引入的训练方式。
-> **状态**: 📋 规划 (2026-06-03)
+> **状态**: 🔄 进行中 (2026-06-05) — Exp-B (1:1 微调) ✅ 训练完成 (inline @1=0.0085); Exp-A (从头重训) 🟡 cnbj 排队。**执行状态 + 实测见 §7**。
 > **关联**:
 > - smooth800 基线: [`../../history/experiments/task_a_new_smooth_800_new_norm_results.md`](../../history/experiments/task_a_new_smooth_800_new_norm_results.md) (811 ep, MAE@1=0.0089, best=step40k)
 > - dagger 同步: [`../../../deployment/training_ops/data_sync_tos.md`](../../../deployment/training_ops/data_sync_tos.md) (sync_vis_dagger, vis_dagger/v2)
@@ -172,6 +172,43 @@
 - **Q2**: "从头重训 50k" vs "best ckpt 微调 20k" 哪个引入 dagger 更高效 (真机同效则微调胜, 省算力)。
 
 > 后续 (视结果): 若 dagger 有效, 可推广到更多 dagger 日期 / 调配比 / 试 dagger 裁投放 (v3) 版本。
+
+---
+
+## 7. 执行状态 + 实测结果 (2026-06-05) — 🔄 进行中
+
+> ⚠️ **计划 vs 实际的偏差**(以实际为准): dagger v2 四日期实际 **227 ep**(非计划的 210);build 时跳过 5 个 broken-video ep。Exp-B init 实际用 **smooth800 `step49999`**(用户提供的 `kai0/checkpoints/task_a_new_smooth_800_step49999`,非 step40000;两者已 plateau 等价)。
+
+| 数据集 | 计划 | **实际(build 完)** | 备注 |
+|---|---|---|---|
+| **D1** full-mix `A_smooth800_dagger_full` | 1021 | **1033 ep** | smooth 811 + dagger 227 − 5 broken-skip;`chunks_size=1033` |
+| **D2** 1:1-mix `A_smooth800_dagger_1to1` | 420 | **453 ep** | smooth 抽227(seed42) + dagger 227 − 1 skip |
+
+### 7.1 Exp-B (D2 1:1 微调) — ✅ 训练完成 (cnsh)
+
+- **状态**: ✅ 20k step 训完(cnsh 单节点 8 A100, 1.9s/it ≈ 9h);config `pi05_flatten_fold_A_smooth800_dagger_1to1_ft`, init `step49999`, `--overwrite`。
+- **inline-eval**(smooth val 26 ep, 200-frame 子集, 每 8k):
+
+  | step | MAE@1 | MAE@10 | MAE@25 | MAE@50 |
+  |---|---|---|---|---|
+  | 8000 | 0.0088 | 0.0168 | 0.0262 | 0.0378 |
+  | **16000** | **0.0085** | **0.0164** | **0.0255** | **0.0368** |
+
+  → 16k 仍在降、未 plateau,训到 20k 持续改善 → **最佳 ckpt 大概率 step 19999**(未落在 inline 点,确切须 offline eval `10000` vs `19999`)。
+- **保存 ckpt**: `10000`, `19999` → `kai0/checkpoints/pi05_flatten_fold_A_smooth800_dagger_1to1_ft/smooth800_dagger_1to1_ft_cnsh/`
+- ⏳ **待办**: offline 全 val eval(pi05 协议,确认最佳 ckpt) + 真机。
+
+### 7.2 Exp-A (D1 full-mix 从头重训) — 🟡 cnbj 排队中
+
+- **状态**: 🟡 Queueing(cnbj `Robot-North-H20` 2 节点 gang 配额长期不足)。曾尝试迁 cnsh(数据+init 已就位)但用户决定**留 cnbj 排队**(`t-20260605081112-tth46`)。
+- config `pi05_flatten_fold_A_smooth800_dagger_full`, init `mixed_1_clean`, 50k, 16 H20。
+- ⏳ 训练未开始 → 无结果。
+
+### 7.3 踩坑记录(已修,详见 [`training_pitfalls_common.md`](../../../deployment/training_ops/submission/training_pitfalls_common.md))
+
+- **info.json `total_episodes` 用 pre-skip 数** → 幽灵尾索引 → lerobot 文件 assert → offline HF 崩(§3)。已修 build 脚本 + 3 份 info.json。
+- **`chunks_size=1000` < N(1033)** → ep≥1000 找 chunk-001 → 同样 assert 崩(§3)。已修(`chunks_size=max(1000,N)`)。
+- **多机 ckpt-init `sync_global_devices` mismatch** = 上次失败留的残桩 ckpt 目录 → 清目录后重提即过。
 
 ---
 

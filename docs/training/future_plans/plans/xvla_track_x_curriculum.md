@@ -1,6 +1,6 @@
 # Track X — X-VLA 官方架构 Native 训练 (X3.A + X3.B + X3.C)
 
-> **状态**: 🔄 vis_v2_merged 版作废 → A_0423_0527 控制变量 → **smooth_800 三件套训练完成 + eval (§0.NEW)** → X3.C 真机**失败** → 根因 R1 (缺 ImageNet 归一化) → **🔴 当前: P0 重训 `X3C_smooth800_p0` (修 R1 + 对齐官方, uc01 运行中), 见 §0.NEW.6 ⭐⭐**。§0/§0.1 (A_0423_0527) 降为对照。
+> **状态**: 🔄 vis_v2_merged 版作废 → A_0423_0527 控制变量 → **smooth_800 三件套训练完成 + eval (§0.NEW)** → X3.C 真机**失败** → 根因 R1 (缺 ImageNet 归一化) → **P0 重训 `X3C_smooth800_p0` (修 R1 + 对齐官方) **uc→volc cnsh 8卡 60k ✅ 训完 + offline eval done (best=step_058000, @1=0.0341), 见 §0.NEW.6.7; 🔴 真机终判待做**, 见 §0.NEW.6 ⭐⭐**。§0/§0.1 (A_0423_0527) 降为对照。
 > **关联 task**: `#17 Track X X-VLA 官方架构训练`。
 > **战略上下文**: [cross_embodiment_strategy.md](../../../deployment/strategy/cross_embodiment_strategy.md) §1 (3 robots) + §5.2 (Soft Prompt) + §7 (Tri-track)。
 
@@ -223,9 +223,9 @@ X3.C 自身 MAE (EE6D 20D, final, 1000 窗口):
 |---|---|---|
 | P0.1 | 代码: `multi_domain_dataset.imagenet_normalize_chw` (train) + `serve_policy_xvla --imagenet_norm` (serve, 数值完全一致) + ColorJitter | ✅ commit `f8f7c79`+`0e0775b` |
 | P0.2 | config `X3C_smooth800_p0` (官方对齐) | ✅ |
-| P0.3 | uc01 重训 → **2026-06-03 NFS I/O 争用卡死 (用户删除任务期间 D 态 nfs_wait) + uc 集群回退** → 改走 **volc 8 卡 (§0.NEW.6.6)**;数据+基座已迁本地单卡作备份 | ⏸️ uc 弃 → 迁 volc |
-| P0.4 | offline eval (全 ckpt MAE 曲线, 同 1000 val 窗口; **P0 ckpt 自洽**) | ⏳ |
-| P0.5 | ⭐ **真机测试 + 复测 trace 客观判据** | ⏳ |
+| P0.3 | uc01 卡死 → uc 回退 → **volc cnsh 8卡单节点重训 60k** (§0.NEW.6.6) | ✅ 训完 2026-06-04 (`xvla/ckpts/xvla_x3c_smooth800_p0/`) |
+| P0.4 | offline eval (ckpt MAE 扫描, val=`A_new_smooth_800_xvla_val`) | ✅ **best=step_058000, @1=0.0341 (§0.NEW.6.7)** |
+| P0.5 | ⭐ **真机测试 + 复测 trace 客观判据** (X3C_p0 终判) | ⏳ 待做 |
 
 ### §0.NEW.6.3 验收判据 — 真机 trace 客观指标 (对比 30k 基线)
 
@@ -279,7 +279,40 @@ X3.C 自身 MAE (EE6D 20D, final, 1000 窗口):
 - X-VLA ckpt **只存 model_state、无 optimizer、无 resume**(step 硬编码 0)→ 中断只能从头跑或加 warm-restart(`--init-from`,目前未实现)。volc 上要一气呵成;
 - 真机推理务必 `--imagenet_norm`(train/serve parity,§0.NEW.6.4 铁律)。
 
-**状态**: 📝 规划 — 待选集群 + 数据/基座上 vePFS + 出 YAML 提交。
+**状态**: ✅ **训练完成 + offline eval done** (2026-06-04~05)。实际执行: 镜像用 `visincept-cn-shanghai.../grasp/h2r:1.0`(cnsh 已缓存,秒级部署);venv 从 uc 迁 cnsh vePFS(`xvla/X-VLA-env/.venv` + repoint cp3.10.20);bart-large tokenizer 离线缓存到 `xvla/assets/bart-large-tokenizer`(`XVLA_BART_TOK` env);YAML `train_scripts/kai/volc/xvla_x3c_p0_cnsh_8gpu.yaml`。60k step 训完(0.85 it/s ≈ 20h),每 2k 存 → `xvla/ckpts/xvla_x3c_smooth800_p0/`。
+
+### §0.NEW.6.7 ⭐ X3C_p0 offline eval — best ckpt = step_058000 (2026-06-05)
+
+**协议**: `eval_xvla_ee6d.py`(EE6D 20D action-chunk MAE),val = **`A_new_smooth_800_xvla_val`**(独立 26 held-out ep,domain_id=20,10 denoise steps,chunk=30)。先 7-ckpt 粗扫(300 win)→ 58k/final 精扫(1000 win)。
+
+**ckpt MAE 收敛曲线**(300 窗口):
+
+| step | MAE@1 | MAE@10 |
+|---|---|---|
+| 10k | 0.0607 | 0.0692 |
+| 20k | 0.0522 | 0.0628 |
+| 30k | 0.0426 | 0.0507 |
+| 40k | 0.0349 | 0.0455 |
+| 50k | 0.0326 | 0.0441 |
+| **58k** | **0.0305** | **0.0422** |
+| final (60k) | 0.0305 | 0.0423 |
+
+→ **MAE@1 全程严格单调下降 0.0607→0.0305,无过拟合回弹,末段收敛**(50k→58k 仍 -6%,58k≈final)。与旧 30k 版同样 "final≈best" 的健康动力学。
+
+**最佳 ckpt = `step_058000`**(1000 窗口精扫,各 horizon 微胜 final):
+
+| | MAE@1 | MAE@10 | MAE@25 | MAE@30 |
+|---|---|---|---|---|
+| **step_058000** ✅ | **0.0341** | **0.0467** | **0.0687** | **0.0747** |
+| step_final (60k) | 0.0342 | 0.0468 | 0.0689 | 0.0748 |
+
+**最佳 ckpt 路径**:
+```
+/vePFS/tim/workspace/deepdive_kai0/xvla/ckpts/xvla_x3c_smooth800_p0/step_058000/state_dict.pt
+```
+
+> ⚠️ **口径注意**: 本次 val 用**独立的 `A_new_smooth_800_xvla_val`(26 ep)**, 与 §0.NEW.2.5 旧 30k 版用的 "A_new_smooth_800 训练集末 50 ep(idx≥756)slice" **不是同一个 val** → 两版 MAE **不可直接数值对比**(要可比须同 val 重跑)。
+> ⚠️ **铁律**: P0 ckpt(已修 R1 imagenet_norm)真机推理**必须** `--imagenet_norm`(§0.NEW.6.4)。**offline MAE 低 ≠ 真机 work** —— X3.C 终判仍是真机测试(P0.5 §0.NEW.6.5,⏳ 待做)。
 
 ---
 
