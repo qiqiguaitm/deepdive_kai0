@@ -1,7 +1,7 @@
 # AWBC × ViVa Value Model 对比实验方案
 
 **创建时间**: 2026-05-31
-**状态**: 📝 **PLAN — 待评审 / 未启动**
+**状态**: 🔶 **暂缓 (2026-06-06)** — ViVa(5B WAN value,单卡 ~19 天/模型 + 跨集群算力)成本太高,**先走传统 pi0-AdvantageEstimator 路线出 AWBC 基线**,并把数据从 demo-only `smooth_800` 扩成 **smooth800+全dagger**(dagger 段正好补上本文 §3 指出的 demo-only 天花板)。传统路线见 [`../../../deployment/strategy/awbc_implementation_plan.md`](../../../deployment/strategy/awbc_implementation_plan.md) ⭐当前执行计划。ViVa 待传统路线出基线后,作为"换更强 value 模型"的对照再上(本文档保留为 ViVa 方案蓝本)。
 **负责人**: Tim
 **一句话**: 把 AWBC pipeline 里产 advantage label 的 estimator 换成 **ViVa video-generative value model**,做**只换 label 来源、其余全锁死**的受控对比 —— 且对比**两个 ViVa 变体**(official 线性进度 value vs DSM-r30 里程碑加权 value),看哪种 value 信号能让同一套 AWBC 训出更好的 policy,并与 smooth_800 SFT 基准对照。
 

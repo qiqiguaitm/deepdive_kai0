@@ -1,12 +1,41 @@
 # AWBC / RECAP Advantage 升级实施方案
 
 > **目的**: 把当前 deepdive_kai0 简化版的 "全 dagger 标 positive" 升级为完整 RECAP 4-step pipeline — 用 advantage estimator 给每帧打 ground-truth advantage 值, 再做 advantage-weighted behavior cloning.
-> **现状**: 简化版已在用 ([`../../train_scripts/data/label_dagger_positive.py`](../../train_scripts/data/label_dagger_positive.py)); 完整版**未启动**, 触发条件未达成 (val MAE@1 仍在下降).
-> **关键依赖**: 需要 DAgger 走 Form C (双 dataset 分离, inference + dagger), 见 [`dagger_implementation_plan.md`](dagger_implementation_plan.md) §4.5.
+> **现状 (2026-06-06)**: 🟢 **启动传统路线** — smooth800 SFT 已 plateau (MAE@1=0.0089) + dagger 已积累 6 个日期, 触发条件达成. **复用已训好的 advantage estimator (跳过 Stage 0-1), 在 smooth800+全dagger 上做一次 AWBC**. 见下方 [⭐ 当前执行计划](#-当前执行计划-2026-06-06--传统路线-复用估计器--smooth800全dagger). ViVa 路线 (5B 视频生成 value, 算力昂贵) **暂缓**, 见 [`../../training/future_plans/plans/awbc_viva_value_comparison_plan.md`](../../training/future_plans/plans/awbc_viva_value_comparison_plan.md).
+> **关键依赖**: 需要 dagger 段 (≈ Form C 的 inference/纠错信号) 给 estimator 区分高/低 advantage — 本次靠**加 dagger** 解决 (smooth_800 纯 demo-only 是 ViVa 计划里的天花板).
 > **上游参考**:
 > - 论文: [RECAP (Physical Intelligence 2025-11, arXiv 2511.14759)](https://arxiv.org/abs/2511.14759)
 > - KAI0 上游实现: `/data1/tim/workspace/kai0/stage_advantage/` (已开源, 完整 4-step)
 > - 预标注数据集: `Task_A/advantage/` (KAI0 官方 HuggingFace / ModelScope, 跳过 Stage 0-3 直接 Stage 4 训练可用)
+
+---
+
+## ⭐ 当前执行计划 (2026-06-06) — 传统路线: 复用估计器 + smooth800+全dagger
+
+> **决策**: 先不做 ViVa(5B WAN value 模型,单卡 ~19 天/模型 + 跨集群,见 viva 对比计划),先用**已训好的 pi0-AdvantageEstimator** 出一个 AWBC 基线。**唯一改进 = 数据从 demo-only `smooth_800` 扩成 `smooth800 + 全部 dagger`** —— dagger 段提供 estimator 区分"高/低 advantage"所需的非示范/纠错信号(正是 ViVa 计划 §3 指出的 demo-only 天花板)。**复用估计器 → 跳过 Stage 0-1**,只跑 Stage 2(打标)→ 分析对齐 → Stage 3(离散化)→ Stage 4(AWBC 训练)。这次只做**一次新训练**(非多臂对比)。
+
+### 资产(已核实就位)
+
+| 项 | 路径 | 状态 |
+|---|---|---|
+| **Advantage Estimator(复用,跳过 Stage 0-1)** | `kai0/checkpoints/ADVANTAGE_TORCH_KAI0_FLATTEN_FOLD/adv_est_v1/{99999, 100000}` | ✅ 训到 100k(215G) |
+| Stage 2/3 脚本 | `kai0/stage_advantage/annotation/{eval.py, evaluator.py, discretize_advantage.py}` | ✅ |
+| **warm-start init**(AWBC 续训起点) | `kai0/checkpoints/task_a_new_smooth_800_step49999/params`(smooth800 SFT,MAE@1=0.0089) | ✅ |
+| smooth800 源 | `kai0/data/Task_A/self_built/A_new_smooth_800/{base 811ep, val 26ep}` | ✅ |
+| **全 dagger(6 日期)** | `kai0/data/Task_A/vis_dagger/v2/{2026-05-29,06-01,06-02,06-03,06-04,06-05}-v2` = 64+32+71+60+73+13 = **313 ep** | ✅ |
+
+### 步骤
+
+1. **建数据集 `A_smooth800_dagger_all`**(smooth 811 + 全 6 dagger 日期 313 ≈ **1124 ep**)。⚠️ 现成的 `A_smooth800_dagger_full` 只含**前 4** dagger 日期(227ep),不是"全 dagger" → **需扩 `build_smooth800_dagger.py` 的 `DAGGER_DATES` 到 6 个日期重建**;沿用其 build 惯例(squeeze、symlink、auto norm_stats、`chunks_size=max(1000,N)`)。
+2. **V0 sanity(必做)**: 在 3-5 ep 上跑估计器,画 advantage vs GT 进度,确认估计器在 **smooth800+vis-dagger 域**上方向对、corr 合理 —— ViVa 计划 R8 担心"pi0-AE 与 vis 域不符",**必须先验证再全量**。
+3. **Stage 2 打标**: `python kai0/stage_advantage/annotation/eval.py Flatten-Fold KAI0 <A_smooth800_dagger_all>`(多卡用 `--num-workers/--worker-id` 切片)→ 每帧 +`relative_advantage` / `absolute_advantage` 列。
+4. **对齐 / 分析处理**: advantage 分布直方图 + per-episode corr(advantage vs 进度)过滤差 episode(参 viva 计划 `corr_filter`,|corr|<阈值剔除)+ 据分布定 discretize 阈值(median vs top-25%)。
+5. **Stage 3 离散化**: `discretize_advantage.py <ds> --discretion-type binary --advantage-source absolute_advantage` → `task_index ∈ {0,1}` + `meta/tasks.jsonl`("Flatten and fold the cloth. Advantage: positive/negative")。
+6. **Stage 4 AWBC 训练**: ⚠️ **本仓库 config.py 暂无 `pi05_flatten_fold_awbc`(那是 KAI0 上游的)→ 需新建 AWBC TrainConfig**:`prompt_from_task=True` / init = `task_a_new_smooth_800_step49999` / `repo_id` = labeled 集 / batch128 / warm-start 续训 ~15-20k step(SFT plateau 后精修,步数少)。推理永远喂 positive prompt。
+7. **评估**: Tier1 离线 MAE(对照 SFT 0.0089,仅 sanity —— MAE 对 AWBC 不敏感)+ **Tier3 真机 rollout(决定性,成功率/throughput)**。
+
+### 与 SFT 基线对照
+warm-start 从 0.0089 SFT 续训 → 任何 < 0.0089 的离线改进 + 真机成功率提升,干净归因到 advantage 加权。**主判据 = 真机 rollout**(positive-prompt 推理)。
 
 ---
 
