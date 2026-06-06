@@ -1018,7 +1018,7 @@ _CONFIGS = [
     #  • 1:1 balance by probability (domain_weights), NO disk copy (DomainWeightedSampler)
     # Health gate: vis inline MAE must be ~0.008 量级, NOT ≈0.47 (that = collapse path).
     TrainConfig(
-        name="xvla_kaivis_perdsnorm_cond",
+        name="pi05_kaivis_perdsnorm_cond",
         model=pi0_config.Pi0Config(pi05=True, action_head_cond_num_domains=2),
         data=KaiVisMergedDataConfig(
             repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/kai_vis_merged",

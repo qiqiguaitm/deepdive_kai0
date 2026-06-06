@@ -2,11 +2,11 @@
 
 > **目的**: 干净地检验 **per-dataset norm + domain-token conditioning** 能否在 kai+vis 混训下保住 vis 部署精度(并为"压双模态抖动 / kai 帮 OOD"做真机判据)。之前所有 conditioning 实验都跑在 broken 的 `datasets_yaml`/ConcatDataset 路径上、全塌成 predict-zero —— **conditioning 从没被真正检验过**。本路线改走**物理预合并单源 + 真·per-DS norm + 加权采样**。
 >
-> **状态**: ✅ **offline 跑通 (2026-06-06)** —— `xvla_kaivis_perdsnorm_cond` 50k 训完,vis inline MAE@1 单调降到 **0.0086(≈ vis-only baseline),全程没塌 0.47**。这是 conditioning 路线**第一次干净验证成功**。🔴 **真机 + no-cond control 仍待做**(Q1/Q2/Q3 终判)。
+> **状态**: ✅ **offline 跑通 (2026-06-06)** —— `pi05_kaivis_perdsnorm_cond` 50k 训完,vis inline MAE@1 单调降到 **0.0086(≈ vis-only baseline),全程没塌 0.47**。这是 conditioning 路线**第一次干净验证成功**。🔴 **真机 + no-cond control 仍待做**(Q1/Q2/Q3 终判)。
 >
 > **最佳 ckpt**:
 > ```
-> /vePFS/tim/workspace/deepdive_kai0/kai0/checkpoints/xvla_kaivis_perdsnorm_cond/xvla_kaivis_perdsnorm_cond_cnsh/49999
+> /vePFS/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_kaivis_perdsnorm_cond/pi05_kaivis_perdsnorm_cond_cnsh/49999
 > ```
 >
 > **关联**:
@@ -19,7 +19,7 @@
 
 ## TL;DR (结论速览, 2026-06-06)
 
-1. **方法跑通,没塌**: `xvla_kaivis_perdsnorm_cond`(kai_base+dagger ⊕ vis=smooth800+dagger,per-DS norm + domain token + 帧级 1:1 加权采样,单预合并集)50k 训完。vis inline MAE@1 **0.0305(8k)→ 0.0086(49999)**,单调收敛、末端 plateau、无过拟合。**对比历史三连崩(@1≈0.47 predict-zero),这是 conditioning 第一次在健康路径上跑成功。**
+1. **方法跑通,没塌**: `pi05_kaivis_perdsnorm_cond`(kai_base+dagger ⊕ vis=smooth800+dagger,per-DS norm + domain token + 帧级 1:1 加权采样,单预合并集)50k 训完。vis inline MAE@1 **0.0305(8k)→ 0.0086(49999)**,单调收敛、末端 plateau、无过拟合。**对比历史三连崩(@1≈0.47 predict-zero),这是 conditioning 第一次在健康路径上跑成功。**
 2. **kai 没伤 vis**: 收敛 vis @1=0.0086 ≈ 纯 vis baseline(Exp-B vis 0.0080 / dagger-B 0.0085)。混入 6512 ep kai + per-DS norm + token,vis in-distribution 单步精度**持平**纯 vis。
 3. **三连崩的真因不是 conditioning,是 `datasets_yaml` 代码路径**(详见 §0)。修复 = 物理预合并单源 + 真·per-DS norm(之前从没实现)+ task_index 透传 domain + 帧级加权采样。
 4. **还没回答的(需真机 + control)**: Q1 减抖、Q2 超越/OOD、Q3 conditioning 必要性(要 no-cond control 对照)。offline 只证明"前置闸门通过"。
@@ -84,8 +84,8 @@
 
 ### 2.4 config + 训练规格
 
-`config.py` 新增 `KaiVisMergedDataConfig` + `TrainConfig xvla_kaivis_perdsnorm_cond`:
-`Pi0Config(pi05=True, action_head_cond_num_domains=2)` / init `pi05_base` / 50k / bs128 / fsdp16 / `inline_eval_dataset_id=1`(vis;否则 `pi0.py:247` 跳 token)/ inline val `vis_v2_merged_val`。**cnsh 2-host 16 A100**(`xvla_kaivis_perdsnorm_cond_cnsh_16gpu.yaml`)。
+`config.py` 新增 `KaiVisMergedDataConfig` + `TrainConfig pi05_kaivis_perdsnorm_cond`:
+`Pi0Config(pi05=True, action_head_cond_num_domains=2)` / init `pi05_base` / 50k / bs128 / fsdp16 / `inline_eval_dataset_id=1`(vis;否则 `pi0.py:247` 跳 token)/ inline val `vis_v2_merged_val`。**cnsh 2-host 16 A100**(`pi05_kaivis_perdsnorm_cond_cnsh_16gpu.yaml`)。
 
 ---
 
@@ -130,7 +130,7 @@
 
 **Offline(健康闸门,已过)**:vis MAE@1 同量级 ~0.008、绝不 ≈0.47 ✅;(待补)conditioning sanity:同帧切 dataset_id=0/1 输出应明显不同。
 
-**真机(终判,vis 机器)** — 三组对比 `xvla_kaivis_perdsnorm_cond` vs **no-cond control** vs **vis-only baseline**:
+**真机(终判,vis 机器)** — 三组对比 `pi05_kaivis_perdsnorm_cond` vs **no-cond control** vs **vis-only baseline**:
 
 | metric | 对应 |
 |---|---|

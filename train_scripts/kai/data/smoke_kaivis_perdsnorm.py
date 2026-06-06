@@ -20,7 +20,7 @@ import openpi.training.config as _config
 import openpi.training.data_loader as _data_loader
 import openpi.transforms as _transforms
 
-CFG = "xvla_kaivis_perdsnorm_cond"
+CFG = "pi05_kaivis_perdsnorm_cond"
 MERGED = "/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/kai_vis_merged"
 
 

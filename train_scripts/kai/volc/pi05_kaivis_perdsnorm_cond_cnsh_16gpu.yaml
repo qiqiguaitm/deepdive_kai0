@@ -1,11 +1,11 @@
 # Cross-embodiment per-DS-norm + Action-Head conditioning — cnsh 2-host 16 A100, 50k
-#   Config: xvla_kaivis_perdsnorm_cond (config.py)
+#   Config: pi05_kaivis_perdsnorm_cond (config.py)
 #   Data:   kai_vis_merged (kai0_base+kai0_dagger=domain0 6512ep, A_smooth800_dagger_full=domain1/vis 1033ep)
 #   per-DS norm (DomainNormalize) + domain token (2域) + 1:1 加权采样(domain_weights=(1,6.305))
 #   Init:   pi05_base (config 内置)
-# Submit: source ~/.volc_creds && kai0/.venv/bin/python train_scripts/kai/volc/submit_yaml.py train_scripts/kai/volc/xvla_kaivis_perdsnorm_cond_cnsh_16gpu.yaml
+# Submit: source ~/.volc_creds && kai0/.venv/bin/python train_scripts/kai/volc/submit_yaml.py train_scripts/kai/volc/pi05_kaivis_perdsnorm_cond_cnsh_16gpu.yaml
 
-TaskName: "xvla-kaivis-perdsnorm-cond-cnsh-16gpu"
+TaskName: "pi05-kaivis-perdsnorm-cond-cnsh-16gpu"
 Description: "per-DS-norm + cond kai+vis merged: JAX 2-host 16 A100, pi05_base init, 50k"
 Tags: []
 
@@ -54,7 +54,7 @@ Entrypoint: |
   NODE=${MLP_ROLE_INDEX:-0}
   LOG_DIR=/vePFS/tim/workspace/deepdive_kai0/logs
   mkdir -p "$LOG_DIR"
-  LOG="$LOG_DIR/xvla_kaivis_perdsnorm_cond_${STAMP}_node${NODE}.log"
+  LOG="$LOG_DIR/pi05_kaivis_perdsnorm_cond_${STAMP}_node${NODE}.log"
   exec >> "$LOG" 2>&1
   echo "=== entrypoint start $(date) node=$NODE/${MLP_WORKER_NUM:-1} ==="
   set -ex
@@ -84,8 +84,8 @@ Entrypoint: |
   export JAX_NUM_PROCESSES="${MLP_WORKER_NUM:-2}"
   export JAX_PROCESS_INDEX="${MLP_ROLE_INDEX:-0}"
 
-  exec python -u scripts/train.py xvla_kaivis_perdsnorm_cond \
-    --exp-name xvla_kaivis_perdsnorm_cond_cnsh \
+  exec python -u scripts/train.py pi05_kaivis_perdsnorm_cond \
+    --exp-name pi05_kaivis_perdsnorm_cond_cnsh \
     --no-wandb-enabled \
     --overwrite
 
