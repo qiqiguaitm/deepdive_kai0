@@ -262,6 +262,9 @@ class XVLAHdf5Dataset(Dataset):
         action_chunk: int = 30,
         image_size_main: int = 256,
         image_size_wrist: int = 224,
+        action_qdur: Optional[float] = None,
+        image_aug: bool = False,
+        fps: int = 30,
     ):
         self.root = Path(root)
         self.action_cache_dir = Path(action_cache_dir)
@@ -270,6 +273,15 @@ class XVLAHdf5Dataset(Dataset):
         self.action_chunk = action_chunk
         self.image_size_main = image_size_main
         self.image_size_wrist = image_size_wrist
+        # D5 anchor (match LeRobotEE6DDataset): action_chunk anchors over qdur seconds (linspace downsample).
+        self.action_qdur = action_qdur
+        self.fps = fps
+        # ColorJitter(0.2) train aug, identical to LeRobotEE6DDataset (jitter on [0,1] → ImageNet normalize).
+        self.image_aug = bool(image_aug)
+        self._jitter = None
+        if self.image_aug:
+            from torchvision.transforms import ColorJitter
+            self._jitter = ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.0)
 
         # Find all hdf5 episodes
         self.hdf5_files = sorted(self.root.rglob("episode_*.hdf5"))
@@ -295,11 +307,20 @@ class XVLAHdf5Dataset(Dataset):
         # Load action cache (mmap)
         action_cache = np.load(cache_path, mmap_mode="r")
         T = action_cache.shape[0]
-        max_f = min(T, f_idx + self.action_chunk)
-        action_chunk = action_cache[f_idx:max_f].copy()
-        if action_chunk.shape[0] < self.action_chunk:
-            pad = np.tile(action_chunk[-1:], (self.action_chunk - action_chunk.shape[0], 1))
-            action_chunk = np.concatenate([action_chunk, pad], axis=0)
+        if self.action_qdur is None:
+            # legacy: next action_chunk consecutive frames (~1s @30Hz)
+            max_f = min(T, f_idx + self.action_chunk)
+            action_chunk = action_cache[f_idx:max_f].copy()
+            if action_chunk.shape[0] < self.action_chunk:
+                pad = np.tile(action_chunk[-1:], (self.action_chunk - action_chunk.shape[0], 1))
+                action_chunk = np.concatenate([action_chunk, pad], axis=0)
+        else:
+            # D5: intention-abstraction — action_chunk anchors over qdur seconds (linspace 时间下采样).
+            # Identical to LeRobotEE6DDataset anchor path (官方 base.py:152 linspace + 末端 clamp).
+            horizon = self.action_qdur * float(self.fps)          # 2.0s × 30 = 60 frames
+            anchors = np.linspace(f_idx, f_idx + horizon, self.action_chunk + 1)[1:]
+            anchors = np.clip(np.rint(anchors).astype(int), 0, T - 1)
+            action_chunk = action_cache[anchors].copy()
 
         # Load state + images from hdf5
         with h5py.File(hp, "r") as f:
@@ -317,7 +338,10 @@ class XVLAHdf5Dataset(Dataset):
                     arr = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
                     arr = resize_pad(arr, size)
                 key = "observation.images.image" + (str(i+1) if i > 0 else "")
-                imgs[key] = imagenet_normalize_chw(torch.from_numpy(arr).permute(2, 0, 1).float() / 255.0)
+                t = torch.from_numpy(arr).permute(2, 0, 1).float() / 255.0
+                if self._jitter is not None:
+                    t = self._jitter(t)
+                imgs[key] = imagenet_normalize_chw(t)
 
         return {
             **imgs,

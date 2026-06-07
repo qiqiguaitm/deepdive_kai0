@@ -30,6 +30,9 @@ SB = os.environ.get("XVLA_SB", "/data/shared/ubuntu/workspace/deepdive_kai0/xvla
 CKPT_INIT = os.environ.get("XVLA_CKPT_INIT", "/data/shared/ubuntu/workspace/xvla_ckpts")  # base init model; override via XVLA_CKPT_INIT env
 BART_TOK = os.environ.get("XVLA_BART_TOK", "facebook/bart-large")  # text-encoder tokenizer; point to a local dir on offline (HF_HUB_OFFLINE) nodes
 PROMPT = "Flatten and fold the cloth."
+# Exp-O (§0.NEW.7): official Soft-Fold hdf5 root + ee6d action cache (override via env on each cluster)
+SOFTFOLD_ROOT = os.environ.get("XVLA_SOFTFOLD_ROOT", "/data/shared/ubuntu/workspace/deepdive_kai0/xvla/data/xvla_soft_fold")
+SOFTFOLD_CACHE = os.environ.get("XVLA_SOFTFOLD_CACHE", f"{SOFTFOLD_ROOT}/action_ee6d_cache")
 
 CONFIGS = {
     "X3B_stage_a": dict(
@@ -184,6 +187,24 @@ CONFIGS = {
         image_aug=True,
         action_qdur=2.0,    # ⭐ D5 修复: 30 anchor over 2s (对齐官方 real_world.py qdur=2.0)
     ),
+    # Exp-O (§0.NEW.7): official Soft-Fold, SAME pipeline as Exp-S (X3C_smooth800_d5anchor) —
+    # only the data differs (official 1532ep hdf5 via XVLAHdf5Dataset + action_qdur=2.0 + ImageNet + jitter).
+    # Isolates whether OUR dataset content is the problem. domain_id=21 (xvla).
+    "X3_official_softfold_d5anchor": dict(
+        datasets=[
+            dict(type="hdf5", root=SOFTFOLD_ROOT, action_cache_dir=SOFTFOLD_CACHE,
+                 domain_id=21, prompt=PROMPT, weight=1.0),
+        ],
+        steps=60_000,
+        lr=1e-4,
+        warmup_steps=2000,
+        freeze_steps=1000,
+        weight_decay=0.0,
+        batch_size_per_gpu=8,
+        vlm_lr_scale=0.1,
+        image_aug=True,
+        action_qdur=2.0,    # D5 anchor (XVLAHdf5Dataset linspace), identical to Exp-S
+    ),
     "X3C_smooth800_100k": dict(
         # §0.NEW.5: X3.C vis-only 延长到 100k step (≈7 epoch) 验证 X-VLA 是否欠训。
         # 与 X3C_smooth800 完全相同, 仅 steps 30k→100k (cosine decay 自动拉到 100k)。
@@ -255,6 +276,8 @@ def build_dataset(cfg):
             ds = XVLAHdf5Dataset(
                 root=d["root"], action_cache_dir=d["action_cache_dir"],
                 domain_id=d["domain_id"], task_prompt=d["prompt"],
+                action_qdur=cfg.get("action_qdur", None),
+                image_aug=cfg.get("image_aug", False),
             )
         else:
             ds = LeRobotEE6DDataset(d["root"], domain_id=d["domain_id"], task_prompt=d["prompt"],
