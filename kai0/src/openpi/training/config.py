@@ -1851,6 +1851,49 @@ _CONFIGS = [
         inline_eval_every=4,
     ),
 
+    # v3.2 idle-trimming Step-2 (idle_data_trimming §3): front-trim (v3) + middle selective idle-downsample.
+    # Single-variable vs the v3 baseline. init mixed_1_clean, 50k, norm 各自重算. cnbj 8卡.
+    # Exp-1: ≤5-10 early "work" window v3.2 (985 ep).
+    TrainConfig(
+        name="pi05_flatten_fold_v32_le0510",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_v32_le0510",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS-North-E/vis_robot/shared_ckpt/Task_A/mixed_1_clean/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6,
+        ),
+        ema_decay=0.9999, num_train_steps=50_000, keep_period=10_000, save_interval=2_000,
+        num_workers=16, batch_size=128, fsdp_devices=8,
+        inline_eval_val_root="/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_v2_merged_val",
+        inline_eval_n_frames=200, inline_eval_every=4,
+    ),
+    # Exp-2: full v3 (excl 5-16) v3.2 (1940 ep).
+    TrainConfig(
+        name="pi05_flatten_fold_v32_all",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_v32_all",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS-North-E/vis_robot/shared_ckpt/Task_A/mixed_1_clean/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6,
+        ),
+        ema_decay=0.9999, num_train_steps=50_000, keep_period=10_000, save_interval=2_000,
+        num_workers=16, batch_size=128, fsdp_devices=8,
+        inline_eval_val_root="/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_v2_merged_val",
+        inline_eval_n_frames=200, inline_eval_every=4,
+    ),
+
     # Exp-B (D2): smooth800抽样 + dagger 1:1 (~454 ep), best ckpt step40000 微调 20k — cnsh 8卡
     TrainConfig(
         name="pi05_flatten_fold_A_smooth800_dagger_1to1_ft",

@@ -1,0 +1,80 @@
+# v3.2 idle-trimming Exp-2 (full v3 excl 5-16, selective idle-downsample) — cnbj 1-host 8 H20, 50k
+#   Single-variable vs full-v3 baseline (Exp-C/Exp-D). Data pre-built on gf3 (A_v32_all, 1940 ep), no in-pod build.
+# Submit: source ~/.volc_creds && VOLC_REGION=cn-beijing kai0/.venv/bin/python train_scripts/kai/volc/submit_yaml.py train_scripts/kai/volc/v32_all_cnbj_8gpu.yaml
+TaskName: "v32-all-cnbj-8gpu"
+Description: "v3.2 Exp-2 full(excl5-16) idle-downsample (1940ep): JAX 1-host 8 H20, mixed_1_clean, 50k"
+Tags: []
+
+ImageUrl: "dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1"
+ResourceQueueName: "Robot-North-H20"
+Framework: "PyTorch"
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 1
+    Flavor: "ml.hpcpni3ln.45xlarge"   # 8× H20-SXM5-96GB single node
+
+ActiveDeadlineSeconds: 172800
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnbj875793a96d6b"
+    MountPath: "/vePFS-North-E/vis_robot"
+    SubPath: "/vis_robot"
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+  - Name: TOKENIZERS_PARALLELISM
+    Value: "false"
+  - Name: NCCL_DEBUG
+    Value: "WARN"
+  - Name: OMP_NUM_THREADS
+    Value: "8"
+  - Name: XLA_PYTHON_CLIENT_MEM_FRACTION
+    Value: "0.85"
+  - Name: JAX_COMPILATION_CACHE_MIN_ENTRY_SIZE_BYTES
+    Value: "-1"
+  - Name: JAX_COMPILATION_CACHE_MIN_COMPILE_TIME_SECS
+    Value: "1"
+  - Name: JAX_ENABLE_EMPTY_ARRAYS
+    Value: "true"
+
+Entrypoint: |
+  set -uo pipefail
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  NODE=${MLP_ROLE_INDEX:-0}
+  LOG_DIR=/vePFS-North-E/vis_robot/logs
+  mkdir -p "$LOG_DIR"
+  LOG="$LOG_DIR/v32_all_${STAMP}_node${NODE}.log"
+  exec >> "$LOG" 2>&1
+  echo "=== entrypoint start $(date) (1-host 8 H20) ==="
+  set -x
+  nvidia-smi -L
+  REPO=/vePFS-North-E/vis_robot/workspace/deepdive_kai0
+  cd "$REPO/kai0"
+  source .venv/bin/activate
+  python -c "import jax; print(f'jax {jax.__version__} devs={len(jax.devices())}')"
+
+  TRAIN=$REPO/kai0/data/Task_A/self_built/A_v32_all
+  INIT=/vePFS-North-E/vis_robot/shared_ckpt/Task_A/mixed_1_clean/params
+  [ -f "$TRAIN/meta/episodes.jsonl" ] || { echo "FATAL: data missing $TRAIN" >&2; exit 13; }
+  [ -f "$TRAIN/norm_stats.json" ]     || { echo "FATAL: norm_stats missing" >&2; exit 13; }
+  [ -f "$INIT/_METADATA" ]            || { echo "FATAL: mixed_1_clean init missing" >&2; exit 13; }
+  echo "[$(date)] preflight OK"
+
+  exec python -u scripts/train.py pi05_flatten_fold_v32_all \
+    --exp-name v32_all_cnbj \
+    --no-wandb-enabled \
+    --overwrite
+
+RetryOptions:
+    EnableRetry: true
+    MaxRetryTimes: 1
+
+AccessType: "Public"
