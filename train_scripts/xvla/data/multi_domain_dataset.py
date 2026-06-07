@@ -91,11 +91,18 @@ class LeRobotEE6DDataset(Dataset):
         image_size_main: int = 256,
         image_size_wrist: int = 224,
         image_aug: bool = False,
+        action_qdur: Optional[float] = None,
     ):
         self.root = Path(root)
         self.domain_id = int(domain_id)
         self.task_prompt = task_prompt
         self.action_chunk = action_chunk
+        # D5 fix (2026-06-07): intention-abstraction action representation.
+        # None  → legacy: 30 consecutive frames (dense, ~1s @30Hz) — 与 xvla-base 预训练表示不符。
+        # 2.0   → 官方对齐: action_chunk 个 anchor 均匀铺在 qdur 秒上 (linspace 时间下采样),
+        #         对齐 X-VLA base.py:152 (linspace(cur,cur+qdur,N+1)) + real_world.py:40 (qdur=2.0)。
+        #         见 docs/training/analysis/xvla_vs_official_gap_rootcause.md §7。
+        self.action_qdur = action_qdur
         self.image_size_main = image_size_main
         self.image_size_wrist = image_size_wrist
         # P0: ColorJitter(0.2) 对齐官方 X-VLA dataset.py (训练增强, 真机光照/颜色泛化)
@@ -158,13 +165,21 @@ class LeRobotEE6DDataset(Dataset):
 
         # State (current frame)
         state = np.array(df["observation.state"][f_idx], dtype=np.float32)
-        # Action chunk (next action_chunk frames, including current)
-        max_f = min(len(df), f_idx + self.action_chunk)
-        action_chunk = np.stack([np.array(df["action"][i], dtype=np.float32) for i in range(f_idx, max_f)])
-        # Pad to action_chunk if needed
-        if action_chunk.shape[0] < self.action_chunk:
-            pad = np.tile(action_chunk[-1:], (self.action_chunk - action_chunk.shape[0], 1))
-            action_chunk = np.concatenate([action_chunk, pad], axis=0)
+        n = len(df)
+        if self.action_qdur is None:
+            # legacy: next action_chunk consecutive frames (~1s @30Hz)
+            max_f = min(n, f_idx + self.action_chunk)
+            action_chunk = np.stack([np.array(df["action"][i], dtype=np.float32) for i in range(f_idx, max_f)])
+            if action_chunk.shape[0] < self.action_chunk:
+                pad = np.tile(action_chunk[-1:], (self.action_chunk - action_chunk.shape[0], 1))
+                action_chunk = np.concatenate([action_chunk, pad], axis=0)
+        else:
+            # D5: intention-abstraction — action_chunk anchors over qdur seconds (linspace 时间下采样).
+            # 对齐官方 base.py:152 `linspace(cur, cur+qdur, N+1)` 取后 N 个; 末端 clamp 到最后一帧.
+            horizon = self.action_qdur * float(self.fps)          # e.g. 2.0s × 30 = 60 frames
+            anchors = np.linspace(f_idx, f_idx + horizon, self.action_chunk + 1)[1:]  # N future anchors
+            anchors = np.clip(np.rint(anchors).astype(int), 0, n - 1)
+            action_chunk = np.stack([np.array(df["action"][i], dtype=np.float32) for i in anchors])
 
         # Decode camera frames
         img_dict = {}

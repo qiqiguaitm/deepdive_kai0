@@ -166,6 +166,24 @@ CONFIGS = {
         vlm_lr_scale=0.1,
         image_aug=True,     # 对齐官方 ColorJitter(0.2)
     ),
+    # D5 修复 (2026-06-07): 单变量 = action 表示从"30 连续帧(1s 稠密)"改为
+    # "30 anchor 铺在 2s(intention abstraction, action_qdur=2.0)", 对齐官方 X-VLA。
+    # 其余与 X3C_smooth800_p0 完全相同。验证: offline 欠到位(pred chunk 位移/GT 60-80%)是否消失。
+    # 见 docs/training/analysis/xvla_vs_official_gap_rootcause.md §7。
+    "X3C_smooth800_d5anchor": dict(
+        datasets=[
+            dict(root=f"{SB}/A_new_smooth_800_xvla", domain_id=20, prompt=PROMPT, weight=1.0),
+        ],
+        steps=60_000,
+        lr=1e-4,
+        warmup_steps=2000,
+        freeze_steps=1000,
+        weight_decay=0.0,
+        batch_size_per_gpu=8,
+        vlm_lr_scale=0.1,
+        image_aug=True,
+        action_qdur=2.0,    # ⭐ D5 修复: 30 anchor over 2s (对齐官方 real_world.py qdur=2.0)
+    ),
     "X3C_smooth800_100k": dict(
         # §0.NEW.5: X3.C vis-only 延长到 100k step (≈7 epoch) 验证 X-VLA 是否欠训。
         # 与 X3C_smooth800 完全相同, 仅 steps 30k→100k (cosine decay 自动拉到 100k)。
@@ -240,7 +258,8 @@ def build_dataset(cfg):
             )
         else:
             ds = LeRobotEE6DDataset(d["root"], domain_id=d["domain_id"], task_prompt=d["prompt"],
-                                    image_aug=cfg.get("image_aug", False))
+                                    image_aug=cfg.get("image_aug", False),
+                                    action_qdur=cfg.get("action_qdur", None))
         datasets.append(ds)
         weights.append(d["weight"])
     multi = MultiDomainDataset(datasets)
