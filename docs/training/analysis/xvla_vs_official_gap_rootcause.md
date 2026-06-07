@@ -198,6 +198,7 @@ P0 ckpt 真机录 trace, 对比 [`x3c_realrobot_trace_20260601.md`](x3c_realrobo
   - **验证判据(offline)**:训完用运动剖面探针测"接近/抓取 pred chunk 位移/GT"——若从 60-80% 回到接近 100%(欠到位消失)→ **D5 坐实为真因**;否则查次要嫌疑。
   - ⚠️ **真机验证还需对齐执行时序**:30 anchor 现表示 2s 运动,部署执行须按 2s 时序(非 30Hz 稠密),否则 2× 过快。offline 先验证表示假说,真机时序为下一步。
 - 次要嫌疑:官方 Soft-Fold 可能 **co-train 在 290K 多域语料**(享跨本体先验),我们是**单域 finetune-from-base on 811ep** → 配方差异。D5 修复后若仍不足再查。
+- ⭐ **数据隔离实验(已规划)**: 官方 Soft-Fold(已迁 gf0,§5 证数据/处理正确)vs 我们数据,**同 X-VLA-base + 同参数 + 同 D5-pipeline + 同部署** → 若官方能 fold、我们不能,则**我们的 demonstration 数据本身有问题**;若都不能,则 pipeline 有 bug。详细 plan 见 [`../future_plans/plans/xvla_track_x_curriculum.md`](../future_plans/plans/xvla_track_x_curriculum.md) §0.NEW.7。
 
 ---
 
