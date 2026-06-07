@@ -155,7 +155,7 @@ offline vis MAE ≈ 0.47 ? — 否(0.0086)✅ → 进真机
 - [x] 合并集 `kai_vis_merged` + 2 份 per-DS norm + 帧级加权采样 + config + smoke + cnsh 16卡训练 50k
 - [x] offline 健康闸门(vis @1=0.0086,没塌)
 - [x] **Exp-1 真机**:无问题(用户 2026-06-07)。✅ conditioning 路线 offline+真机双通过(具体抖动/成功率数值待量化回填)
-- [ ] **⭐ Exp-2(隔离 kai)**:vis 缩到纯 smooth800(去 vis_dagger)+ 重算权重(~6.2)+ 重算 per-DS norm + 同方式重训 → 见 §7.2
+- [x] **⭐ Exp-2(隔离 kai)build+提交**:vis 缩到纯 smooth800,合并集 `kai_vis_s800_merged`(7318ep)+ 权重 6.246 + per-DS norm 重算 + smoke ✅ → **8卡 cnsh 已提交 `t-20260607140155-46btn`**(2026-06-07)→ 见 §7.2
 - [ ] **Exp-2 真机 vs smooth800-only baseline**(= 既有 `task_a_new_smooth_800` 模型)→ **判定 kai 是否真帮**
 - [ ] (可选)**no-cond control**:同数据去掉 `action_head_cond_num_domains`(Q3,conditioning 必要性)
 - [ ] 回填 `xvla_conditioning_methods_results.md` + deep-dive 结论
@@ -181,11 +181,16 @@ offline vis MAE ≈ 0.47 ? — 否(0.0086)✅ → 进真机
 **变更(相对 Exp-1,单变量:只动 vis 源)**:
 | | Exp-1 | **Exp-2** |
 |---|---|---|
-| vis 数据 | `A_smooth800_dagger_full`(1033ep/1.46M,含 vis_dagger) | **`A_new_smooth_800/base`(811ep/0.93M,纯 smooth800,去 vis_dagger)** |
-| kai 数据 | base+dagger(6512ep/5.78M) | 不变 |
-| 帧级权重 (kai,vis) | (1.0, 3.97) | **(1.0, ~6.2)** 重算维持帧级 1:1(vis 0.93M / kai 5.78M)|
-| per-DS norm | kai / vis(含dagger) | **vis 用纯 smooth800 帧重算** |
-| 其余 | per-DS norm + domain token + 预合并单源 + 50k/bs128/16卡 + init pi05_base + inline_eval_dataset_id=1 | **完全相同** |
+| vis 数据 | `A_smooth800_dagger_full`(1033ep/1.46M,含 vis_dagger) | **`A_new_smooth_800/base`(811→806ep*/0.925M,纯 smooth800,去 vis_dagger)** |
+| kai 数据 | base+dagger(6512ep/5.78M) | 不变(6512ep/5,777,710 frames) |
+| 合并集 | `kai_vis_merged`(7545ep) | **`kai_vis_s800_merged`(7318ep/6.70M frames)** |
+| 帧级权重 (kai,vis) | (1.0, 3.970) | **(1.0, 6.246)** 重算维持帧级 1:1(kai 5,777,710 / vis 925,055,smoke vis-fraction=0.507 ✅)|
+| per-DS norm | kai / vis(含dagger) | **vis 用纯 smooth800 帧重算**(已生成 norm_domain1_vis) |
+| config | `pi05_kaivis_perdsnorm_cond` | **`pi05_kaivis_cond_visS800`** |
+| 集群/卡 | cnsh 2-host 16 A100 | **cnsh 1-host 8 A100**(fsdp=8;bs128/50k 不变,global batch 同) |
+| 其余 | per-DS norm + domain token + 预合并单源 + init pi05_base + inline_eval_dataset_id=1 | **完全相同** |
+
+> *5 个 vis ep 因缺视频被 build 跳过(811→806);kai 全保留。
 
 **对照 baseline(关键,干净可比)**:
 | Run | kai | vis | dagger? | 用途 |
@@ -198,13 +203,14 @@ offline vis MAE ≈ 0.47 ? — 否(0.0086)✅ → 进真机
 - Exp-2 **≈ baseline** → kai 对(同任务近同构的)vis 无净增益 → 收束到 vis-only / 把 kai 留给真异构。
 - ⚠️ 残留: kai 仍含 kai_dagger(属"kai 数据"一部分,合理);若要更纯,后续可再出 kai-base-only 变体(本次先一个)。
 
-**执行链(待提交)**:
-1. build 新合并集 `kai_vis_s800_merged`(`build_kai_vis_merged.py` 改 vis 源 → `A_new_smooth_800/base`)+ `build_kai_vis_norm.py` 重算 2 份 per-DS norm(vis=纯 smooth800)。
-2. 重算帧级权重 ≈ 5.78M/0.93M = **6.2**(维持帧级 1:1)。
-3. 新 config `pi05_kaivis_cond_visS800`(克隆 `pi05_kaivis_perdsnorm_cond`,改 data 指向新集 + domain_weights)。commit+push。
-4. smoke(实例化采样器,验证 weight + dataset_id 透传)。
-5. 提交 16卡(cnsh 同 Exp-1,或 cnbj 按资源)。
-6. 出 ckpt → 真机 vs smooth800 baseline 对比 → 回填本节结论。
+**执行链(✅ 已提交 2026-06-07)**:
+1. ✅ build `kai_vis_s800_merged`(`build_kai_vis_merged.py --vis-src self_built/A_new_smooth_800/base`)→ 7318ep/6.70M。
+2. ✅ `build_kai_vis_norm.py --merged kai_vis_s800_merged` → 2 份 per-DS norm(kai 5,777,710 / vis 925,055 frames)。
+3. ✅ 帧级权重 = 5,777,710/925,055 = **6.246**(维持帧级 1:1)。
+4. ✅ config `pi05_kaivis_cond_visS800`(克隆 Exp-1,fsdp_devices=8)。commit+push(`6099534`)。
+5. ✅ smoke:per-domain norm 区分 + vis-fraction **0.507** + dataset_id 透传 ✅。
+6. ✅ **提交 8卡 cnsh**:yaml `pi05_kaivis_cond_visS800_cnsh_8gpu.yaml`,**task_id `t-20260607140155-46btn`**(cn-shanghai / robot-task)。
+7. ⏳ 出 ckpt → **真机 vs smooth800-only baseline(`task_a_new_smooth_800`)对比** → 回填本节结论(判定 kai 是否真帮)。
 
 ---
 
