@@ -20,8 +20,8 @@ import openpi.training.config as _config
 import openpi.training.data_loader as _data_loader
 import openpi.transforms as _transforms
 
-CFG = "pi05_kaivis_perdsnorm_cond"
-MERGED = "/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/kai_vis_merged"
+CFG = sys.argv[1] if len(sys.argv) > 1 else "pi05_kaivis_perdsnorm_cond"
+MERGED = sys.argv[2] if len(sys.argv) > 2 else "/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/kai_vis_merged"
 
 
 def main():

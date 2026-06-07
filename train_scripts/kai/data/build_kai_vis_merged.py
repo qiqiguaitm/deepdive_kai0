@@ -34,11 +34,17 @@ PROMPT = "Flatten and fold the cloth."
 KEEP = ["observation.state", "action"]   # rebuild the rest (frame_index/index/episode_index/timestamp/task_index)
 
 # (source_dir, domain_id)  — domain_id becomes task_index (kai=0, vis=1)
-SOURCES = [
+# kai sources are fixed; the vis source (domain 1) is selectable via --vis-src for EXP-2
+# (Exp-1 = A_smooth800_dagger_full incl vis_dagger; Exp-2 = A_new_smooth_800/base pure smooth800).
+KAI_SOURCES = [
     (TA / "kai0_base", 0),
     (TA / "kai0_dagger", 0),
-    (TA / "self_built" / "A_smooth800_dagger_full", 1),
 ]
+
+
+def _build_sources(vis_src: str):
+    """vis_src is a path relative to Task_A (e.g. 'self_built/A_new_smooth_800/base')."""
+    return KAI_SOURCES + [(TA / vis_src, 1)]
 
 
 def _resolve_video(sv: Path):
@@ -59,10 +65,11 @@ def _src_episodes(src_dir):
         yield pq, old, old // cs
 
 
-def build(out_name, dry_run, symlink_video=True):
+def build(out_name, dry_run, symlink_video=True, vis_src="self_built/A_smooth800_dagger_full"):
     dst = TA / "self_built" / out_name
+    sources = _build_sources(vis_src)
     all_eps = []  # (parquet_path, old_idx, src_dir, domain_id)
-    for src, dom in SOURCES:
+    for src, dom in sources:
         if not src.exists():
             sys.exit(f"FATAL: source missing: {src}")
         eps = list(_src_episodes(src))
@@ -149,8 +156,11 @@ def main():
     ap.add_argument("--out", default="kai_vis_merged")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--copy-video", action="store_true", help="copy instead of symlink (default symlink)")
+    ap.add_argument("--vis-src", default="self_built/A_smooth800_dagger_full",
+                    help="vis (domain 1) source path relative to Task_A "
+                         "(Exp-1 default; EXP-2 uses self_built/A_new_smooth_800/base)")
     a = ap.parse_args()
-    build(a.out, a.dry_run, symlink_video=not a.copy_video)
+    build(a.out, a.dry_run, symlink_video=not a.copy_video, vis_src=a.vis_src)
 
 
 if __name__ == "__main__":

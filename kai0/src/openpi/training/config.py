@@ -1059,6 +1059,36 @@ _CONFIGS = [
         inline_eval_dataset_id=1,
     ),
 
+    # EXP-2 (corrected_plan_a §7.2): isolate kai's contribution by removing vis_dagger.
+    # Single-variable change vs pi05_kaivis_perdsnorm_cond: vis source = pure smooth800
+    # (A_new_smooth_800/base, 811ep/0.93M frames) instead of A_smooth800_dagger_full.
+    # FRAME-level 1:1 weight recomputed (kai 5.777M / vis 0.930M = 6.213). 8-card cnsh (fsdp=8).
+    TrainConfig(
+        name="pi05_kaivis_cond_visS800",
+        model=pi0_config.Pi0Config(pi05=True, action_head_cond_num_domains=2),
+        data=KaiVisMergedDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/kai_vis_s800_merged",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+            domain_weights=(1.0, 6.246),  # FRAME-level 1:1: kai 5,777,710 frames / vis(pure smooth800) 925,055 = 6.246 (norm-build exact)
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS/tim/workspace/openpi_cache/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+        inline_eval_dataset_id=1,
+    ),
+
     # X-VLA Exp1: Hard Prompt Mixed (kai data + "kai " prefix, vis data + "vis " prefix)
     # tasks.jsonl patched per dataset in xvla/data/mixed_hard/
     TrainConfig(
