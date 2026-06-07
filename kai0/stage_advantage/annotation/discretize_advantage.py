@@ -336,6 +336,13 @@ def main():
         help="Threshold percentile for task_index labeling (default: 70, meaning top 70%% get task_index=1)"
     )
     parser.add_argument(
+        "--threshold-value",
+        type=float,
+        default=None,
+        help="Exact advantage VALUE threshold (binary). If set, overrides --threshold percentile: "
+             "task_index=1 iff advantage >= this value. Use 0.0 for the principled 'advantage>0' split."
+    )
+    parser.add_argument(
         "--chunk-size",
         type=int,
         default=50,
@@ -456,9 +463,14 @@ def main():
         # Calculate threshold/boundaries for this stage
         if len(stage_rewards) > 0:
             if args.discretion_type == "binary":
-                threshold_value = np.percentile(stage_rewards, (100 - args.threshold))
+                if args.threshold_value is not None:
+                    threshold_value = float(args.threshold_value)
+                    pos_frac = float(np.mean(np.asarray(stage_rewards) >= threshold_value))
+                    print(f"\nFixed threshold value: {threshold_value:.6f}  → positive frac {pos_frac:.3f}")
+                else:
+                    threshold_value = np.percentile(stage_rewards, (100 - args.threshold))
+                    print(f"\nThreshold value (top {args.threshold}%): {threshold_value:.6f}")
                 threshold_percentiles_by_stage[stage_idx] = threshold_value
-                print(f"\nThreshold value (top {args.threshold}%): {threshold_value:.6f}")
             elif args.discretion_type == "n_slices":
                 n_slices = args.n_slices
                 step_pct = 100 / n_slices
