@@ -31,6 +31,23 @@
 
 ---
 
+## 1.5 ⭐ 互联网深度调研结论:是否需要删除"所有"idle 数据(2026-06-07)
+
+> deep-research(101 agents / 19 源 / 23 条 3-票核验 claim)。**Bottom line:删掉"所有"idle 帧 —— 既非必要、也不是领域默认、且有风险;证据支持"靶向中间路线"而非一刀切全删。**
+
+1. **idling/卡顿的真因是 single-step / history-conditioned BC 的 copycat 过拟合**,不是 idle 帧本身有毒 —— 单步策略学会"重复上一动作"(训练 near-zero 误差却真机不动)。[Diffusion Policy `2303.04137`:BC-RNN/IBC "get stuck when idle actions not removed";Causal Confusion `1905.11979`;Copycat `2010.14876`;ACT RSS19]
+2. **chunked 策略(ACT / Diffusion Policy / pi0 / pi0.5 / X-VLA)天生吸收 chunk 内 pause** → 对保留的 idle 鲁棒(DP:horizon>1 "compensate for idle portions",h=8 最优)。**我们 pi05/XVLA 都是 chunked → 删中段 pause 的边际收益很可能很小。** 但**超过 chunk 长度的"前端长 idle"chunking 盖不住 → 仍需裁**(正好解释前端裁有效)。
+3. **主流数据集不做"全删低速帧"**:DROID 只删 operator-gated idle(投放/setup 等待),非速度阈值全删;openpi pi0-DROID 只过滤"整块都 idle 的 chunk"。"删 idle 是常见标准做法"被**证伪(0-3 vote)**。
+4. **全删的风险**:任务需要的 pause(叠衣 settle / regrasp 稳定)被删 → 策略学不会"该等时等";train/deploy 分布漂移;丢失恢复力。[DP 明确"因任务需要故意不删 idle"]
+5. **领域推荐的是"删的替代方案"**:action chunking(已有)+ **upweight changepoint 关键帧**(Keyframe-Focused IL `2106.06452`)+ **语义/熵感知选择性下采样**(ESPADA `2512.07371` ~2×、DemoSpeedup `2506.05064` ~3×,压缩 casual 段、保留高精度段;**ESPADA 含真机叠衣**)。
+6. **关键空白 = 本实验的价值**:目前**无任何"在 chunked VLA 上直接 ablate 删中段 pause vs 靠 chunking 吸收"的工作** → 本系列 v3.1 实验正好填空白。研究**预测:全删 ≈ 或略差于 前端裁(v3)**。
+
+> **据此修正 Step 2 设计**:不盲目全删。**前端裁(已验证)+ 中段长 pause 设上限/下采样、保留短功能性 settle** 是证据支持的最优。但要实证"全删是否必要",就把 **v3.1(全删)当一个 arm**,并**必须和 v3(前端裁)baseline 同数据对比**(+ 可选"中间路线"arm)。详见 §3。
+>
+> **Sources**: DP `2303.04137` · ACT `roboticsproceedings.org/rss19/p016` · PIP `2508.15669` · Causal Confusion `1905.11979` · Copycat `2010.14876` · Keyframe-Focused `2106.06452` · ESPADA `2512.07371` · DemoSpeedup `2506.05064` · DROID `droid_policy_learning` · openpi droid README。
+
+---
+
 ## 2. Step 1 — 前端投放裁剪:已完成实验汇总
 
 | 实验 | 数据 | 裁剪 | offline | 真机 | 结论 |
@@ -44,24 +61,41 @@
 
 ---
 
-## 3. ⭐ Step 2 — 中段 idle 裁剪(未来,单变量隔离设计)
+## 3. ⭐ Step 2 — v3.1(删除全部 idle)实验 + 调研建议的对照设计
 
-> 前端裁已验证有效。下一步:清除 episode **中段**的停顿/静止/反复帧(操作过程里的犹豫),看真机能否进一步改善。
+> 用户计划:**通过代码把数据集里所有 idle(前端+中段+尾部)删掉 → 生成 v3.1**,然后训两个模型,验证"是否需要删所有 idle"。
+> ⚠️ **调研提示(§1.5)**:全删非必要、有风险,且 pi05 是 chunked → 删中段边际收益预计很小。**所以实验必须带 v3(前端裁)baseline 对比 + 一个"中间路线"arm**,否则只跑两个 v3.1 无法回答"是否需要全删"。
 
-### 3.1 检测 + 裁剪(待实现)
-- 检测中段静止段:`|Δaction|` 持续 `< thr`(静止)且**不在开头/结尾**的连续段 → 候选删除。
-- ⚠️ **关键风险:轨迹连续性**。中段删段后,action chunk 可能**跨被删段跳变**(前后帧不连续)→ 反而引入 jump。需:(a) 删段后重排 frame_index + 重建 chunk;(b) 保留段边界的过渡帧(渐入渐出);(c) 只删"完全静止"(很严阈值),不动慢速有效动作。
-- 参数从严起步(只删明显停顿),宁可少删不可删坏轨迹。
+### 3.1 v3.1 数据构建(待实现)
+- **定义**: v3.1 = v3(前端投放已裁)**再删掉中段 + 尾部所有静止段** = "全删 idle"。
+- 检测:逐帧 `|Δaction|` 持续 `< thr`(静止)的连续段 → 删除(不分前/中/尾)。
+- ⚠️ **关键风险:轨迹连续性**(调研也强调)。删中段后 action chunk 会**跨被删段跳变** → 引入 jump。必须:(a) 删后重排 `frame_index`/`index` + 重建 chunk;(b) 保留段边界过渡帧;(c) 严阈值,只删"完全静止",不碰慢速有效动作。
+- 实现:扩 `build_no_release.py` 加 `--mode all_idle`(或新脚本),输出 `vis_base/v3.1/<date>`。**先 2a 小规模验证裁剪正确再批量。**
 
-### 3.2 单变量实验设计(吸取 Step 1 教训:一次只动一个变量)
-- 选**一份固定数据**(建议 smooth_800 或某后期段),**唯一变量 = 中段 idle 裁/不裁**,其余(参数/init/pipeline/部署)完全相同。
-- 对照:`base`(仅前裁 v3)vs `mid_trim`(前裁 + 中段裁)。
-- **真机为终判**:走停/犹豫时长、cloth loop 次数、完成率;offline 仅看健康。
+### 3.2 实验矩阵(单变量 = idle 删除程度;同 init/参数/pipeline/部署)
+| arm | 数据 | idle 处理 | 用途 |
+|---|---|---|---|
+| **B-early(baseline)** | ≤5-10 | **v3(仅前端裁)** | 早期 work 锚(≈ smooth800)对照 |
+| **Exp-2a** ⭐(用户)| ≤5-10 | **v3.1(全删)** | 早期数据上"全删 vs 前端裁" |
+| **B-all(baseline)** | 全量(排 5-16) | **v3(仅前端裁)** | = Exp-C/Exp-D 系列 |
+| **Exp-2b** ⭐(用户)| 全量 | **v3.1(全删)** | 全量上"全删 vs 前端裁" |
+| (可选)**Exp-2c 中间路线** | ≤5-10 或全量 | **前端裁 + 中段长 pause 设上限/下采样、留短 settle** | 调研推荐解,大概率最优 |
 
-### 3.3 分步执行
-- **2a 小规模验证裁剪正确**:1~2 ep 上跑检测+裁剪,人工/可视化确认"只删静止、轨迹不断裂、chunk 不跳变"。
-- **2b 单段单变量真机**:一段数据 base vs mid_trim,同参数训 → 真机 A/B。
-- **2c 推广**:若 2b 真机改善 → 全量数据中段裁 + 重训。
+> 注:用户原计划是 Exp-2a + Exp-2b(两个 v3.1)。**B-early / B-all 是必须补的对照**(否则无法判定"全删是否必要");它们多半已有现成 v3 ckpt 可复用(smooth800 / Exp-C / Exp-D)。
+
+### 3.3 判据(真机为终判)
+| 结果 | 结论 |
+|---|---|
+| v3.1 真机 **明显优于** v3 | 全删有用 → 值得(推翻调研预测,填补 chunked-VLA 空白) |
+| v3.1 **≈** v3 | **全删非必要**(调研预测) → 省事用 v3;或转 Exp-2c 中间路线找增量 |
+| v3.1 **差于** v3 | 全删**有害**(删了功能性 settle / 分布漂移)→ 明确不要全删 |
+> offline MAE 仅看训练健康(idle 多的轨迹 MAE 反指,§1.5/铁律)。
+
+### 3.4 分步执行
+- **2a** 扩 build 加全删 idle 模式;1~2 ep 验证"只删静止、轨迹不断裂、chunk 不跳变"(可视化)。
+- **2b** build `≤5-10 v3.1` + `全量 v3.1`;注册 config(克隆 Exp-C/smooth800 同参,仅换数据);提交训练。
+- **2c** 对齐 B-early/B-all 的 v3 baseline(复用现成 ckpt 或补训);**真机三方对比** → 落 §3.3 判据。
+- **2d**(条件)若全删 ≈/差 → 跑 Exp-2c 中间路线(前端裁 + 中段下采样)验证证据推荐解。
 
 ---
 
