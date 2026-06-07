@@ -155,7 +155,13 @@ def main():
     ap.add_argument("--no-norm-stats", action="store_true")
     ap.add_argument("--symlink-video", action="store_true",
                     help="symlink videos to resolved source instead of copy (small dataset, repath-able to other cluster)")
+    ap.add_argument("--dagger-dates", nargs="+", default=None,
+                    help="override dagger date dirs (default = 4 dates); AWBC uses all 6: 2026-05-29-v2 06-01 06-02 06-03 06-04 06-05-v2")
     a = ap.parse_args()
+    if a.dagger_dates:
+        global DAGGER_DATES
+        DAGGER_DATES = a.dagger_dates
+        print(f"[override] DAGGER_DATES = {DAGGER_DATES}", flush=True)
     build(a.mode, a.out, a.seed, a.dry_run, not a.no_norm_stats, a.action_dim, a.symlink_video)
 
 

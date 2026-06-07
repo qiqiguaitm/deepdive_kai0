@@ -56,7 +56,7 @@ MODELS_CONFIG_MAP = {
         'KAI0': {
             'name': 'KAI0',
             'config_name': 'ADVANTAGE_TORCH_KAI0_FLATTEN_FOLD',
-            'ckpt_dir': 'experiment/ADVANTAGE_TORCH_KAI0_FLATTEN_FOLD/run1',
+            'ckpt_dir': '/vePFS/tim/workspace/deepdive_kai0/kai0/checkpoints/ADVANTAGE_TORCH_KAI0_FLATTEN_FOLD/adv_est_v1',
             'ckpt_steps': 100000
         },
     },
