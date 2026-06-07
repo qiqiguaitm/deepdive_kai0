@@ -435,8 +435,8 @@ def main():
                     help="generalized merge: merge these date dirs into ONE self_built dataset "
                          "(e.g. 2026-05-18-v3 2026-05-19-v3 ...). Requires --merge-out + --mode. "
                          "trim per --mode (use raw for already-trimmed v3 sources).")
-    ap.add_argument("--merge-src", choices=["v2", "v3"], default="v2",
-                    help="source root for --merge-dates: v2 (raw vis_base/v2) or v3 (trimmed vis_base/v3)")
+    ap.add_argument("--merge-src", choices=["v2", "v3", "v3.2"], default="v2",
+                    help="source root for --merge-dates: v2 (raw) / v3 (front-trimmed) / v3.2 (idle-downsampled)")
     ap.add_argument("--merge-out", metavar="NAME",
                     help="output dataset name under self_built/ for --merge-dates")
     ap.add_argument("--per-date-v32", nargs="+", metavar="DATE",
@@ -493,7 +493,7 @@ def main():
         if not args.merge_out:
             sys.exit("--merge-dates requires --merge-out NAME")
         merge_dates = args.merge_dates
-        src_root = V3_ROOT if args.merge_src == "v3" else VIS_BASE
+        src_root = {"v3": V3_ROOT, "v3.2": V3_2_ROOT}.get(args.merge_src, VIS_BASE)
         dst = DST_ROOT / args.merge_out
         print(f"merge: {len(merge_dates)} dates from vis_base/{args.merge_src} → self_built/{args.merge_out} "
               f"(trim={trim})", flush=True)
@@ -502,7 +502,7 @@ def main():
         src_root = VIS_BASE
         dst = DST_ROOT / ("A_0522_0526_no_release" if trim else "A_0522_0526_raw")
     # v3 per-date dirs store videos under feature-key dirs (observation.images.*); v2 uses bare cam names (CAM_DIRS).
-    src_feat_dirs = bool(args.merge_dates and args.merge_src == "v3")
+    src_feat_dirs = bool(args.merge_dates and args.merge_src in ("v3", "v3.2"))
 
     if not args.dry_run:
         if dst.exists():
