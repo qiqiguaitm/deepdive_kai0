@@ -4,7 +4,7 @@
 # Usage:  AIHC_IMG_PASSWORD='****' bash finetune/aihc/submit_tau0_aihc.sh [RETRY=5]
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-SPEC="$HERE/aijob_tau0_4n8g.json"
+SPEC="${1:-$HERE/aijob_tau0_4n8g.json}"   # optional spec path arg
 POOL=aihc-serverless; QUEUE=aihcq-z4v1apdppzwy
 RETRY=${RETRY:-5}
 CONFIG_NAME=${CONFIG_NAME:-}   # optional: override a CONFIG-style env

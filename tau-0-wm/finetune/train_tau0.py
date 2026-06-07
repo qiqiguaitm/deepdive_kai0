@@ -30,6 +30,7 @@ IMG_H, IMG_W = 192, 256
 N_VIEWS = 3
 # video frames -> T_lat=(CHUNK-1)//4+1. 5->2 (reused GigaWorld cache); 9->3 (tau0 native, P3).
 CHUNK = int(os.environ.get("TAU0_CHUNK", "5"))
+COND_NOISE = float(os.environ.get("TAU0_COND_NOISE", "0.0"))  # P4: noise-augment conditioning frame
 ACTION_CHUNK = 33
 ACTION_DIM = 14     # joint
 VAE_SP, VAE_T = 16, 4
@@ -87,6 +88,9 @@ class TauFlowTrainer:
         na = torch.randn_like(a0)
         noised_v = (nv * sig_v + z0 * (1 - sig_v))
         zt = ((1 - mask) * z0 + mask * noised_v).to(z0.dtype)   # frame0 clean, rest noised
+        if COND_NOISE > 0:   # robustify vs imperfect self-conditioning at rollout (exposure-bias mitigation)
+            zt = zt.clone()
+            zt[:, 0:1] = zt[:, 0:1] + COND_NOISE * torch.randn_like(zt[:, 0:1])
         at = (na * sig_a + a0 * (1 - sig_a)).to(a0.dtype)
         v_target = nv - z0
         a_target = na - a0

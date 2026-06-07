@@ -39,25 +39,40 @@ export NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-eth0}
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 
 # ---- tau0 training args (override via AIHC envs) ----
-PHASE=${PHASE:-p2_specialize}
+PHASE=${PHASE:-p2_specialize}          # P3 = "all" (full FT)
 MAX_STEPS=${MAX_STEPS:-20000}
-LR=${LR:-3e-5}
+LR=${LR:-3e-5}                         # P3 warmup-cosine peak ~2**-13.5 ≈ 1.1e-4
 GRAD_ACCUM=${GRAD_ACCUM:-2}
-LAMBDA_V=${LAMBDA_V:-0.0}
+LAMBDA_V=${LAMBDA_V:-0.0}              # P3 = 1.0
+LAMBDA_A=${LAMBDA_A:-1.0}              # P3 = 5.0  (GigaWorld 5:1 action:video)
+WARMUP_STEPS=${WARMUP_STEPS:-0}
+COSINE_STEPS=${COSINE_STEPS:-0}
 CKPT_DIR=${CKPT_DIR:-/mnt/pfs/p46h4f/cosmos/deepdive_kai0/tau-0-wm/runs/tau0_fold_${PHASE}_32g}
 CKPT_INTERVAL=${CKPT_INTERVAL:-1000}
 INIT_CKPT=${INIT_CKPT:-/mnt/pfs/p46h4f/cosmos/deepdive_kai0/tau-0-wm/checkpoints/tau-0-wm}
 RESUME=${RESUME:-}
 EXTRA=${EXTRA:-}
+export TAU0_CHUNK=${TAU0_CHUNK:-5}              # P3 = 9 (native contiguous, T_lat=3); P4 = 33 (T_lat=9)
+export TAU0_LATENT_DIR=${TAU0_LATENT_DIR:-vae_latent}   # P3 = vae_latent_c9; P4 = vae_latent_c33
+export TAU0_COND_NOISE=${TAU0_COND_NOISE:-0.0}  # P4 = 0.05 (exposure-bias mitigation)
+USE_DEEPSPEED=${USE_DEEPSPEED:-0}               # P3 = 1 (full-FT needs ZeRO-2)
 
 echo "[aihc-tau0] node $NODE_RANK/$NNODES gpus=$NUM_GPUS total=$NPROC_TOTAL master=$MASTER_ADDR:$MASTER_PORT"
-echo "[aihc-tau0] phase=$PHASE max_steps=$MAX_STEPS lr=$LR ckpt_dir=$CKPT_DIR init=$INIT_CKPT IB=$([ "$NCCL_IB_DISABLE" = 0 ] && echo on || echo off)"
+echo "[aihc-tau0] phase=$PHASE steps=$MAX_STEPS lr=$LR λa=$LAMBDA_A λv=$LAMBDA_V warmup=$WARMUP_STEPS chunk=$TAU0_CHUNK latdir=$TAU0_LATENT_DIR ds=$USE_DEEPSPEED"
 "$VENV/bin/python" -c 'import torch;print("[aihc-tau0] torch",torch.__version__,"gpus",torch.cuda.device_count())' || true
 
+if [ "$USE_DEEPSPEED" = 1 ]; then
+  DIST_FLAGS="--use_deepspeed --zero_stage 2 --deepspeed_multinode_launcher standard --gradient_accumulation_steps $GRAD_ACCUM"
+else
+  DIST_FLAGS="--multi_gpu"
+fi
+
 exec "$VENV/bin/accelerate" launch \
-  --multi_gpu --num_machines "$NNODES" --num_processes "$NPROC_TOTAL" --machine_rank "$NODE_RANK" \
+  $DIST_FLAGS --num_machines "$NNODES" --num_processes "$NPROC_TOTAL" --machine_rank "$NODE_RANK" \
   --main_process_ip "$MASTER_ADDR" --main_process_port "$MASTER_PORT" \
   --mixed_precision bf16 --dynamo_backend no \
   finetune/run_train.py --phase "$PHASE" --max_steps "$MAX_STEPS" --lr "$LR" \
-  --grad_accum "$GRAD_ACCUM" --lambda_v "$LAMBDA_V" --ckpt_dir "$CKPT_DIR" \
-  --ckpt_interval "$CKPT_INTERVAL" --init_ckpt "$INIT_CKPT" ${RESUME:+--resume "$RESUME"} $EXTRA
+  --grad_accum "$GRAD_ACCUM" --lambda_v "$LAMBDA_V" --lambda_a "$LAMBDA_A" \
+  --warmup_steps "$WARMUP_STEPS" --cosine_steps "$COSINE_STEPS" \
+  --ckpt_dir "$CKPT_DIR" --ckpt_interval "$CKPT_INTERVAL" --init_ckpt "$INIT_CKPT" \
+  ${RESUME:+--resume "$RESUME"} $EXTRA

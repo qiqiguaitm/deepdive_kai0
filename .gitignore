@@ -87,3 +87,10 @@ giga_world_policy/scripts/aihc/workspace/
 # τ₀-WM 项目: 源码入 git, 仅排除大产物/本地文件
 # (checkpoints/ 与 __pycache__/ 已被全局规则忽略)
 tau-0-wm/.claude/
+
+# NVIDIA/cosmos 工程 (含自己的 .git + 280G 预训练) — 收拢于此, 绝不入 kai0 仓库
+/cosmos/
+/cosmos.oldlink.bak
+
+# tau-0-wm training outputs (checkpoints/report assets, 100s of GB)
+tau-0-wm/runs/

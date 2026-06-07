@@ -81,10 +81,16 @@ def main():
     model, rep = build_joint_wanmodel(action_in_dim=14, ckpt_dir=args.init_ckpt,
                                       load_pretrained=not args.random_init,
                                       dtype=torch.float32, device="cpu", verbose=is_main)
+    resume_step = 0
     if args.resume:
         sd = torch.load(args.resume, map_location="cpu")
         model.load_state_dict(sd, strict=False)
-        log(f"resumed trainable params from {args.resume}")
+        # continue step/LR schedule when resuming from a step_<N>.pt checkpoint
+        # (P2's final.pt → 0, i.e. fresh schedule; P3's step_8000.pt → 8000)
+        import re as _re
+        m = _re.search(r"step_(\d+)\.pt$", os.path.basename(args.resume))
+        resume_step = int(m.group(1)) if m else 0
+        log(f"resumed trainable params from {args.resume} (start_step={resume_step})")
     n_tr, n_all = set_trainable(model, args.phase)
     if model.config.get("gradient_checkpointing", False) is False:
         model.gradient_checkpointing = True   # activation ckpt to fit
@@ -97,29 +103,28 @@ def main():
 
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad],
                             lr=args.lr, weight_decay=1e-2)
-    sched = None
+    # manual warmup-cosine LR (set on param_groups each step) — robust under DeepSpeed/DDP
+    import math as _m
+    cos_T = args.cosine_steps or args.max_steps
+    def compute_lr(s):
+        if args.warmup_steps <= 0:
+            return args.lr
+        if s < args.warmup_steps:
+            return args.lr * (s + 1) / args.warmup_steps
+        p = min(1.0, (s - args.warmup_steps) / max(1, cos_T - args.warmup_steps))
+        return args.lr * 0.5 * (1 + _m.cos(_m.pi * p))
     if args.warmup_steps > 0:
-        import math as _m
-        cos_T = args.cosine_steps or args.max_steps
-        def lr_lambda(s):
-            if s < args.warmup_steps:
-                return (s + 1) / args.warmup_steps
-            p = min(1.0, (s - args.warmup_steps) / max(1, cos_T - args.warmup_steps))
-            return 0.5 * (1 + _m.cos(_m.pi * p))   # cosine decay 1 -> 0
-        sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda)
         log(f"warmup-cosine LR: warmup={args.warmup_steps} cosine_T={cos_T} peak={args.lr}")
-    prepared = accel.prepare(model, opt, dl, *( [sched] if sched is not None else [] ))
-    model, opt, dl = prepared[0], prepared[1], prepared[2]
-    if sched is not None:
-        sched = prepared[3]
+    model, opt, dl = accel.prepare(model, opt, dl)
     raw = accel.unwrap_model(model)
     tr = TauFlowTrainer(raw, dev, lambda_v=args.lambda_v, lambda_a=args.lambda_a)
     model.train()
 
     os.makedirs(args.ckpt_dir, exist_ok=True)
-    step = 0
+    step = resume_step
     t0 = time.time()
     running = 0.0
+    running_v = 0.0
     data_iter = iter(dl)
     while step < args.max_steps:
         try:
@@ -135,19 +140,24 @@ def main():
             ctx = b["t5"].to(dev, torch.bfloat16)
             loss, parts = tr.forward_step(z0, a0, state, ctx, ref=ref)
             accel.backward(loss)
+            if accel.sync_gradients and args.warmup_steps > 0:
+                lr_now = compute_lr(step)
+                for pg in opt.param_groups:
+                    pg["lr"] = lr_now
             opt.step()
-            if sched is not None and accel.sync_gradients:
-                sched.step()
             opt.zero_grad()
         running += parts["a_loss"]
+        running_v += parts.get("v_loss", 0.0)
         if accel.sync_gradients:
             step += 1
             if step % args.log_interval == 0:
-                sps = step / (time.time() - t0)
+                sps = (step - resume_step) / (time.time() - t0)
                 cur_lr = opt.param_groups[0]["lr"]
-                log(f"step {step}/{args.max_steps}  a_loss={running/args.log_interval/args.grad_accum:.4f}  "
+                denom = args.log_interval * args.grad_accum
+                log(f"step {step}/{args.max_steps}  a_loss={running/denom:.4f}  v_loss={running_v/denom:.4f}  "
                     f"lr={cur_lr:.2e}  {sps:.2f} step/s")
                 running = 0.0
+                running_v = 0.0
             if is_main and step % args.ckpt_interval == 0:
                 full = accel.unwrap_model(model).state_dict()
                 sd = full if args.phase == "all" else {k: v for k, v in full.items()

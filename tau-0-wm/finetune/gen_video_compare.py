@@ -19,7 +19,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from finetune.model_joint import build_joint_wanmodel  # noqa: E402
-from finetune.train_tau0 import compute_seq_len, video_latent_shape, PATCH  # noqa: E402
+from finetune.train_tau0 import compute_seq_len, video_latent_shape, PATCH, CHUNK  # noqa: E402
 from finetune.data_joint import LatentJointDataset  # noqa: E402
 
 VAL = "/mnt/pfs/p46h4f/cosmos/deepdive_kai0/kai0/data/wam_fold_v1/visrobot01_val"
@@ -124,6 +124,31 @@ def to_uint8_panorama(vid_cthw):
     return v
 
 
+# GigaWorld episode_report-style 14-dim action trajectory (pred raw vs GT), deployment layout.
+DIM = [f"L_j{i}" for i in range(6)] + ["L_grip"] + [f"R_j{i}" for i in range(6)] + ["R_grip"]
+
+
+def save_traj_png(pred_abs, gt_abs, path, title=""):
+    """pred_abs/gt_abs: (T,14) absolute. 14 subplots (2 arms x 7), pred(raw,red) vs GT(black--)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    T = min(len(pred_abs), len(gt_abs))
+    x = np.arange(T)
+    fig, axes = plt.subplots(2, 7, figsize=(20, 5))
+    axes = axes.flatten()
+    for d in range(14):
+        axes[d].plot(x, gt_abs[:T, d], "k--", lw=1.5, label="GT")
+        axes[d].plot(x, pred_abs[:T, d], "r-", lw=1.2, label="pred(raw)")
+        axes[d].set_title(DIM[d], fontsize=9)
+        axes[d].tick_params(labelsize=7)
+    axes[0].legend(fontsize=8, loc="best")
+    fig.suptitle(title, fontsize=11)
+    fig.tight_layout()
+    fig.savefig(path, dpi=70, bbox_inches="tight")
+    plt.close(fig)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ckpt", default="/mnt/pfs/p46h4f/cosmos/deepdive_kai0/tau-0-wm/runs/tau0_fold_p1/final.pt")
@@ -169,27 +194,32 @@ def main():
         # ---- action: full inference -> abs -> MAE@horizon (vs pi0.5) ----
         pred_norm = gen_action(model, z_cond, ctx, state, args.steps, dev, seq_len)[0].cpu().numpy()
         pred_abs = undo_proprio_action(pred_norm, s_abs, ds.stats)   # (33,14) abs
+        win_mae = {}
         for h in HORIZONS:
-            mae_acc[h].append(float(np.abs(pred_abs[:h] - a_abs_gt[:h]).mean()))
-        # ---- video: GigaWorld-style closed-loop rollout -> full GIF vs GT ----
-        K = args.rollout_k
-        nw = ep["visual"].shape[0]
-        ws = min(w, max(0, nw - K - 1))                              # leave room for K consecutive windows
-        ref0 = ep["ref"][ws].float().to(dev, dt)                     # [C,1,h,Wv]
-        gt_roll = torch.cat([ep["ref"][min(ws + j, nw - 1)].float().to(dev, dt) for j in range(K + 1)], dim=1)
-        pred_roll = rollout_video(model, ref0, ctx, K, args.steps, dev, seq_len)  # [C,K+1,h,Wv]
-        gt_vid = to_uint8_panorama(decode(vae, lm, ls, gt_roll))     # [T,H,W,3]
-        pred_vid = to_uint8_panorama(decode(vae, lm, ls, pred_roll))
+            m = float(np.abs(pred_abs[:h] - a_abs_gt[:h]).mean())
+            mae_acc[h].append(m); win_mae[f"mae@{h}"] = round(m, 5)
+        # GigaWorld-style action trajectory plot (14-dim pred raw vs GT)
+        traj_fn = os.path.join(args.out_dir, f"traj_{k}.png")
+        save_traj_png(pred_abs, a_abs_gt, traj_fn,
+                      title=f"sample {k} · action chunk (33 steps) · pred(raw) vs GT · mae@1={win_mae['mae@1']} mae@33={win_mae.get('mae@'+str(ACTION_CHUNK),'')}")
+        # ---- video: CLEAN single-chunk full-clip generation vs contiguous GT ----
+        # gt_lat = ep["visual"][w] is the CONTIGUOUS future clip; z_cond = it with frame0=observed ref.
+        # One gen_video() call denoises the whole t_lat-frame chunk (chunk=33 -> 33-frame one-shot video),
+        # so there is NO autoregressive recursion and NO window-ref temporal misalignment.
+        gen_lat = gen_video(model, z_cond, ctx, args.steps, dev, seq_len)   # [C,t_lat,h,Wv]
+        gt_vid = to_uint8_panorama(decode(vae, lm, ls, gt_lat))             # contiguous GT clip [T,H,W,3]
+        pred_vid = to_uint8_panorama(decode(vae, lm, ls, gen_lat))
         T = min(gt_vid.shape[0], pred_vid.shape[0])
-        ps = float(np.mean([psnr(gt_vid[i], pred_vid[i], data_range=255) for i in range(1, T)]))
-        ss = float(np.mean([ssim(gt_vid[i], pred_vid[i], data_range=255, channel_axis=2) for i in range(1, T)]))
-        # animated GIF: GT (top) | pred (bottom), all rolled-out frames
+        ev = list(range(1, T)) if T > 1 else [0]                           # exclude conditioning frame-0
+        ps = float(np.mean([psnr(gt_vid[i], pred_vid[i], data_range=255) for i in ev]))
+        ss = float(np.mean([ssim(gt_vid[i], pred_vid[i], data_range=255, channel_axis=2) for i in ev]))
         sep = np.full((4, gt_vid.shape[2], 3), 255, np.uint8)
         gif = [Image.fromarray(np.concatenate([gt_vid[ti], sep, pred_vid[ti]], axis=0)) for ti in range(T)]
         fn = os.path.join(args.out_dir, f"vidcmp_{k}.gif")
         gif[0].save(fn, save_all=True, append_images=gif[1:], duration=int(1000 / args.fps), loop=0)
-        results.append({"window": k, "psnr": round(ps, 2), "ssim": round(ss, 4), "frames": T, "img": os.path.basename(fn)})
-        print(f"[vid] window {k}: rollout K={K} ({T} frames) PSNR={ps:.2f} SSIM={ss:.4f} -> {fn}", flush=True)
+        results.append({"window": k, "psnr": round(ps, 2), "ssim": round(ss, 4), "frames": T,
+                        "img": os.path.basename(fn), "traj": os.path.basename(traj_fn), "mae": win_mae})
+        print(f"[vid] window {k}: single-chunk ({T} frames, chunk={CHUNK}) PSNR={ps:.2f} SSIM={ss:.4f} -> {fn}", flush=True)
 
     import json
     mae_at = {f"mae@{h}": round(float(np.mean(mae_acc[h])), 5) for h in HORIZONS}
