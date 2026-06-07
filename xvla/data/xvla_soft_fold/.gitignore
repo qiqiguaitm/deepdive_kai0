@@ -1,0 +1,5 @@
+# 官方 Soft-Fold 数据 (~441G, 1532 hdf5) — 仅本地落盘, 不入 git
+*
+!.gitignore
+!README.md
+!README_facebear.md

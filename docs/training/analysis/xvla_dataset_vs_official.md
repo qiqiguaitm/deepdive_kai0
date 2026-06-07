@@ -24,6 +24,8 @@
 | 🟡 | 图像归一化 | ImageNet + ColorJitter | P0 前缺 (R1); **P0 已修** | 见 rootcause R1 |
 
 > **结论**: 数据数值层面**没有致命错误** (rot6d/gripper/xyz/loss-scale 全对齐, 标签语义正确)。**唯一实质差异是 D5 采样时间窗口** (我们 chunk 覆盖 1s, 官方 2s)。图像问题 (R1) 已由 P0 解决。
+>
+> ✅ **2026-06-07 真实官方数据核验 (见 §5)**: 官方 Soft-Fold 数据(1532ep/441G)已落 gf0,直接读官方 HDF5 核验 —— **EE 帧 (我们 PiperFK link6 vs 官方录制 eef_6d) 精确一致到 0.1mm**(此前"帧偏移"担心证伪);gripper 同为米、相机同 3 路 640×480。**EE 帧/gripper/相机全对齐 → D5 是唯一确认实质差异。**
 
 ---
 
@@ -126,3 +128,25 @@ GRIPPER_SCALE = 1.0   XYZ_SCALE = 500.0   ROT_SCALE = 10.0
 | chunk 采样 | `base.py:150-154` (linspace qdur=2.0) | `multi_domain_dataset.py:161-167` (连续帧) |
 | gripper 阈值 | `real_world.py:42` (×50<1) | `joint_to_ee6d.py:48` (×50<1) |
 | 分析脚本 (一次性) | — | `/tmp/ds_compare.py`, `/tmp/ds_anomaly.py`, `/tmp/sem_check.py` (uc01) |
+
+---
+
+## 5. 真实官方 Soft-Fold 数据核验 (2026-06-07, gf0 本地 1532ep/441G)
+
+> 官方 Soft-Fold(`Facebear/XVLA-Soft-Fold`)已迁到 `xvla/data/xvla_soft_fold`(gf0,441G,gitignored)。官方 HDF5 每 episode 同时含 `action`(14D joint)/ `observations/qpos`(14D)/ `eef_6d`(20D 录制 EE6D)/ `eef_quaternion`(16D)/ 3 相机 + 时间戳 → 可直接对官方数据核验 §1-4 的代码级结论。
+
+### 5.1 ✅ EE 帧 — 我们 PiperFK link6 ≡ 官方录制 eef_6d (0.1mm)
+- 用我们 `joint_to_ee6d`(PiperFK `CalFK` link6)跑**官方 qpos** → 对比**官方 eef_6d**(200 帧):
+  - **xyz 差 |abs| 均值 = 0.0001m (0.1mm),std 0.0003m;rot6d 差 0.0003;f0 逐位吻合**。
+- → **官方 eef_6d 本身就是 PiperFK link6,与我们转换完全一致。** 此前担心的"官方录制 eef vs 我们算 link6 可能差 ~13.58cm 帧偏移"**被真实数据证伪** —— 我们的 EE6D 处理正确。
+- 附:`action vs qpos |Δ|=0.005` → 官方也是 action≈关节读数(同我们约定,佐证 §3)。
+
+### 5.2 ✅ gripper 单位 — 官方也是米
+- 官方 grip_raw(eef_quaternion[7] / qpos[6])范围 **−0.0009~0.062m**;我们 vis 0~0.08m → **同单位(米)**,`×50<1`(<0.02m 闭)阈值对两者都成立。
+- (注:直接比"我们二值 vs 官方 eef_6d 原始 gripper"一致率仅 52% 是 **raw-vs-binarized 比较假象** —— 官方 handler 在 load 时才 `×50<1` 二值化,与我们一致。)
+
+### 5.3 ✅ 相机 — 3 路 640×480 RGB 同构
+- 官方 `cam_high / cam_left_wrist / cam_right_wrist` 均 **640×480 RGB**;我们 `top_head / hand_left / hand_right` 同 3 路同分辨率。
+
+### 5.4 结论
+**数据集 + 处理在 EE 帧 / gripper / 相机三方面与官方完全一致(EE 帧精确到 0.1mm)。** §B 提的"EE 帧"风险已被真实官方数据证伪。**至此唯一确认的实质差异仍是 D5(action chunk 1s vs 2s)**,已在 `X3C_smooth800_d5anchor`(task `t-20260607152340-4j7q5`)验证中。核查脚本在 gitignored `_xvla_gripper_debug/`。
