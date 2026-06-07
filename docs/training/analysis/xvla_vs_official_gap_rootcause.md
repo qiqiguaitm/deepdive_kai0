@@ -190,9 +190,13 @@ P0 ckpt 真机录 trace, 对比 [`x3c_realrobot_trace_20260601.md`](x3c_realrobo
 | R2 EE6D→IK 链 | 高 | 放大器,非源头 |
 | gripper 部署映射(SoftFold -0.0055) | — | 叠加项 |
 
-### 7.4 验证 / 修复(下一步)
+### 7.4 验证 / 修复 — D5 对照实验已提交 (2026-06-07)
 
-- **重建 EE6D 数据用官方 intention abstraction**:每个 query time 取 `linspace(cur, cur+2.0s, num_actions+1)` 时间插值 anchor(对齐 `real_world.py qdur=2.0`),替换"30 连续帧"。重训 X3.C → 看欠到位/乱飘是否消失、真机能否抓到衣角。**这是数据/表示重建,与"官方能 fold"自洽,不是容量。**
+- **✅ 已落地 (读取时重采样, 无需重建数据)**:`LeRobotEE6DDataset` 加 `action_qdur` 参数(`multi_domain_dataset.py`);设 2.0 时,action chunk = `linspace(f_idx, f_idx+qdur·fps, N+1)[1:]` 取 30 anchor(对齐官方 `base.py:152` + `real_world.py qdur=2.0`),per-frame EE6D 按帧重采样,**默认 None=legacy 不影响其它实验**。smoke 实测:anchor chunk 位移 **1.59m vs legacy 0.117m(13.6×)**,样本数不变。
+- **对照实验** `X3C_smooth800_d5anchor`(单变量 vs `X3C_smooth800_p0`,仅 `action_qdur=2.0`):
+  - YAML `xvla_x3c_d5anchor_cnsh_8gpu.yaml`,**task `t-20260607152340-4j7q5`**(cn-shanghai / robot-task 8 A100,60k)。
+  - **验证判据(offline)**:训完用运动剖面探针测"接近/抓取 pred chunk 位移/GT"——若从 60-80% 回到接近 100%(欠到位消失)→ **D5 坐实为真因**;否则查次要嫌疑。
+  - ⚠️ **真机验证还需对齐执行时序**:30 anchor 现表示 2s 运动,部署执行须按 2s 时序(非 30Hz 稠密),否则 2× 过快。offline 先验证表示假说,真机时序为下一步。
 - 次要嫌疑:官方 Soft-Fold 可能 **co-train 在 290K 多域语料**(享跨本体先验),我们是**单域 finetune-from-base on 811ep** → 配方差异。D5 修复后若仍不足再查。
 
 ---
