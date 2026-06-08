@@ -3,7 +3,7 @@
 > **核心目的(本系列的真正主线,之前文档未点明)**: 验证**裁掉 episode 里的 idle(静止)帧能否让模型真机表现更好**。idle 帧分两类:① **前端**"投放等待"长静止段(机械臂不动、操作员往台上放衣服);② **中段**操作里的停顿/犹豫/反复。假设:idle 帧被 BC 忠实模仿 → 真机走停 / 犹豫 / cloth loop / 拉取松手。
 > **分步走**: **Step 1 前端投放裁剪**(= 之前的 v2→v3 / no_release,已做)→ **Step 2 中段 idle 裁剪**(未来)→ Step 3 节奏归一(可选)。
 > **状态**: Step 1 ✅ 真机初步成立(裁前端真机明显改善);Step 2 📋 规划。
-> **建立**: 2026-06-07(**合并自** [`v2v3_data_window_scaling_experiments.md`](v2v3_data_window_scaling_experiments.md) + [`data_root_cause_probe_experiments.md`](data_root_cause_probe_experiments.md) H1,围绕 idle 主题重组)。
+> **建立**: 2026-06-07(**完整合并自** `v2v3_data_window_scaling_experiments.md`(2026-06-08 该文件已删,明细见 §5)+ [`data_root_cause_probe_experiments.md`](data_root_cause_probe_experiments.md) H1,围绕 idle 主题重组)。
 > ⚠️ **方法学铁律**: **真机为终判,offline MAE 系统性反指** —— idle 多的慢/停顿轨迹逐帧 teacher-forcing MAE 反而低,真机却灾难。MAE 仅用于确认训练健康 + 选 ckpt。
 
 ---
@@ -55,7 +55,7 @@
 | **no_release probe**(data_root_cause Exp-1)| `A_0522_0526`(后期 fail 2 天 200ep)| no_release(前裁)vs raw(未裁)| best step20k MAE@1 **0.0160**(与 raw 持平,offline 看不出)| ✅ **no-release 明显改善**(用户 2026-06-02)| 🟢 **H1 投放污染初步成立**:前裁真机更流畅 |
 | v2/v3 window 系列 | v2/5-18(Exp-A 未裁)· v3 窗口/全量/去脏(Exp-B/C/D 前裁)| 混合(见下注)| 各 horizon MAE | ⏳ 真机待做 | 量数据量/时窗/去脏,**顺带都在 v3 前裁基础上** |
 
-> ⚠️ **诚实标注(之前的混淆)**: v2/v3 window 系列(Exp-A~D)其实**混了多个变量**(trim v2/v3 × 窗口 1日/多日/全量 × 去脏 Exp-D),**没把"idle 裁剪"作为单变量隔离**。真正干净的"裁 vs 不裁"单变量对照是 **no_release probe(Exp-1 no_release vs raw,同 2 天同量)** → 这才是 Step 1 的关键证据。Exp-A~D 的窗口/去脏结论与 idle 主题正交(Exp-D `t-20260607104053-jgbgw` 仍在跑,细节见原 v2v3 文档)。
+> ⚠️ **诚实标注(之前的混淆)**: v2/v3 window 系列(Exp-A~D)其实**混了多个变量**(trim v2/v3 × 窗口 1日/多日/全量 × 去脏 Exp-D),**没把"idle 裁剪"作为单变量隔离**。真正干净的"裁 vs 不裁"单变量对照是 **no_release probe(Exp-1 no_release vs raw,同 2 天同量)** → 这才是 Step 1 的关键证据。Exp-A~D 的窗口/去脏结论与 idle 主题正交(Exp-D `t-20260607104053-jgbgw` 仍在跑,完整明细见 §5)。
 
 **Step 1 结论**: **前端投放裁剪(no_release / v2→v3)真机明显改善**(H1 初步成立)。offline MAE 看不出(反指)。→ **idle 数据确实伤真机,裁了有用;下一步裁中段。**
 
@@ -100,7 +100,70 @@
 ---
 
 ## 4. 关联文档
-- **合并来源(已并入本文档)**: `v2v3_data_window_scaling_experiments.md`(v2/v3 + 窗口 Exp-A~D,细节与 Exp-D 任务跟踪留存其中)。
 - **前端裁根因线**: `data_root_cause_probe_experiments.md`(H1=投放污染=本系列 Step 1;H2 慢节奏 / H3 gripper 漂移 / H4 wrist OOD 是**其它**真机失败根因,不属 idle 主题,各自单查)。
 - **裁剪脚本**: `train_scripts/kai/data/build_no_release.py`(`--mode no_release` 前裁 / `--per-date` v3 / 待加中段裁模式)。
 - **work 锚点**: `task_a_new_smooth_800_new_norm_results.md`。
+
+---
+
+## 5. 附录 — v2/v3 窗口/数量实验明细(2026-06-08 完整并入,原 `v2v3_data_window_scaling_experiments.md` 已删)
+
+> 原 v2/v3 系列(2026-06-03 建)的初衷是查**数据时窗/数量**对真机的影响,**顺带都跑在 v3 前端裁基础上**(故与本 idle 主题相关但非单变量,见 §2 诚实标注)。下为完整明细 + Exp-D 任务跟踪。
+> ⚠️ 真机为终判,offline MAE 反指;每个 ckpt 出来必须真机测,MAE 仅确认收敛 + 选 best。
+
+### 5.1 数据清单(2026-06-03 实测,源在 uc `vis_base/`)
+- **Exp-A 源** `vis_base/v2/2026-05-18-v2`:**201 ep, 25G**。⚠️ **v2 版本**(未裁,与 B/C 的 v3 是不同 pipeline)。
+- **Exp-B/C 源** `vis_base/v3/<date>`(v3 = 前端投放已裁):
+
+| date | ep | | date | ep |
+|---|--:|---|---|--:|
+| 2026-04-23-v3 | 21 | | 2026-05-10-v3 | 95 |
+| 2026-04-24-v3 | 187 | | 2026-05-16-v3 | 16 ⛔排除(残缺3.3M) |
+| 2026-04-25-v3 | 96 | | **2026-05-18-v3** | **201** |
+| 2026-04-28-v3 | 152 | | **2026-05-19-v3** | **100** |
+| 2026-04-29-v3 | 100 | | **2026-05-20-v3** | **100** |
+| 2026-04-30-v3 | 83 | | **2026-05-21-v3** | **100** |
+| 2026-05-06-v3 | 100 | | **2026-05-22-v3** | **100** |
+| 2026-05-07-v3 | 20 | | **2026-05-26-v3** | **100** |
+| 2026-05-08-v3 | 101 | | **2026-05-27-v3** | **105** |
+| 2026-05-09-v3 | 30 | | **2026-05-28-v3** | **149** |
+
+- **Exp-B(5-18~5-28,加粗 8 日)= 955 ep**(5-23/24/25 无采集)。
+- **Exp-C(全 v3 排 5-16)= 1940 ep**(4-23~5-10 共 985 + 5-18~5-28 共 955)。
+
+### 5.2 三个实验规格(单变量名义=数据量/时窗,均在 v3 前裁上)
+| | **Exp-A** | **Exp-B** | **Exp-C** |
+|---|---|---|---|
+| 数据 | v2/2026-05-18 单日 | v3 5-18~5-28 窗口 | v3 全量(排 5-16) |
+| ep 数 | 201 | 955 | 1940 |
+| config | `pi05_flatten_fold_v2_0518_201` | `pi05_flatten_fold_v3_0518_0528` | `pi05_flatten_fold_v3_all_no0516` |
+| 集群 | cnsh(robot-task A100) | cnbj(Robot-North-H20) | cnbj |
+| 卡数 | 16(2节点) | 16 | 16 |
+| 顺序 | 独立 | 先跑 | **Exp-B 完成后顺序跑** |
+
+**统一训练配置(对齐 work 锚 smooth_800)**: pi05 / JAX `scripts/train.py` / init `mixed_1_clean` / prompt `"Flatten and fold the cloth."` / absolute joint / LR cosine warmup1k peak1.5e-5→1.5e-6 / EMA 0.9999 / bs128 / fsdp16 / **50k step** / norm 各自重算 / inline-eval `vis_v2_merged_val`。
+
+### 5.3 执行链(每实验)
+1. **build**(合并日期 → lerobot v2.1 单集,episode_index 重排):`build_no_release.py --mode raw`(不再裁,v3 已前裁)。产物落各集群 vePFS `self_built/<数据名>/`。
+2. `compute_norm_states_fast.py --config-name <config>`(数据所在机)。
+3. 注册 config 到 `config.py` + commit/push(gf3/cnbj、gf0/cnsh 由 cron/pull 同步)。
+4. init `mixed_1_clean/params` 在目标集群 vePFS 就位(22G 校验)。
+5. 提交 16卡 YAML(cnsh/cnbj 对应 queue+image+SubPath)。
+6. 验证 log:`Generating train split` + `Step N: loss` + 熬过首次 ckpt save。
+
+### 5.4 注意事项
+- **v2 vs v3 混用**(已定 Exp-A 保 v2):Exp-A 是 v2-单日独立基线,**不与 B/C 构成严格单日 vs 窗口同版本对比**;干净窗口对比在 **Exp-B vs Exp-C(同 v3)**。
+- **早期数据增益方向**:Exp-C vs Exp-B 的差(加 4-23~5-10 的 985ep)→ 真机判"早期数据帮忙/稀释"。
+- **5-16 排除**:仅 16ep/3.3M 残缺,无争议。
+- **steps 全 50k**:Exp-A 单日 201ep 在 50k 大概率过拟 → inline-eval 选 best ckpt 取中段(参考 no_release ~20k 触底)。
+
+### 5.5 ⭐ Exp-D — 排除嫌疑窗 5-19~5-27(2026-06-07,已提交)
+> **假说(用户)**: 之前 v3 训练(Exp-C/B)真机有问题,怀疑混入 **5-19~5-27 脏数据**。本实验剔除这 6 天,其余同 Exp-C,真机对比验证。
+
+- **数据集 `A_v3_excl_0519_0527`** = ≤5-18(排5-16)+ 5-28 = **1335 ep**(13 天)。选入:4-23(21) 4-24(187) 4-25(96) 4-28(152) 4-29(100) 4-30(83) 5-06(100) 5-07(20) 5-08(101) 5-09(30) 5-10(95) 5-18(201) 5-28(149)。排除嫌疑窗 5-19/20/21/22/26/27(605 ep)+ 5-16。= Exp-C(1940)− 605 = 1335。
+- **config** `pi05_flatten_fold_v3_excl_0519_0527` · init `mixed_1_clean` · 50k · bs128 · 16卡 · norm 重算 · inline-eval `vis_v2_merged_val`。
+- **提交(cnbj 16卡, 2026-06-07)**: YAML `train_scripts/kai/volc/v3_excl_0519_0527_cnbj_16gpu.yaml`(2-host×8 H20)。**task `t-20260607104053-jgbgw`**(cn-beijing / Robot-North-H20)。
+- ⚠️ **数据 build 折进 entrypoint**(node-0 in-pod `build_no_release.py --merge-src v3 --merge-dates ...` 合并 13 天 + 重算 norm,sentinel barrier;build 失败则 preflight 安全退出)。原因:cnbj `/vePFS-North-E/vis_robot` 为 root:root 700,本地 tim 无权预建。
+- 监控:`volc_job_status.py` / cnbj `logs/v3_excl_0519_0527_*.log`(root)。**真机为终判**:出 ckpt 后真机对比 Exp-C(含嫌疑窗)→ Exp-D 明显改善则假说成立。
+
+> **决策记录(2026-06-03)**: 数据 master 在 vePFS(vis_base 软链,uc 回退无影响);Exp-A 保 v2/5-18;steps 全 50k;Exp-C 触发=手动(Exp-B 完成后)。
