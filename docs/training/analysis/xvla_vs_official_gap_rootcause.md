@@ -229,10 +229,61 @@ P0 ckpt 真机录 trace, 对比 [`x3c_realrobot_trace_20260601.md`](x3c_realrobo
 
 ---
 
+## 8. ⭐⭐ 深入:数据差异 vs 训练 regime 差异 — 为什么训练不对 (2026-06-08)
+
+> 目标:欠到位(接近/抓取 pred/GT ~0.70)+ 持握过冲 = **动态范围压缩 / 回归均值** 的特征(模型对"该走多远"条件化不足,朝动作幅度的边际均值压)。在 R4 容量排除、D5 排除后,逐项查"配方"与"数据"两条。**结论:配方结构不是区分点,矛头落在数据(质量/覆盖)或 base ckpt/pipeline,Exp-O 为决定性检验。**
+
+### 8.1 soft-prompt / domain 槽 freshness(直接 introspect base ckpt)
+
+`lerobot/xvla-base`(= X-VLA-Pt 基座)的**全部 30-行 domain 嵌入**(`soft_prompt_hub` + `action_encoder.fc/bias` + `action_decoder.fc/bias`,`models/transformer.py:245,395`)一致显示:**只有 slot 10–17 被训过**(norm 显著高;bias≠0),**slot 5 / 18–29 全是 fresh**(near-init;`action_encoder/decoder.bias` 这些行**精确=0.000**,即从未接收梯度)。
+
+| domain_id | 含义(`xvla/X-VLA/datasets/domain_config.py:41`) | base 中状态 |
+|---|---|---|
+| 5 | **AIR-AGILEX-HQ**(eef_6d 20D,= 我们数据格式) | **FRESH**(bias=0) |
+| 10 | AIR-AGILEX(eef_quaternion 16D) | ✅ 训练过 |
+| 16 | robomind-agilex | ✅ 训练过 |
+| 20 | 我们的 vis(自定义) | **FRESH**(bias=0,与 5 等价) |
+
+### 8.2 ⭐ 关键反转:fresh-slot **不是**我们独有的问题
+官方 **X-VLA-SoftFold(cloth fold 100% 成功)部署用 `domain_id=5`**(`evaluation/SoftFold-Agilex/deploy/client_eef6d_xvla.py:116`,且是 `client_eef6d_xvla` = eef_6d 20D,**和我们同格式**)。而 slot 5 在 X-VLA-Pt 里**和我们的 slot 20 一样是全新空槽(bias 精确=0)**。
+→ **官方也是"从 fresh 槽 + 单域 finetune-from-Pt"**,与我们(slot 20)**结构完全相同** → **"cold-start soft-prompt / 单域 finetune"不可能是我们失败的原因**(否则官方也会失败)。先前 Explore agent 把此列为头号嫌疑 → **经 ckpt 实测证伪,撤销**。
+> 注:slot 10(AIR-AGILEX,已训)用 quaternion 表示;官方 SoftFold 故意改用 fresh 的 HQ 槽(5)+eef_6d → 说明**fresh 槽对官方 work 没障碍**。domain_id 5 与 20 在此 base 中等价(都 fresh),Exp-O 用 21 也无碍,只要 train/deploy 一致即可。
+
+### 8.3 数据分布实测对比(官方 Soft-Fold vs 我们 smooth_800,各采 50 ep)
+脚本 `/tmp/data_cmp.py`(eef_6d / EE6D action 的 xyz):
+
+| 指标 | 官方 Soft-Fold | 我们 smooth_800 | 解读 |
+|---|---|---|---|
+| ep 时长 | **58.2s**(1747帧) | 32.7s(980帧) | 我们 ~**½ 长**(更快完成/更少帧) |
+| 中位 xyz 速度 | 21.0 cm/s | 14.7 cm/s | 我们更慢(中位) |
+| p90 / p99 速度 | 56.2 cm/s / 0.040 | **60.6** cm/s / **0.045** | 我们峰值更快 |
+| 2s chunk 位移 中位/p90 | 0.43 / 1.02 m | 0.45 / **1.20** m | **我们大动作不少反更多** |
+| idle 占比(<1.5cm/s) | 7.1% | **12.6%** | 我们 idle ~**2×** |
+
+→ **"我们数据缺大动作"被排除**:2s 位移分布相当、p90 我们更大。**欠到位 = 模型学不出数据里已有的大 reach**(GT 高动量位移 1.1–1.7m,pred 只 70%),非数据没有。数据侧真实差异 = **ep 更短 + idle ~2×**,以及**未测的 demonstration 一致性/多模态/覆盖**(本探针测不到)。
+
+### 8.4 根因落点(本次净结论)
+排除链:R4 容量(官方 0.9B 能 fold)❌ → D5 动作表示(dense/anchor 都欠到位 0.70)❌ → fresh-slot/单域配方(官方同样 fresh 槽单域)❌。**剩下两条**:
+1. **数据质量/覆盖/一致性**(非幅度):我们 811ep vs 官方 1532ep;更短、idle 更多;state→action 条件可预测性可能更低 → 弱条件化 → 范围压缩。
+2. **base ckpt / pipeline**:我们 `xvla-base` 仅 8 个训练域,是否 = 官方 X-VLA-Pt 的同等基座?pipeline 是否有未发现的偏差?
+
+→ **Exp-O 升为决定性检验**,等价于"**用我们的 base+pipeline+配方能否复现官方 100% SoftFold**":
+- Exp-O(官方数据)**fold** + Exp-S(我们数据)**不 fold** → **我们的 vis 数据质量/覆盖是问题**(配方/base/pipeline 没问题)。
+- Exp-O **也不 fold** → **base ckpt 或 pipeline 有问题**(数据+配方都对齐官方仍失败)→ 回头核 base 来源 + 逐行 pipeline。
+- 两者都 fold → 之前真机失败 = 部署侧(gripper 映射 / 2s 时序回放)。
+
+> 下一步(按性价比):① 等 Exp-O 训完,同样跑欠到位探针 + 真机 fold(domain/gripper/2s 时序对齐);② 若 Exp-O 也欠到位 → 核 `xvla-base` 是否官方 X-VLA-Pt 同源;③ 数据侧补测 demonstration 一致性(同状态下动作的多模态/方差)。
+
+---
+
 ## 附录 — 关键文件:行
 
 | 项 | 位置 |
 |---|---|
+| **官方 SoftFold 部署 domain_id=5 (eef_6d)** | `xvla/X-VLA/evaluation/SoftFold-Agilex/deploy/client_eef6d_xvla.py:116` |
+| **domain_id 映射 (AIR-AGILEX=10, HQ=5)** | `xvla/X-VLA/datasets/domain_config.py:41-63` |
+| **base ckpt domain 槽 freshness 检查** | `/tmp/check_softprompt.py` + `/tmp/check_alldomain.py`(只 10-17 训练) |
+| **数据分布对比脚本** | `/tmp/data_cmp.py`(官方 58s/idle7% vs 我们 33s/idle13%) |
 | **官方动作 anchor(intention abstraction)** | `xvla/X-VLA/datasets/domain_handler/base.py:152` (`linspace(cur,cur+qdur,N+1)`) + `real_world.py:40` (`qdur=2.0`) |
 | **我们动作 chunk(30 连续帧 1s)** | `train_scripts/xvla/data/multi_domain_dataset.py:162-163` |
 | 我们训练 forward (绕过 processor) | `train_scripts/xvla/launch/xvla_train.py:330` |
