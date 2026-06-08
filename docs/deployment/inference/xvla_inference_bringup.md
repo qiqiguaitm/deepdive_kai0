@@ -18,6 +18,22 @@
 
 ---
 
+## ⭐ 上真机前 — train/serve parity 前置核对 (2026-06-08 加, 必做)
+
+> **教训**: P0/d5anchor ckpt 是**带 ImageNet 归一 + 修正 gripper 行程**训的;若 sim01 跑旧 serve(imagenet_norm=off / gripper `-0.0055` SoftFold 坑),真机**静默错位** → 抓不到布、走停。06-05/06-07 早的两次"P0 真机失败"就发生在 parity 修复(`0c9a528`+`6bfd3a0`, **6-7 22:28**)之前,故结论前提待复测(见 rootcause §7 caveat)。**每次上真机前在 sim01(`/data1/tim/workspace/deepdive_kai0`)跑下面 5 项,全绿才上。**
+
+| # | 检查 | 命令 / 期望 |
+|---|---|---|
+| 1 | **代码同步**(sim01 非 auto-sync,易 stale) | `git fetch origin main && git merge-base --is-ancestor 6bfd3a0 HEAD && echo OK` — 必须含 `6bfd3a0`(imagenet sidecar + gripper 修正) |
+| 2 | **serve 无本地分叉** | `git status --short kai0/scripts/serve_policy_xvla.py` 应为空 |
+| 3 | **gripper 默认 = vis Piper** | serve `--gripper_open_value` 默认 `0.08` / `--gripper_close_value` `0.0`(**非** SoftFold `0.0656/-0.0055`) |
+| 4 | **imagenet_norm = ckpt 一致** | ckpt 旁 `sidecar.json` 的 `image_norm`:P0/d5anchor=`imagenet`(serve 自动开)、旧 30k=`none`。缺字段时 serve 默认开(对 P0 正确)。启动日志确认 `imagenet_norm=True (来源: sidecar)` |
+| 5 | **d5anchor 专属**:2s anchor 时序 | d5anchor 的 30 anchor 表示 **2s** 运动,部署须按 2s 时序回放(非 30Hz 1s),否则 2× 过快。P0(dense 1s)无此项 |
+
+> 一键核对见(从能连 sim01 的机器):`ssh sim01 'cd /data1/tim/workspace/deepdive_kai0 && git fetch origin main -q; git merge-base --is-ancestor 6bfd3a0 HEAD && echo "✅ synced" || echo "🔴 STALE git pull"; cat <部署ckpt>/sidecar.json'`
+
+---
+
 ## 0. TL;DR — 当前状态与阻塞
 
 X-VLA 走 **server-only**: X-VLA 特有逻辑全在推理 server, 对外 emit 标准 `action_kind="ee"` 16D, 复用 `policy_inference_node --execution-mode ee_pose` 客户端。

@@ -151,6 +151,8 @@ P0 ckpt 真机录 trace, 对比 [`x3c_realrobot_trace_20260601.md`](x3c_realrobo
 ## 7. P0 后实测复盘 + 根因重定位 (2026-06-07) — 容量排除,动作表示(D5)是主因
 
 > P0 版 `xvla_x3c_smooth800_p0/step58000` 训完:offline xyz MAE@1 0.0052(P0 前 0.0122→减半,R1 见效),**但真机仍"连衣角都抓不到"**(用户实测)。两个针对性探针(Claude 离线 A100,bart 真 token + 在线 EE6D 转换 + held-out vis;脚本在 gitignored `_xvla_gripper_debug/`)定位真因。
+>
+> 🟠 **⚠️ 前提待复测 caveat(2026-06-08 补)**: 本节据以"P0 真机不 work → 找模型根因"的两次真机失败(6-5 §(c2)、6-7 早 §7),**都发生在部署 parity 修复之前**——serve gripper 默认 = SoftFold 坑 `-0.0055`(§(c2) 自己判定的"抓不到布"主因)直到 `0c9a528`(**6-7 22:28**)才改成 vis Piper 行程 `0.08/0.0`;imagenet_norm sidecar 默认开到 `6bfd3a0`(同 6-7 22:28)才落地。**即:至今未有一次"配方正确(gripper 0.08/0.0 + imagenet ON)"的干净 P0 真机测试。** 故下面"D5/数据是主因"的结论**前提是 offline 探针(有效)+ 一个被部署 bug 污染的真机观测(待复测)**。**最便宜的下一步 = 用现修好的 sim01 parity 重跑 P0 真机**:若现在能抓上 → 之前失败=gripper 部署 bug,模型/数据没那么糟;若够到却仍欠到位抓不准 → 才是干净的模型级失败,再上 Exp-O。注:**offline 欠到位(7.1/7.2)是 teacher-forcing 无关部署、仍成立**;待复测的只是"它是否真导致真机失败"。
 
 ### 7.1 实测诊断
 
