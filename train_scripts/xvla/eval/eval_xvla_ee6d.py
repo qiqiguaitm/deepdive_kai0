@@ -91,6 +91,10 @@ def main():
     ap.add_argument("--domain-id", type=int, default=20)
     ap.add_argument("--n-windows", type=int, default=1000)
     ap.add_argument("--batch-size", type=int, default=16)
+    ap.add_argument("--action-qdur", type=float, default=None,
+                    help="GT action-chunk protocol: None=dense (legacy 30 consecutive frames ~1s); "
+                         "2.0=anchor (30 anchors linspace over 2s, matches D5/official). "
+                         "Set 2.0 to fairly eval a d5anchor-trained model.")
     ap.add_argument("--out", default="/tmp/xvla_eval.json")
     args = ap.parse_args()
 
@@ -110,8 +114,9 @@ def main():
     n_denoise = model.config.num_denoising_steps
     print(f"[cfg] chunk_size={chunk_size} num_denoising_steps={n_denoise}", flush=True)
 
-    print(f"[data] LeRobotEE6DDataset({args.val_root}, domain_id={args.domain_id})", flush=True)
-    ds = LeRobotEE6DDataset(args.val_root, domain_id=args.domain_id, task_prompt=PROMPT)
+    print(f"[data] LeRobotEE6DDataset({args.val_root}, domain_id={args.domain_id}, action_qdur={args.action_qdur})", flush=True)
+    ds = LeRobotEE6DDataset(args.val_root, domain_id=args.domain_id, task_prompt=PROMPT,
+                            action_qdur=args.action_qdur)
     print(f"[data] total windows in dataset: {len(ds)}", flush=True)
     chosen, sel_meta = select_windows(ds, args.n_windows)
     print(f"[data] selected {len(chosen)} val windows: {json.dumps(sel_meta)}", flush=True)
@@ -162,6 +167,7 @@ def main():
         "step": step,
         "val_root": args.val_root,
         "domain_id": args.domain_id,
+        "action_qdur": args.action_qdur,
         "n_windows_requested": args.n_windows,
         "n_windows_eval": n_seen,
         "batch_size": bs,

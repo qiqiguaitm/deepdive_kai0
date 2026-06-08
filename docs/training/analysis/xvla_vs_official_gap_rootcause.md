@@ -21,7 +21,8 @@
 
 > **为什么 pi05 同数据 work 而 X3.C 不**: pi05 (a) 图像归一化正确 (openpi AgilexInputs 标准管线), (b) 直接输出 joint **不经 IK**, (c) 模型更大更成熟, (d) 训练配方匹配 (50k step EMA)。X3.C 在 R1/R2/R3/R4 四处同时吃亏。
 >
-> ⚠️ **2026-06-07 重定位(以 §7 为准)**: P0 修了 R1 后真机仍"抓不到衣角",实测复盘 → **R4 容量排除**(官方 0.9B 能 fold)、**新增 D5 = 动作 chunk 表示(我们 1s 稠密 vs 官方 2s intention-abstraction anchor)升为主因**。上表 R1/R4 权重已过时,详见 §7。
+> ⚠️ **2026-06-07 重定位(以 §7 为准)**: P0 修了 R1 后真机仍"抓不到衣角",实测复盘 → **R4 容量排除**(官方 0.9B 能 fold)、D5 = 动作 chunk 表示(我们 1s 稠密 vs 官方 2s intention-abstraction anchor)一度升为主因。上表 R1/R4 权重已过时,详见 §7。
+> ⚠️⚠️ **2026-06-08 再修正(以 §7.5 为准)**: D5 对照 `X3C_smooth800_d5anchor` 训完,offline 欠到位探针实测 → **D5 没治好接近/抓取欠到位(0.71→0.70),只治好持握乱飘+震荡 → D5 从主因降为"部分改善"**;欠到位与动作表示无关(dense/anchor 都 ~0.70)→ **头号嫌疑转向"配方/数据"**(单域 finetune-from-base vs 官方 290K 多域 co-train),待 Exp-O vs Exp-S 数据隔离实验定论。
 
 ---
 
@@ -181,14 +182,15 @@ P0 ckpt 真机录 trace, 对比 [`x3c_realrobot_trace_20260601.md`](x3c_realrobo
 
 ### 7.3 根因权重修正(P0 后)
 
-| 根因 | P0 前 | P0 后(本次)修正 |
-|---|---|---|
-| **D5 动作表示(1s 稠密 vs 官方 2s anchor)** | 未列 | 🔴 **主因**(实测+代码坐实) |
-| R1 ImageNet 归一 | 主因 | P0 已修,offline 减半但真机仍废 → **非真机主因** |
-| R3 欠训 | 中 | 次(58k 近 plateau) |
-| **R4 容量 0.9B** | 中 | ❌ **排除**(官方 0.9B 能 fold) |
-| R2 EE6D→IK 链 | 高 | 放大器,非源头 |
-| gripper 部署映射(SoftFold -0.0055) | — | 叠加项 |
+| 根因 | P0 前 | P0 后 | D5 对照训完后(2026-06-08,见 §7.5) |
+|---|---|---|---|
+| **D5 动作表示(1s 稠密 vs 官方 2s anchor)** | 未列 | 🟠 候选主因(代码坐实) | 🟡 **降级:部分改善,非根治**——治持握乱飘(8.75→1.61)+ 治震荡,但**接近/抓取欠到位 0.71→0.70 没动** |
+| R1 ImageNet 归一 | 主因 | P0 已修,offline 减半但真机仍废 → 非真机主因 | 同 |
+| R3 欠训 | 中 | 次(58k 近 plateau) | 同 |
+| **R4 容量 0.9B** | 中 | ❌ **排除**(官方 0.9B 能 fold) | 维持排除 |
+| R2 EE6D→IK 链 | 高 | 放大器,非源头 | 同 |
+| **配方/数据(单域 finetune-from-base vs 官方 290K 多域 co-train)** | — | 次要嫌疑 | 🔴 **升为头号嫌疑**——欠到位与动作表示无关(dense/anchor 都 ~0.70)、R4 已排除 → Exp-O vs Exp-S 数据隔离实验定论 |
+| gripper 部署映射(SoftFold -0.0055) | — | 叠加项 | 同 |
 
 ### 7.4 验证 / 修复 — D5 对照实验已提交 (2026-06-07)
 
@@ -199,6 +201,31 @@ P0 ckpt 真机录 trace, 对比 [`x3c_realrobot_trace_20260601.md`](x3c_realrobo
   - ⚠️ **真机验证还需对齐执行时序**:30 anchor 现表示 2s 运动,部署执行须按 2s 时序(非 30Hz 稠密),否则 2× 过快。offline 先验证表示假说,真机时序为下一步。
 - 次要嫌疑:官方 Soft-Fold 可能 **co-train 在 290K 多域语料**(享跨本体先验),我们是**单域 finetune-from-base on 811ep** → 配方差异。D5 修复后若仍不足再查。
 - ⭐ **数据隔离实验(已规划)**: 官方 Soft-Fold(已迁 gf0,§5 证数据/处理正确)vs 我们数据,**同 X-VLA-base + 同参数 + 同 D5-pipeline + 同部署** → 若官方能 fold、我们不能,则**我们的 demonstration 数据本身有问题**;若都不能,则 pipeline 有 bug。详细 plan 见 [`../future_plans/plans/xvla_track_x_curriculum.md`](../future_plans/plans/xvla_track_x_curriculum.md) §0.NEW.7。
+
+---
+
+## 7.5 ⭐ D5 对照训完 — offline 实测复盘 (2026-06-08):D5 ≠ 根治,降级
+
+> `X3C_smooth800_d5anchor`(单变量 vs `X3C_smooth800_p0`,仅 `action_qdur=2.0`)训完 60k。跑两个 offline:matched-protocol MAE + §7.4 预注册的欠到位探针。**脚本**:`eval_xvla_ee6d.py --action-qdur`(新增) + `_xvla_gripper_debug/probe6_d5anchor_underreach.py`。**完整表见** curriculum §0.NEW.7。
+
+### 7.5.1 证伪"错配放大 MAE"(旧 §0.NEW.7 解释)
+旧版称 d5anchor 的高 MAE 是"anchor-pred vs dense-GT 失配的假象"。实测:同 val 同窗口把 GT 也换成 anchor 2s(`--action-qdur 2.0`)→ **MAE 几乎不变**(@1 dense 0.0387 vs anchor 0.0386;@30 0.1006 vs 0.1007)。→ 高 MAE **是真实的,非 GT 标尺假象**。(d5anchor 仍不宜与 p0 比绝对值,但真因是"2s horizon 物理跨度 2×、长程更难",非标尺错。)
+
+### 7.5.2 ⭐ 欠到位探针 — D5 没治好"够不到衣角"
+每模型按各自原生 GT,高/低动量窗口由 dense-GT 位移分桶、同 f_idx:
+
+| 模型 / 原生 GT | 接近/抓取 pred/GT | 持握 pred/GT | pred lag1(GT) |
+|---|---|---|---|
+| X3C_p0 (dense 1s) | **0.71** 欠到位 | 8.75 乱飘 | 0.66 (0.77) |
+| d5anchor (anchor 2s) | **0.70** 欠到位 | 1.61 | 0.85 (0.84) |
+
+- **§7.4 预注册判据(欠到位回 ~100%)未达成**:接近/抓取 0.71→0.70,**几乎没动 → D5 不是抓取欠到位的根治**。
+- D5 **确实改善**:持握乱飘 8.75→1.61、时序震荡 pred lag1 现合 GT(0.85 vs 0.84,p0 偏抖)。绝对指令位移 0.81m→1.22m(+51%,2s 时序回放下绝对到达更远,真机或仍有正作用)。
+
+### 7.5.3 根因重定位(再修)
+- **D5 降级**:主因 → "部分改善"(治乱飘/震荡,不治欠到位)。
+- **接近欠到位在 dense 与 anchor 两种动作表示下都 ~0.70 → 与动作表示无关**。叠加 R4 容量已排除(官方同 0.9B 能 fold)→ **头号嫌疑 = 配方/数据**:我们单域 finetune-from-base on 811ep vs 官方 **290K 多域 co-train**。
+- **→ Exp-O(官方 Soft-Fold)vs Exp-S(我们数据)数据隔离实验从"佐证"升为头号下一步**(§0.NEW.7);真机 fold 须 2s anchor 时序回放 + gripper 各自实测行程。
 
 ---
 
