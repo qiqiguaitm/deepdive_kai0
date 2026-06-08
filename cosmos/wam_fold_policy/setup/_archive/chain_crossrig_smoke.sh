@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-cd /mnt/pfs/p46h4f/cosmos/wam_fold_policy_runs/reports
+cd /mnt/pfs/p46h4f/cosmos/deepdive_kai0/cosmos/wam_fold_policy_runs/reports
 # wait for the 16-GPU eval to finish (frees GPUs)
 until grep -qE "EVAL_16GPU_DONE" run_16gpu.log 2>/dev/null; do sleep 60; done
 echo "=== eval done, GPUs free -> cross-rig smoke validation $(date) ==="

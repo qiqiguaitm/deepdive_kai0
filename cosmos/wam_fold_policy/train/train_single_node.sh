@@ -14,9 +14,9 @@ export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}/mnt/pfs/p46h4f/hua
 export HF_ENDPOINT=https://hf-mirror.com HF_HOME=/mnt/pfs/p46h4f/cosmos/hf_home HF_HUB_OFFLINE=1
 export UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple UV_HTTP_TIMEOUT=600
 export UV_PROJECT_ENVIRONMENT=$VENV
-export IMAGINAIRE_OUTPUT_ROOT=/mnt/pfs/p46h4f/cosmos/wam_fold_policy_runs/train_out_single
+export IMAGINAIRE_OUTPUT_ROOT=/mnt/pfs/p46h4f/cosmos/deepdive_kai0/cosmos/wam_fold_policy_runs/train_out_single
 mkdir -p "$IMAGINAIRE_OUTPUT_ROOT"
-export BASE_CKPT_DCP=/mnt/pfs/p46h4f/cosmos/wam_fold_policy_runs/checkpoints/Cosmos3-Nano-Policy-DROID-dcp
+export BASE_CKPT_DCP=/mnt/pfs/p46h4f/cosmos/deepdive_kai0/cosmos/wam_fold_policy_runs/checkpoints/Cosmos3-Nano-Policy-DROID-dcp
 export WAN_VAE_PATH=/mnt/pfs/p46h4f/cosmos/hf_home/hub/models--Wan-AI--Wan2.2-TI2V-5B/snapshots/921dbaf3f1674a56f47e83fb80a34bac8a8f203e/Wan2.2_VAE.pth
 cd "$CF"
 NGPU=${NGPU:-8}; MAXITER=${MAXITER:-5000}; SAVEITER=${SAVEITER:-500}

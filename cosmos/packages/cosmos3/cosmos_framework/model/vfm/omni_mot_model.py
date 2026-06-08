@@ -2717,9 +2717,20 @@ class OmniMoTModel(ImaginaireModel):
         self._normalize_video_databatch_inplace(data_batch)
         self._augment_image_dim_inplace(data_batch)  # converts each image tensor to (1, C, 1, H, W)
         raw_state_vision = data_batch[self.input_image_key if is_image_batch else self.input_video_key]
-        x0_tokens_vision = [
-            self.encode(raw_state_vision_i).contiguous().float() for raw_state_vision_i in raw_state_vision
-        ]
+        # VAE-latent precompute bypass: if the batch carries precomputed latents (the RAW
+        # encode output of the padded video, one per sample), skip the ~2.35 s/step online
+        # VAE encode. The cache is dropped by collation unless EVERY sample has one, so a
+        # present key means a full hit → safe to use. Match the online path exactly: latents
+        # were stored as float32; move to the model device + .contiguous().float() (NO bf16
+        # round-trip), then the shared _remove_padding_from_latent below crops via image_size.
+        precomputed_latent = data_batch.get("precomputed_latent", None)
+        if precomputed_latent is not None:
+            _dev = self.tensor_kwargs["device"]
+            x0_tokens_vision = [lat.to(_dev).contiguous().float() for lat in precomputed_latent]
+        else:
+            x0_tokens_vision = [
+                self.encode(raw_state_vision_i).contiguous().float() for raw_state_vision_i in raw_state_vision
+            ]
 
         frame_size = data_batch.get("image_size", None)
         if frame_size is not None:

@@ -8,6 +8,12 @@
 
 ## 当前优先级 plan
 
+### 🌍 Cosmos3 世界模型评测 (2026-06-05 新)
+
+| 优先级 | 计划 | 状态 | 资源 | ETA | 目的 |
+|---|---|---|---|---|---|
+| ⭐⭐ P1 | [**Cosmos3 三模型 I2V 世界预测评测**](plans/cosmos3_three_model_i2v_eval_plan.md) | 📝 待评审 (设计定稿, P0 env 已解) | 当前主机(b2)+b1 = 16×A100 | ~7–9h | 叠衣 val 上横比 Nano/Super/Super-I2V；3 ep × 3 cam × horizon(1s/3s/7s) **滑窗覆盖整段** teacher-forced rollout，metric-vs-horizon + PSNR/SSIM/LPIPS/temporal/FVD |
+
 ### 🔥 v7/v8 真机失败验证实验 (2026-05-27 新)
 
 | 优先级 | 计划 | 状态 | 资源 | ETA | 目的 |

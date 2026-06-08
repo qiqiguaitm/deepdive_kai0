@@ -10,7 +10,7 @@ COS=/mnt/pfs/p46h4f/cosmos/deepdive_kai0/cosmos
 CF=$COS/packages/cosmos3
 WFP=$COS/wam_fold_policy
 VENV=$CF/.venv
-RUNS=/mnt/pfs/p46h4f/cosmos/wam_fold_policy_runs
+RUNS=/mnt/pfs/p46h4f/cosmos/deepdive_kai0/cosmos/wam_fold_policy_runs
 cd "$CF"
 
 # ---- populate the venv's node-local python on this pod (venv symlinks to /root/.local) ----
@@ -37,6 +37,8 @@ export WAN_VAE_PATH=/mnt/pfs/p46h4f/cosmos/hf_home/hub/models--Wan-AI--Wan2.2-TI
 export BASE_CKPT_DCP=$RUNS/checkpoints/Cosmos3-Nano-Policy-DROID-dcp
 export CKPT_DIR=${CKPT_DIR:-$RUNS/train_out_4n8g}
 export IMAGINAIRE_OUTPUT_ROOT="$CKPT_DIR"; mkdir -p "$CKPT_DIR"
+# offline wandb -> metrics/step-time on gpfs (readable; AIHC log streaming unreliable)
+export WANDB_MODE=offline WANDB_DIR="$CKPT_DIR/wandb" WANDB__SERVICE_WAIT=300; mkdir -p "$CKPT_DIR/wandb"
 
 # ---- RDMA/IB (reuse dreamzero userspace rdma-core staged on PFS, like GigaWorld/tau0) ----
 IBROOT=/mnt/pfs/p46h4f/cosmos/dreamzero/ibverbs/root
@@ -57,6 +59,18 @@ export NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-eth0}
 export GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME:-eth0}
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 
+# ---- CPU-RAM OOM mitigation (the step-~860 re-OOM) ----
+# pfsl2 video/parquet reads accumulate ~125 MB/step in cache and climb linearly
+# (44→70→100→119 GB at steps 200/400/600/800 → OOM ~860). num_workers↓ only lowered the
+# baseline. Bound it: (1) cap glibc per-thread arenas (worker heap bloat); (2) periodically
+# drop reclaimable page cache (best-effort, needs cap to write drop_caches); (3) log `free`
+# so we can tell reclaimable-cache vs anon-RSS from gpfs. One set of loops per pod.
+export MALLOC_ARENA_MAX=${MALLOC_ARENA_MAX:-2}
+export MALLOC_TRIM_THRESHOLD_=${MALLOC_TRIM_THRESHOLD_:-0}
+mkdir -p "$CKPT_DIR"
+( while true; do sync; echo 1 > /proc/sys/vm/drop_caches 2>/dev/null; sleep 20; done ) &
+( while true; do { echo -n "$(date +%H:%M:%S) "; free -g | sed -n 2p; } >> "$CKPT_DIR/mem_node${NODE_RANK}.log" 2>/dev/null; sleep 60; done ) &
+
 # ---- training args (override via AIHC envs) ----
 MAX_STEPS=${MAX_STEPS:-50000}
 SAVE_ITER=${SAVE_ITER:-1000}
@@ -67,8 +81,28 @@ echo "[aihc-cosmos] node $NODE_RANK/$NNODES gpus=$NUM_GPUS total=$((NNODES*NUM_G
 echo "[aihc-cosmos] max_iter=$MAX_STEPS save_iter=$SAVE_ITER ckpt_dir=$CKPT_DIR (cross-rig visrobot01+kairobot01)"
 "$VENV/bin/python" -c 'import torch;print("[aihc-cosmos] torch",torch.__version__,"cuda",torch.cuda.is_available(),torch.cuda.device_count())' || true
 
-exec "$VENV/bin/torchrun" \
+# (MFU lever #1 dropped: `callbacks.norm_monitor.*` is not a CLI-overridable struct path
+# under this hydra compose — it raises ConfigCompositionException. The norm hooks are a
+# tiny cost and norms already log only every 5000 steps, so #1 isn't worth a struct hack.)
+# Robustness: tie the LambdaCosine cycle length to the actual run length so a single cosine
+# cycle always spans the whole run (sum(cycle_lengths) < max_iter → scheduler indexes a
+# None cycle → KeyValidationError crash, which killed b4b51/vxj6 at step ~300).
+# cosine cycle spans the whole run; decoupled from max_iter via SCHED_CYCLE so a short
+# validation run (small max_iter) can still use the real LR trajectory (large cycle) and
+# avoid the step==sum(cycle_lengths) boundary crash. Defaults to MAX_STEPS for real runs.
+MFU_OVERRIDES="scheduler.cycle_lengths=[${SCHED_CYCLE:-$MAX_STEPS}]"
+
+# Full per-node log → gpfs. AIHC `aihc job logs` is HEAD-capped at 1000 lines, so a
+# traceback that fires after startup (e.g. a mid-training exception) is invisible.
+# tee the whole stream to a readable file; the crash tail lands here.
+RANKLOG="$CKPT_DIR/train_node${NODE_RANK}.log"
+echo "[aihc-cosmos] teeing full output to $RANKLOG"
+
+# Not exec'd: pipe through tee so the full stdout+stderr (incl. tracebacks) persists.
+set -o pipefail
+"$VENV/bin/torchrun" \
   --nnodes="$NNODES" --nproc_per_node="$NUM_GPUS" --node_rank="$NODE_RANK" \
   --master_addr="$MASTER_ADDR" --master_port="$MASTER_PORT" \
   -m cosmos_framework.scripts.train --sft-toml="$TOML" -- \
-  trainer.max_iter="$MAX_STEPS" checkpoint.save_iter="$SAVE_ITER" $EXTRA
+  trainer.max_iter="$MAX_STEPS" checkpoint.save_iter="$SAVE_ITER" $MFU_OVERRIDES $EXTRA \
+  2>&1 | tee "$RANKLOG"

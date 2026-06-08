@@ -28,6 +28,7 @@ same ``ActionTransformPipeline`` / DataPacker can consume it:
 from __future__ import annotations
 
 import json
+import os
 import random
 from pathlib import Path
 from typing import Any, Literal
@@ -37,6 +38,64 @@ import pyarrow.parquet as pq
 import torch
 import torch.nn.functional as F
 from lerobot.datasets.video_utils import decode_video_frames
+
+# ---- CPU-RAM leak fix: bound lerobot's torchcodec decoder cache ----------------------------
+# lerobot.datasets.video_utils.VideoDecoderCache._cache is an UNBOUNDED dict: it keeps one
+# VideoDecoder + an OPEN file handle per unique video path forever (no eviction). wam_fold has
+# ~8410 episodes x 3 cams ≈ 25k videos; shuffled windows keep opening new ones, so per worker
+# the cache (decoders + handles + their pfsl2-cached bytes) grows linearly ~1 GB/step/node →
+# CPU OOM ~step 750 (drop_caches/MALLOC_TRIM can't reclaim live handles). Replace the module
+# singleton with an LRU that closes evicted handles (also frees their pfsl2 cache). Cap is tiny
+# because full-shuffle hit-rate is low anyway and dataloader time is fully hidden.
+import importlib as _importlib
+from collections import OrderedDict as _OrderedDict
+from threading import Lock as _Lock
+import lerobot.datasets.video_utils as _lvu
+
+
+class _BoundedVideoDecoderCache:
+    def __init__(self, maxsize: int = 16) -> None:
+        self._cache: "_OrderedDict[str, tuple]" = _OrderedDict()
+        self._lock = _Lock()
+        self._max = max(1, int(maxsize))
+
+    def get_decoder(self, video_path):
+        from torchcodec.decoders import VideoDecoder
+        import fsspec
+        video_path = str(video_path)
+        with self._lock:
+            hit = self._cache.get(video_path)
+            if hit is not None:
+                self._cache.move_to_end(video_path)
+                return hit[0]
+            fh = fsspec.open(video_path).__enter__()
+            dec = VideoDecoder(fh, seek_mode="approximate")
+            self._cache[video_path] = (dec, fh)
+            while len(self._cache) > self._max:
+                _p, (_d, _h) = self._cache.popitem(last=False)
+                try:
+                    _h.close()
+                except Exception:
+                    pass
+            return dec
+
+    def clear(self):
+        with self._lock:
+            for _d, _h in self._cache.values():
+                try:
+                    _h.close()
+                except Exception:
+                    pass
+            self._cache.clear()
+
+    def size(self) -> int:
+        with self._lock:
+            return len(self._cache)
+
+
+_lvu._default_decoder_cache = _BoundedVideoDecoderCache(
+    int(os.environ.get("LEROBOT_DECODER_CACHE_MAX", "16"))
+)
 from torch.utils.data import Dataset
 
 from cosmos_framework.data.vfm.action.action_normalization import normalize_action
@@ -60,6 +119,14 @@ _TASK_TEXT = "Flatten and fold the cloth."
 _MODE_CHOICES = ("forward_dynamics", "inverse_dynamics", "policy")
 
 _ACTION_DIM = 14
+# DELTA-ACTION mask (matches GWP _piper14 + Policy-DROID base convention): arm joints are
+# predicted as a delta vs the proprioceptive state at the window's anchor frame; the two
+# grippers (indices 6, 13) stay ABSOLUTE. delta[t,i] = action[t,i] - state_anchor[i] for
+# joint dims. This anchors short-horizon prediction to the current pose (mae@1 ~= one-step
+# motion) instead of regressing absolute joints from scratch — the abs-vs-delta gap that
+# made cosmos mae@1 ~55x worse than GWP. Reconstruct at eval: abs = delta + state_anchor*mask.
+_DELTA_ACTION = True
+_DELTA_MASK = np.array([True] * 6 + [False] + [True] * 6 + [False], dtype=bool)
 # Per-arm joint layout: 6 arm joints + 1 gripper, x2 arms = 14.
 # Idle detection treats all 14 columns as JOINT (frame-diff based), which is
 # correct for absolute joint commands.
@@ -247,14 +314,34 @@ class WamFoldLeRobotDataset(Dataset):
             dtype=np.float32,
         )  # [chunk, 14]
 
+        # DELTA-ACTION transform (matches GWP + Policy-DROID base). Anchor = proprioceptive
+        # observation.state at the window's first frame (`start`); arm-joint channels become
+        # action - anchor, grippers stay absolute. The model learns deltas relative to the
+        # pose shown in the conditioning video frame; eval reconstructs abs = delta + anchor.
+        if _DELTA_ACTION:
+            state_anchor = np.asarray(
+                table.column("observation.state").to_pylist()[start], dtype=np.float32
+            )  # [14]
+            action_np = action_np.copy()
+            action_np[:, _DELTA_MASK] = action_np[:, _DELTA_MASK] - state_anchor[_DELTA_MASK]
+
         video = self._load_concat_video(meta, timestamps)
         raw_action = torch.from_numpy(action_np).float()
+
+        # Stable per-window identity for the VAE-latent cache (invariant to shuffling).
+        # idx→(file_idx,start) is a fixed mapping and video decode is deterministic, so this
+        # key uniquely + reproducibly names the encoded latent for that exact clip.
+        cache_key = (
+            f"{self._rig}_d{self._domain_id}_c{meta['episode_chunk']:03d}"
+            f"_e{meta['episode_index']:06d}_s{start:04d}_L{self._chunk_length:02d}"
+        )
 
         return self._build_result(
             mode=mode,
             video=video,
             action=raw_action,
             ai_caption=_TASK_TEXT,
+            cache_key=cache_key,
             additional_view_description=(
                 "The top row is from the head-mounted camera. "
                 "The bottom row contains two horizontally concatenated wrist-camera views, "

@@ -11,6 +11,6 @@ export WAN_VAE_PATH=/mnt/pfs/p46h4f/cosmos/hf_home/hub/models--Wan-AI--Wan2.2-TI
 export TOKENIZERS_PARALLELISM=false PYTORCH_ALLOC_CONF=expandable_segments:True
 cd "$CF"
 "$CF/.venv/bin/python" /mnt/pfs/p46h4f/cosmos/deepdive_kai0/cosmos/wam_fold_policy/eval/eval_report.py \
-  --out_dir /mnt/pfs/p46h4f/cosmos/wam_fold_policy_runs/reports \
+  --out_dir /mnt/pfs/p46h4f/cosmos/deepdive_kai0/cosmos/wam_fold_policy_runs/reports \
   --n_metric_eps "${NMETRIC:-6}" --n_viz_eps "${NVIZ:-2}" --model_chunk 16 "$@"
 echo "=== EVAL_REPORT_DONE rc=$? ==="

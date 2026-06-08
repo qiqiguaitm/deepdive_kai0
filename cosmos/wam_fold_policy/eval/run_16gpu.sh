@@ -3,7 +3,7 @@
 # Do NOT export conda LD_LIBRARY_PATH here (breaks ssh); shard.sh sets it per-process.
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY LD_LIBRARY_PATH; export no_proxy='*'
 SHARD=/mnt/pfs/p46h4f/cosmos/deepdive_kai0/cosmos/wam_fold_policy/eval/shard.sh   # scripts
-D=/mnt/pfs/p46h4f/cosmos/wam_fold_policy_runs/reports                            # outputs/logs
+D=/mnt/pfs/p46h4f/cosmos/deepdive_kai0/cosmos/wam_fold_policy_runs/reports                            # outputs/logs
 B1="ssh -p 429 -o BatchMode=yes -o StrictHostKeyChecking=no -o ServerAliveInterval=30 root@120.48.99.93"
 NUM=16
 ARGS="--out_dir $D --no_lpips --max_full_windows 100000 --max_win_per_ep 4 --n_metric_eps ${NMETRIC:-20} --n_viz_eps ${NVIZ:-10}"

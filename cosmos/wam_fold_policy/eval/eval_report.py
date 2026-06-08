@@ -620,6 +620,8 @@ def main():
         mc = args.model_chunk
         # GT action chunk from parquet (absolute 14-D joint), aligned to window start f.
         gt = _read_gt_action(args.val_root, ep, f, args.action_chunk)  # [action_chunk,14]
+        # Anchor states for delta reconstruction (per-sub-chunk obs at f+i*mc).
+        state_win = _read_gt_state(args.val_root, ep, f, args.action_chunk)  # [action_chunk,14]
 
         if args.rollout == "free":
             # ---- FREE-RUNNING autoregressive rollout (action + video jointly, policy mode) ----
@@ -637,7 +639,8 @@ def main():
                     # [C,H,W] float[0,1] concat-view for the next policy.infer first-frame.
                     last = v[-1]  # [H,W,3] uint8 cosmos vertical concat
                     cur = torch.from_numpy(np.ascontiguousarray(last)).permute(2, 0, 1).float() / 255.0
-            pred_raw = np.concatenate(acts, axis=0)[: args.action_chunk]  # [action_chunk,14] raw joint
+            pred_raw = np.concatenate(acts, axis=0)[: args.action_chunk]  # [action_chunk,14] DELTA
+            pred_raw = _delta_to_abs(pred_raw, state_win, mc)             # -> absolute (add anchor state)
             pred_v, gt_v = None, None
             if want_video and vids:
                 full_pred = np.concatenate(vids, axis=0)  # [sum Tv, H, W, 3] dense, ~action_chunk frames
@@ -650,15 +653,17 @@ def main():
         pred_subs = []
         for i in range(n_sub):
             obs = _concat_at(ep, f + i * mc)
-            pred_subs.append(policy.run_policy_subchunk(obs))  # [mc,14] raw
-        pred_raw = np.concatenate(pred_subs, axis=0)[: args.action_chunk]  # [action_chunk,14] raw joint
+            pred_subs.append(policy.run_policy_subchunk(obs))  # [mc,14] DELTA
+        pred_raw = np.concatenate(pred_subs, axis=0)[: args.action_chunk]  # [action_chunk,14] DELTA
+        pred_raw = _delta_to_abs(pred_raw, state_win, mc)                 # -> absolute (add anchor state)
 
         pred_v, gt_v = None, None
         if want_video:
             gt_v = _gt_concat_video(ep, f)  # dense action_chunk REAL frames as GWP 3-view
 
-            # VIDEO rollout (autoregressive FORWARD_DYNAMICS, GT actions normalized)
-            gt_norm = _norm_action_quantile(gt, policy.q01, policy.q99)  # [action_chunk,14] in [-1,1]
+            # VIDEO rollout (autoregressive FORWARD_DYNAMICS, GT actions as normalized DELTAS —
+            # the model now conditions on delta actions, so convert GT abs -> per-sub-chunk delta first).
+            gt_norm = _norm_action_quantile(_abs_to_delta(gt, state_win, mc), policy.q01, policy.q99)
             cur_frame = _concat_at(ep, f)  # init = GT concat first frame
             fd_frames = []
             fd_ok = True
@@ -805,6 +810,50 @@ def _read_gt_action(val_root, ep, start, action_chunk):
     return np.asarray(acts, dtype=np.float32)[:, :14]
 
 
+# ============================ DELTA-action reconstruction (matches training delta switch) ===
+# Training (wam_fold_dataset.py) predicts arm-joint DELTAS vs the proprioceptive state at each
+# model_chunk window's anchor frame; grippers stay absolute. The model is rolled out in n_sub
+# sub-chunks of model_chunk(mc), each conditioned on the obs at f+i*mc, so each sub-chunk's
+# deltas are relative to state[f+i*mc]. Eval reconstructs: abs[t] = delta[t] + state[f+(t//mc)*mc].
+_DELTA_MASK = np.array([True] * 6 + [False] + [True] * 6 + [False], dtype=bool)  # joints delta, grippers abs
+
+
+def _read_gt_state(val_root, ep, start, action_chunk):
+    """Read absolute 14-D observation.state [action_chunk,14] (delta anchor); pad tail by repeat."""
+    import pyarrow.parquet as pq
+    path = None
+    for chunk in sorted(glob.glob(os.path.join(val_root, "data", "chunk-*"))):
+        cand = os.path.join(chunk, f"episode_{ep:06d}.parquet")
+        if os.path.isfile(cand):
+            path = cand; break
+    if path is None:
+        raise FileNotFoundError(f"no parquet for episode {ep} under {val_root}/data")
+    table = pq.read_table(path)
+    sts = table.column("observation.state").to_pylist()[start: start + action_chunk]
+    arr = np.asarray(sts, dtype=np.float32)[:, :14]
+    if 0 < arr.shape[0] < action_chunk:
+        arr = np.concatenate([arr, np.repeat(arr[-1:], action_chunk - arr.shape[0], 0)], 0)
+    return arr
+
+
+def _delta_to_abs(delta, state_win, mc):
+    """Predicted per-sub-chunk deltas -> absolute. abs[t]=delta[t]+state_win[(t//mc)*mc] on joints."""
+    out = np.array(delta, dtype=np.float64).copy()
+    for t in range(out.shape[0]):
+        anc = state_win[min((t // mc) * mc, state_win.shape[0] - 1)]
+        out[t, _DELTA_MASK] = out[t, _DELTA_MASK] + anc[_DELTA_MASK]
+    return out
+
+
+def _abs_to_delta(absact, state_win, mc):
+    """GT absolute actions -> per-sub-chunk deltas (to feed FORWARD_DYNAMICS, which now wants deltas)."""
+    out = np.array(absact, dtype=np.float64).copy()
+    for t in range(out.shape[0]):
+        anc = state_win[min((t // mc) * mc, state_win.shape[0] - 1)]
+        out[t, _DELTA_MASK] = out[t, _DELTA_MASK] - anc[_DELTA_MASK]
+    return out
+
+
 # ============================ aggregate -> report.html (mirrors episode_report.aggregate) ===========
 def aggregate(args, viz_eps, HOR):
     sh = sorted(glob.glob(os.path.join(args.out_dir, "shards", "shard_*.json")))
@@ -917,12 +966,12 @@ def aggregate(args, viz_eps, HOR):
 def get_args():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--val_root", default="/mnt/pfs/p46h4f/cosmos/deepdive_kai0/kai0/data/wam_fold_v1/visrobot01_val")
-    ap.add_argument("--out_dir", default="/mnt/pfs/p46h4f/cosmos/wam_fold_policy_runs/reports")
-    ap.add_argument("--export_dir", default="/mnt/pfs/p46h4f/cosmos/wam_fold_policy_runs/exported/Cosmos3-Nano-Policy-wam_fold")
+    ap.add_argument("--out_dir", default="/mnt/pfs/p46h4f/cosmos/deepdive_kai0/cosmos/wam_fold_policy_runs/reports")
+    ap.add_argument("--export_dir", default="/mnt/pfs/p46h4f/cosmos/deepdive_kai0/cosmos/wam_fold_policy_runs/exported/Cosmos3-Nano-Policy-wam_fold")
     ap.add_argument("--checkpoint_path", default="",
                     help="iter_* DCP dir to export (only needed if export_dir missing)")
     ap.add_argument("--config_file",
-                    default="/mnt/pfs/p46h4f/cosmos/wam_fold_policy_runs/train_out_2node/cosmos3/action/wam_fold_nano/config.yaml")
+                    default="/mnt/pfs/p46h4f/cosmos/deepdive_kai0/cosmos/wam_fold_policy_runs/train_out_2node/cosmos3/action/wam_fold_nano/config.yaml")
     ap.add_argument("--no_export", action="store_true", help="never run export (assume export_dir is ready)")
     ap.add_argument("--export_vit", action="store_true",
                     help="export the Qwen3-VL ViT tower too (needs full Qwen3-VL-8B shards cached); default --no-vit")

@@ -49,7 +49,7 @@ All run outputs (checkpoints, exported model, train/smoke outputs, reports/shard
 go to the **runs root** (NOT this dir):
 
 ```
-RUNS = /mnt/pfs/p46h4f/cosmos/wam_fold_policy_runs
+RUNS = /mnt/pfs/p46h4f/cosmos/deepdive_kai0/cosmos/wam_fold_policy_runs
 ├── checkpoints/Cosmos3-Nano-Policy-DROID-dcp   # DCP warm-start ckpt
 ├── exported/Cosmos3-Nano-Policy-wam_fold       # exported HF model (eval target)
 ├── train_out_2node/   train_out_single/        # IMAGINAIRE_OUTPUT_ROOT per launcher

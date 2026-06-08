@@ -99,3 +99,9 @@ tau-0-wm/.claude/
 tau-0-wm/runs/
 # calibration verify outputs (scratch/outputs, jim-generated on sim01)
 calib/verify_out/
+
+# Claude Code local settings (contains image-pull password — never commit)
+.claude/settings.local.json
+cosmos/wam_fold_policy_runs/
+**/__pycache__/
+*.pyc

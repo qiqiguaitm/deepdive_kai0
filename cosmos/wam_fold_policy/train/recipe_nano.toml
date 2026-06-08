@@ -10,15 +10,20 @@ experiment   = "wam_fold_nano"
 project      = "cosmos3"
 group        = "action"
 name         = "wam_fold_nano"
-wandb_mode   = "disabled"
+wandb_mode   = "offline"
 
 [model]
 max_num_tokens_after_packing = 45056
 joint_attn_implementation    = "two_way"
 precision                    = "bfloat16"
 
+# CRASH FIX (exitCode 137 OOMKilled @ step 386): EMA kept a full ~32-64 GB CPU copy of the
+# 16B model (GPU peak was only 33 GB → EMA lives on CPU), stacked on the climbing pfsl2 video
+# cache (CPU RAM hit 101.9 GB by step 200) → CPU OOM-killer. Disabling EMA frees that copy
+# (the documented fix: prior 16B run went 50k steps zero-OOM after disabling EMA). Harmless
+# here: eval uses the RAW transformer, never the EMA copy (high-decay EMA lags mid-training).
 [model.ema]
-enabled         = true
+enabled         = false
 rate            = 0.1
 iteration_shift = 0
 
@@ -30,8 +35,14 @@ data_parallel_replicate_degree = 4                      # replicate across 4 nod
 enabled         = true
 compile_dynamic = true
 
+# MFU lever #5 TESTED AND REVERTED: mode="none" OOM'd even at batch 8 (77 GB alloc / 80 GB
+# cap) — full activation storage for the 16B MoT needs ~46 GB more than the recompute path.
+# The "40 GB free" seen under selective was exactly what AC buys by recomputing. AC is
+# REQUIRED at this model size / 45k-token budget; selective+fmha is the proven config (ran
+# to step 300 at 31 GB peak). backward(2.47s)<forward(3.59s) already showed recompute isn't
+# the bottleneck, so there's little to gain here anyway. Keep selective.
 [model.activation_checkpointing]
-mode               = "selective"                        # per-op SAC: recompute only heavy ops (faster backward than full; mem-safe under HSDP)
+mode               = "selective"
 save_ops_regex     = ["fmha"]
 preserve_rng_state = true
 determinism_check  = "default"
@@ -47,8 +58,14 @@ keys_to_select = []
 lr             = 2.0e-5
 weight_decay   = 0
 
+# CRASH FIX: cycle_lengths was [300] (leftover from the 300-step smoke recipe). The
+# LambdaCosine scheduler indexes cycle_lengths/warm_up_steps by the current cycle; once
+# global_step reaches sum(cycle_lengths)=300 the cycle index becomes None →
+# omegaconf KeyValidationError ("ListConfig indices ... not NoneType") and the whole job
+# dies. This is what killed b4b51 / vxj6u8wbneoi at step ~300-340. One cosine cycle must
+# span the FULL run: set cycle_lengths = max_iter (10000). Keep the 30-step warmup.
 [scheduler]
-cycle_lengths      = [300]
+cycle_lengths      = [10000]
 f_max              = [1.0]
 f_min              = [0.0]
 f_start            = [0.0]

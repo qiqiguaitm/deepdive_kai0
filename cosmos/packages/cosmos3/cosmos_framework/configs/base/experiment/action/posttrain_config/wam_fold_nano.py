@@ -33,6 +33,7 @@ Usage::
 from __future__ import annotations
 
 import copy
+import os
 from typing import Any
 
 import torch
@@ -54,6 +55,18 @@ cs = ConfigStore.instance()
 # Keep the model's action head width and mask zero-padded channels per-sample.
 # Must match NANO_MODEL_CONFIG["max_action_dim"].
 _MAX_ACTION_DIM = 64
+
+# MFU lever #2 (compile=all): the base NANO config compiles only the per-block
+# "language" path (apply_compile in parallelize_unified_mot.py); "all" additionally
+# compiles the full network (parallelize_vfm_network.py:76), folding the vision /
+# action / VAE-adjacent eager kernels into the graph. compiled_region is NOT a valid
+# TOML field (SFTExperimentConfig forbids it), so it must be set here on the model
+# config — NOT in recipe_nano.toml.
+_NANO_CFG = copy.deepcopy(NANO_MODEL_CONFIG)
+# compiled_region="language" (reverted from "all"): measured no-op for speed (heavy MoT GEMMs
+# already compiled in the language region), and "language" compiles faster → less startup per
+# resume-cycle restart (the pfsl2-cache node-OOM forces ~700-step pod lives + auto-resume).
+_NANO_CFG["compile"]["compiled_region"] = "language"
 
 # Token-cost constants for compute_num_tokens (mirror
 # joint_dataloader._compute_num_tokens_per_sample). Nano video tokenizer:
@@ -120,6 +133,12 @@ class ActionDataPacker(DataPacker):
         "sound",
         "raw_action_dim",
         "image_size",
+        # VAE-latent precompute: per-sample, must stay a list (like "video"). If ANY
+        # sample in a pack lacks a cached latent, sft_collate_fn drops the key (its
+        # `any(v is None)` guard) → the model falls back to online encode for that
+        # batch (safe). cache_key rides along for the precompute job to name outputs.
+        "cache_key",
+        "precomputed_latent",
     }
     # Optional metadata keys that may not survive the pipeline / vary per sample.
     _DROP_IF_NONE_KEYS = {"additional_view_description"}
@@ -135,11 +154,16 @@ class ActionDataPacker(DataPacker):
         spatial_compression: int = _SPATIAL_COMPRESSION,
         patch_spatial: int = _PATCH_SPATIAL,
         temporal_compression: int = _TEMPORAL_COMPRESSION,
+        latent_cache_dir: str | None = None,
     ) -> None:
         self._resolution = resolution
         self._spatial_compression = spatial_compression
         self._patch_spatial = patch_spatial
         self._temporal_compression = temporal_compression
+        # When set, sft_process_sample loads a precomputed VAE latent per sample (by
+        # cache_key) so the model can bypass online encode (~2.35 s/step ≈ 34%). None =
+        # normal online-encode behavior (unchanged), so existing runs are unaffected.
+        self._latent_cache_dir = latent_cache_dir
         self._pipeline = ActionTransformPipeline(
             pad_keys=["video"],
             tokenizer_config=tokenizer_config,
@@ -158,7 +182,20 @@ class ActionDataPacker(DataPacker):
         # ActionTransformPipeline mutates and returns the dict; it resizes/pads
         # the video, tokenizes the caption (if tokenizer_config given), builds a
         # SequencePlan, and pads/masks the action to max_action_dim.
-        return self._pipeline(item, resolution=self._resolution)
+        # Capture cache_key BEFORE the pipeline (which may not preserve unknown keys)
+        # and re-attach after, so it reliably survives into the collated batch.
+        cache_key = item.get("cache_key")
+        item = self._pipeline(item, resolution=self._resolution)
+        if cache_key is not None:
+            item["cache_key"] = cache_key
+            if self._latent_cache_dir is not None:
+                lp = os.path.join(self._latent_cache_dir, cache_key + ".pt")
+                if os.path.exists(lp):
+                    # Per-sample latent tensor [latent_ch, T_lat, H_lat, W_lat] (raw encode
+                    # output of the padded video; train-time _remove_padding_from_latent
+                    # handles cropping via image_size, same as the online path).
+                    item["precomputed_latent"] = torch.load(lp, map_location="cpu")
+        return item
 
     def compute_num_tokens(self, sample: dict) -> int:
         # Mirror joint_dataloader._compute_num_tokens_per_sample:
@@ -247,11 +284,12 @@ wam_fold_nano = LazyDict(
             project="cosmos3",
             group="action",
             name="wam_fold_nano",
-            wandb_mode="disabled",
+            wandb_mode="offline",   # offline: metrics/step-time written to gpfs wandb dir (readable; AIHC log streaming is broken)
         ),
         model=dict(
             # Keep max_action_dim=64; raw_action_dim=14 (per-sample) masks padding.
-            config=copy.deepcopy(NANO_MODEL_CONFIG),
+            # compiled_region="all" applied above (MFU lever #2).
+            config=_NANO_CFG,
         ),
         optimizer=dict(
             betas=[0.9, 0.95],
@@ -265,7 +303,10 @@ wam_fold_nano = LazyDict(
         ),
         scheduler=dict(
             lr_scheduler_type="LambdaCosine",
-            cycle_lengths=[300],
+            # One cosine cycle must span the whole run; sum(cycle_lengths) < max_iter makes
+            # the scheduler index a None cycle at step==sum → KeyValidationError crash.
+            # Overridden at launch to [MAX_STEPS] (run_train_aihc_cosmos.sh); 10000 default.
+            cycle_lengths=[10000],
             f_max=[1.0],
             f_min=[0.0],
             f_start=[0.0],
@@ -343,14 +384,40 @@ wam_fold_nano = LazyDict(
                 max_action_dim=_MAX_ACTION_DIM,
                 cfg_dropout_rate=0.1,
                 append_idle_frames=True,
+                # VAE-latent precompute: set WAM_LATENT_CACHE to the cache dir to bypass
+                # online encode (~34% faster). Unset/empty → None → normal online encode.
+                latent_cache_dir=(os.environ.get("WAM_LATENT_CACHE") or None),
             ),
+            # CRASH FIX (exitCode 137 OOMKilled @ step 386, BOTH EMA on & off — CPU mem pinned
+            # at 101.9 GB by step 200, deterministic w/ seed=42). Real cause: the DATALOADER, not
+            # EMA. 8 ranks/node × num_workers=8 × prefetch=6 = ~384 prefetched decoded-video
+            # buffers/node (3-cam 480p×16f ≈ 44 MB raw each) → ~100 GB baseline; the fixed-seed
+            # batch at step 386 spikes over the node RAM limit. Dataloader time is ~0 (fully
+            # hidden behind 8.6 s steps), so slashing workers/prefetch/pool is free throughput-wise
+            # and cuts ~30+ GB of CPU RAM. num_workers 8→2, prefetch 6→2, pool_size 16→8.
             max_tokens=45056,
-            max_batch_size=8,
-            pool_size=16,
+            # Batch sweep (selective AC):
+            #   batch  8: 7.0s / 15.3k tok = 2186 tok/s, 31 GB, stable
+            #   batch 24: avg 24s/44k = 1833 tok/s BUT best-step 17.8s = 2472 tok/s — high
+            #             variance (variable pack size); node2 OOM'd at iter 387 on a big pack.
+            # The batch24 best-step beating batch8 says the avg drop is variance/OOM, not "bigger
+            # is worse". batch 16 (~30k tok, ~38 GB peak — safely below the OOM level) tests the
+            # middle: should keep most of the upside with far less variance/OOM. MEASURING.
+            # LR kept 2e-5 (2× batch; bump to ~2.8e-5=√2·lr if convergence lags).
+            max_batch_size=16,
+            pool_size=8,
             shuffle=True,
             seed=42,
-            num_workers=8,
-            prefetch_factor=6,
+            # OOM ROOT CAUSE was NOT worker count: cpu_mem (DeviceMonitor) is process-tree RSS,
+            # which climbs ~125 MB/step (dataloader workers holding pfsl2-read data as anon RSS,
+            # plateauing ~650 GB per [[wam-oom-pfsl2-cache]]) and hit the pod's ~120 GB cgroup cap
+            # (AIHC default ~15 GB/GPU × 8) → OOM, while the NODE has 1 TB idle. Real fix: raise
+            # the pod memory to 957 GB in the aijob (GWP reference value) so RSS reaches its plateau
+            # The real CPU-leak fix is the LRU-bounded VideoDecoderCache (wam_fold_dataset.py);
+            # keep num_workers=4 to isolate that fix as the single variable + max data-loading
+            # parallelism (dataloader time is ~0/hidden anyway). cpu_mem_watch verifies flat RAM.
+            num_workers=4,
+            prefetch_factor=2,
             persistent_workers=True,
             pin_memory=True,
         ),

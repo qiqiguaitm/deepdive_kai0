@@ -2,7 +2,7 @@
 # Kill in-flight eval/smoke, then: (1) cross-rig smoke validation, (2) 16-GPU eval with 10 viz eps.
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY LD_LIBRARY_PATH; export no_proxy='*'
 WFP=/mnt/pfs/p46h4f/cosmos/deepdive_kai0/cosmos/wam_fold_policy   # scripts
-D=/mnt/pfs/p46h4f/cosmos/wam_fold_policy_runs/reports            # outputs/logs
+D=/mnt/pfs/p46h4f/cosmos/deepdive_kai0/cosmos/wam_fold_policy_runs/reports            # outputs/logs
 B1="ssh -p 429 -o BatchMode=yes -o StrictHostKeyChecking=no root@120.48.99.93"
 # --- kill in-flight ---
 for pat in run_16gpu.sh shard.sh eval_report chain_crossrig_smoke smoke_validate cosmos_framework.scripts.train; do

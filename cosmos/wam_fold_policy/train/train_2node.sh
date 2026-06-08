@@ -5,7 +5,7 @@
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY LD_LIBRARY_PATH; export no_proxy='*'
 ENVF=/mnt/pfs/p46h4f/cosmos/deepdive_kai0/cosmos/wam_fold_policy/train/env.sh
 TOML=/mnt/pfs/p46h4f/cosmos/deepdive_kai0/cosmos/wam_fold_policy/train/recipe_nano.toml
-LOGDIR=/mnt/pfs/p46h4f/cosmos/wam_fold_policy_runs/reports
+LOGDIR=/mnt/pfs/p46h4f/cosmos/deepdive_kai0/cosmos/wam_fold_policy_runs/reports
 mkdir -p "$LOGDIR"
 MAXITER=${MAXITER:-50000}; SAVEITER=${SAVEITER:-1000}
 B1="ssh -p 429 -o BatchMode=yes -o StrictHostKeyChecking=no -o ServerAliveInterval=30 root@120.48.99.93"
