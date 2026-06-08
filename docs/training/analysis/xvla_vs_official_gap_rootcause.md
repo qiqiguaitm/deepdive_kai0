@@ -262,17 +262,23 @@ P0 ckpt 真机录 trace, 对比 [`x3c_realrobot_trace_20260601.md`](x3c_realrobo
 
 → **"我们数据缺大动作"被排除**:2s 位移分布相当、p90 我们更大。**欠到位 = 模型学不出数据里已有的大 reach**(GT 高动量位移 1.1–1.7m,pred 只 70%),非数据没有。数据侧真实差异 = **ep 更短 + idle ~2×**,以及**未测的 demonstration 一致性/多模态/覆盖**(本探针测不到)。
 
-### 8.4 根因落点(本次净结论)
-排除链:R4 容量(官方 0.9B 能 fold)❌ → D5 动作表示(dense/anchor 都欠到位 0.70)❌ → fresh-slot/单域配方(官方同样 fresh 槽单域)❌。**剩下两条**:
-1. **数据质量/覆盖/一致性**(非幅度):我们 811ep vs 官方 1532ep;更短、idle 更多;state→action 条件可预测性可能更低 → 弱条件化 → 范围压缩。
-2. **base ckpt / pipeline**:我们 `xvla-base` 仅 8 个训练域,是否 = 官方 X-VLA-Pt 的同等基座?pipeline 是否有未发现的偏差?
+### 8.4 base ckpt 溯源 — 确认正版 X-VLA-Pt(排除"base 错"嫌疑)
+查 `xvla/xvla_ckpts`:model card = **`lerobot/xvla-base`**(README 明写"Reference impl: github.com/2toinf/X-VLA;LeRobot impl follows original";下载 cache HF commit `cdb7964`)。三重证据它就是**官方 X-VLA-Pt 基座**(lerobot port):
+1. **参数量一致**:HF `lerobot/xvla-base` 与 `2toINF/X-VLA-Pt` 都 **879.7M**,同 arXiv 2510.10274,同 Florence-2-large;Pt 自称 "Foundation Edition"。
+2. **权重指纹(决定性)**:base 训练过的 domain 槽 **正好 = 10–17**,精确对应 `domain_config.py` 标注的 **"pretraining" 域(robomind×4 / Droid×2 / AGIBOT = 11–17)+ AIR-AGILEX=10**;所有 **"# ft" 域(Bridge=0…HQ=5…AIRBOT=18)全 fresh**。这只可能是**未经任何下游 finetune 的纯 Pt 基座**(若是某 ft 版,对应 ft 槽会被训过)。
+3. → **"base ckpt 不对/残缺"嫌疑排除**。`xvla-base` = 正版 X-VLA-Pt,与官方 SoftFold 同起点。
 
-→ **Exp-O 升为决定性检验**,等价于"**用我们的 base+pipeline+配方能否复现官方 100% SoftFold**":
+### 8.5 根因落点(本次净结论)
+排除链:R4 容量(官方 0.9B 能 fold)❌ → D5 动作表示(dense/anchor 都欠到位 0.70)❌ → fresh-slot/单域配方(官方同样 fresh 槽 5 单域 finetune)❌ → base ckpt(确认正版 X-VLA-Pt,§8.4)❌。**剩下两条**:
+1. **数据质量/覆盖/一致性**(非幅度;leading):我们 811ep vs 官方 1532ep;更短、idle ~2×;state→action 条件可预测性可能更低 → 弱条件化 → 范围压缩。
+2. **pipeline 偏差**(非 base 权重):训练/serve 链路某处未发现的 bug(图像/anchor/归一/IK 时序等),非基座问题。
+
+→ **Exp-O 升为决定性检验**,等价于"**用我们(已确认正版)的 base+pipeline+配方能否复现官方 100% SoftFold**":
 - Exp-O(官方数据)**fold** + Exp-S(我们数据)**不 fold** → **我们的 vis 数据质量/覆盖是问题**(配方/base/pipeline 没问题)。
-- Exp-O **也不 fold** → **base ckpt 或 pipeline 有问题**(数据+配方都对齐官方仍失败)→ 回头核 base 来源 + 逐行 pipeline。
+- Exp-O **也不 fold** → **pipeline 有 bug**(base 已确认正版 §8.4 + 数据+配方都对齐官方仍失败)→ 逐行核训练/serve 链路。
 - 两者都 fold → 之前真机失败 = 部署侧(gripper 映射 / 2s 时序回放)。
 
-> 下一步(按性价比):① 等 Exp-O 训完,同样跑欠到位探针 + 真机 fold(domain/gripper/2s 时序对齐);② 若 Exp-O 也欠到位 → 核 `xvla-base` 是否官方 X-VLA-Pt 同源;③ 数据侧补测 demonstration 一致性(同状态下动作的多模态/方差)。
+> 下一步(按性价比):① 等 Exp-O 训完,同样跑欠到位探针 + 真机 fold(domain/gripper/2s 时序对齐);② base 溯源**已完成**(§8.4 确认正版 X-VLA-Pt);③ 数据侧补测 demonstration 一致性(同状态下动作的多模态/方差)。
 
 ---
 
@@ -282,8 +288,9 @@ P0 ckpt 真机录 trace, 对比 [`x3c_realrobot_trace_20260601.md`](x3c_realrobo
 |---|---|
 | **官方 SoftFold 部署 domain_id=5 (eef_6d)** | `xvla/X-VLA/evaluation/SoftFold-Agilex/deploy/client_eef6d_xvla.py:116` |
 | **domain_id 映射 (AIR-AGILEX=10, HQ=5)** | `xvla/X-VLA/datasets/domain_config.py:41-63` |
-| **base ckpt domain 槽 freshness 检查** | `/tmp/check_softprompt.py` + `/tmp/check_alldomain.py`(只 10-17 训练) |
-| **数据分布对比脚本** | `/tmp/data_cmp.py`(官方 58s/idle7% vs 我们 33s/idle13%) |
+| **base 溯源 = 正版 X-VLA-Pt** | `xvla/xvla_ckpts/README.md`(lerobot/xvla-base)+ HF 879.7M 同 `2toINF/X-VLA-Pt`;权重指纹槽 10-17=Pt 预训练域 |
+| **base ckpt domain 槽 freshness 检查** | `_xvla_gripper_debug/check_softprompt.py` + `check_alldomain.py`(只 10-17 训练) |
+| **数据分布对比脚本** | `_xvla_gripper_debug/data_cmp.py`(官方 58s/idle7% vs 我们 33s/idle13%) |
 | **官方动作 anchor(intention abstraction)** | `xvla/X-VLA/datasets/domain_handler/base.py:152` (`linspace(cur,cur+qdur,N+1)`) + `real_world.py:40` (`qdur=2.0`) |
 | **我们动作 chunk(30 连续帧 1s)** | `train_scripts/xvla/data/multi_domain_dataset.py:162-163` |
 | 我们训练 forward (绕过 processor) | `train_scripts/xvla/launch/xvla_train.py:330` |
