@@ -62,6 +62,13 @@ THR = 3e-3      # rad/frame: sustained mean |Δa| over arm dims => "moving"
 IDLE_THR = float(os.environ.get("V32_IDLE_THR", "2e-3"))   # rad/frame: per-frame |Δa| below this = idle
 KEEP_LEN = int(os.environ.get("V32_KEEP_LEN", "15"))       # idle run ≤ this many frames (≤0.5s) = short settle, kept whole
 DOWNSAMPLE_K = int(os.environ.get("V32_K", "3"))           # long idle run: keep boundaries + every k-th frame
+# v3.2 GRASP PROTECTION (2026-06-09 fix): the arm-only idle detector (ARM_DIMS excludes
+# gripper) classifies grasp/regrasp as "idle" (arm holds still while gripper closes) → the
+# careful grasp dwell got downsampled → real-machine under-reach / 抓不到衣角. Fix: force-keep
+# a window around every gripper-state transition so grasp segments are never thinned.
+GRIP_DIMS = [6, 13]                                        # L/R gripper action dims (excluded from ARM_DIMS)
+GRIP_THR = float(os.environ.get("V32_GRIP_THR", "0.02"))  # |Δgrip| above this = gripper acting (grasp/release)
+GRIP_GUARD = int(os.environ.get("V32_GRIP_GUARD", "30"))  # force-keep ±this many frames around a gripper transition (~1s dwell)
 WIN = 10        # frames of sustained motion to call it the onset
 MARGIN = 15     # keep this many frames before onset (avoid clipping the reach-start)
 
@@ -119,16 +126,28 @@ def _trim_job(job):
 
 
 def idle_keep_indices(action: np.ndarray, idle_thr: float = IDLE_THR,
-                      keep_len: int = KEEP_LEN, k: int = DOWNSAMPLE_K) -> np.ndarray:
+                      keep_len: int = KEEP_LEN, k: int = DOWNSAMPLE_K,
+                      grip_thr: float = GRIP_THR, grip_guard: int = GRIP_GUARD) -> np.ndarray:
     """v3.2 selective idle handling: return sorted frame indices to KEEP.
-    Moving frames always kept; short idle runs (≤keep_len) kept whole (functional settle);
-    long idle runs (>keep_len) compressed: keep both boundaries + every k-th frame.
-    (Boundary transition frames preserved so action chunks don't jump across the seam.)"""
+    A frame counts as "moving" (always kept) if the ARM moves, the GRIPPER changes state,
+    or it falls within ±grip_guard frames of a gripper transition (grasp/regrasp dwell
+    protection — arm holds still while gripper closes, so the arm-only detector would
+    otherwise call it idle and downsample the grasp). Short idle runs (≤keep_len) kept
+    whole (functional settle); long idle runs (>keep_len) compressed: keep both boundaries
+    + every k-th frame. (Boundaries preserved so action chunks don't jump across the seam.)"""
     T = len(action)
     if T <= 1:
         return np.arange(T)
     da = np.abs(np.diff(action[:, ARM_DIMS], axis=0)).mean(axis=1)      # (T-1,)
     moving = np.concatenate([da > idle_thr, [True]])                    # (T,); last frame kept
+    # grasp protection: force-keep gripper transitions + a guard window around each.
+    dg = np.abs(np.diff(action[:, GRIP_DIMS], axis=0)).max(axis=1)      # (T-1,)
+    grip_evt = np.concatenate([[False], dg > grip_thr])                 # (T,); frame where new grip state reached
+    if grip_evt.any() and grip_guard > 0:
+        guard = np.zeros(T, dtype=bool)
+        for e in np.nonzero(grip_evt)[0]:
+            guard[max(0, e - grip_guard):min(T, e + grip_guard + 1)] = True
+        moving = moving | guard
     keep = np.zeros(T, dtype=bool)
     i = 0
     while i < T:
