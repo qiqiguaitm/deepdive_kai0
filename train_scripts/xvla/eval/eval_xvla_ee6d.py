@@ -32,7 +32,7 @@ import torch
 HERE = Path(__file__).resolve()
 # train_scripts/xvla/eval/eval_xvla_ee6d.py -> data dir is ../data
 sys.path.insert(0, str(HERE.parent.parent / "data"))
-from multi_domain_dataset import LeRobotEE6DDataset  # noqa: E402
+from multi_domain_dataset import LeRobotEE6DDataset, XVLAHdf5Dataset  # noqa: E402
 from lerobot.policies.xvla.modeling_xvla import XVLAPolicy  # noqa: E402
 from transformers import AutoTokenizer  # noqa: E402
 
@@ -64,9 +64,16 @@ def build_collate():
 
 
 def select_windows(ds, n_windows):
-    total_ep = len(ds.episodes)
-    cutoff = total_ep - N_HELDOUT_EP
-    region = [i for i, (ep_idx, f_idx) in enumerate(ds.samples) if ep_idx >= cutoff]
+    if hasattr(ds, "hdf5_files"):   # XVLAHdf5Dataset: "episode" = hdf5 file, samples = (hp, cache, f_idx)
+        files = ds.hdf5_files
+        total_ep = len(files)
+        cutoff = total_ep - N_HELDOUT_EP
+        heldout = set(str(f) for f in files[cutoff:])
+        region = [i for i, s in enumerate(ds.samples) if str(s[0]) in heldout]
+    else:                            # LeRobotEE6DDataset: samples = (ep_idx, f_idx)
+        total_ep = len(ds.episodes)
+        cutoff = total_ep - N_HELDOUT_EP
+        region = [i for i, (ep_idx, f_idx) in enumerate(ds.samples) if ep_idx >= cutoff]
     stride = max(1, len(region) // n_windows)
     chosen = region[::stride][:n_windows]
     meta = {
@@ -78,8 +85,8 @@ def select_windows(ds, n_windows):
         "n_selected": len(chosen),
         "first_global_idx": chosen[0] if chosen else None,
         "last_global_idx": chosen[-1] if chosen else None,
-        "first_sample": list(ds.samples[chosen[0]]) if chosen else None,
-        "last_sample": list(ds.samples[chosen[-1]]) if chosen else None,
+        "first_sample": [str(x) for x in ds.samples[chosen[0]]] if chosen else None,
+        "last_sample": [str(x) for x in ds.samples[chosen[-1]]] if chosen else None,
     }
     return chosen, meta
 
@@ -96,6 +103,9 @@ def main():
                          "2.0=anchor (30 anchors linspace over 2s, matches D5/official). "
                          "Set 2.0 to fairly eval a d5anchor-trained model.")
     ap.add_argument("--out", default="/tmp/xvla_eval.json")
+    ap.add_argument("--hdf5-root", default=None,
+                    help="if set, eval on an XVLAHdf5Dataset (soft_fold hdf5) instead of LeRobotEE6DDataset (parquet)")
+    ap.add_argument("--action-cache-dir", default=None, help="ee6d action cache dir (required with --hdf5-root)")
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -114,9 +124,14 @@ def main():
     n_denoise = model.config.num_denoising_steps
     print(f"[cfg] chunk_size={chunk_size} num_denoising_steps={n_denoise}", flush=True)
 
-    print(f"[data] LeRobotEE6DDataset({args.val_root}, domain_id={args.domain_id}, action_qdur={args.action_qdur})", flush=True)
-    ds = LeRobotEE6DDataset(args.val_root, domain_id=args.domain_id, task_prompt=PROMPT,
-                            action_qdur=args.action_qdur)
+    if args.hdf5_root:
+        print(f"[data] XVLAHdf5Dataset({args.hdf5_root}, domain_id={args.domain_id}, action_qdur={args.action_qdur})", flush=True)
+        ds = XVLAHdf5Dataset(args.hdf5_root, action_cache_dir=args.action_cache_dir, domain_id=args.domain_id,
+                             task_prompt=PROMPT, action_qdur=args.action_qdur, image_aug=False)
+    else:
+        print(f"[data] LeRobotEE6DDataset({args.val_root}, domain_id={args.domain_id}, action_qdur={args.action_qdur})", flush=True)
+        ds = LeRobotEE6DDataset(args.val_root, domain_id=args.domain_id, task_prompt=PROMPT,
+                                action_qdur=args.action_qdur)
     print(f"[data] total windows in dataset: {len(ds)}", flush=True)
     chosen, sel_meta = select_windows(ds, args.n_windows)
     print(f"[data] selected {len(chosen)} val windows: {json.dumps(sel_meta)}", flush=True)
