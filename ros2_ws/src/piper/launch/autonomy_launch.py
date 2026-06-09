@@ -191,6 +191,12 @@ def generate_launch_description():
     min_smooth_steps_arg = DeclareLaunchArgument('min_smooth_steps',
         default_value='8',
         description='Min blend window for chunk overlap smoothing (JAX legacy 8, V1 overrides to 3)')
+    # publish_rate = PosCmd 下发 Hz; 必须匹配 ckpt 的 action 时间分辨率 (H/qdur).
+    # 默认 30 = dense-1s ckpt (p0, qdur=1.0 → 30 步/1s). qdur=2.0 的 anchor 变体
+    # (d5anchor) 须传 publish_rate:=15, 否则 30 步/2s 被 30Hz 播成 2× 过快。
+    publish_rate_arg = DeclareLaunchArgument('publish_rate',
+        default_value='30',
+        description='Hz of PosCmd publish (dense-1s ckpt=30; qdur=2.0 anchor ckpt override to 15)')
     # ── Camera knobs (P1.b 2026-05-23, V1 20Hz 攻关) ───────────────────
     # JAX legacy 默认 30 fps + 用 camera_depth_flags.py 的 macro 决定 depth.
     # V1 路径通过 start_autonomy_v1.sh 把 cam_fps:=60 / enable_head_depth:=false
@@ -337,6 +343,7 @@ def generate_launch_description():
             'inference_rate': LaunchConfiguration('inference_rate'),
             'latency_k': LaunchConfiguration('latency_k'),
             'min_smooth_steps': LaunchConfiguration('min_smooth_steps'),
+            'publish_rate': ParameterValue(LaunchConfiguration('publish_rate'), value_type=int),
             # P2 Step 1+2 fast obs pipeline (bool-typed to preserve 'true'/'false')
             'fast_obs_pipeline': ParameterValue(LaunchConfiguration('fast_obs_pipeline'), value_type=bool),
             # A.2 异步 obs prefetch worker (bool-typed)
@@ -455,7 +462,7 @@ def generate_launch_description():
         enable_rtc_arg, rtc_execute_horizon_arg,
         rtc_max_guidance_weight_arg, rtc_smooth_method_arg,
         publish_smooth_alpha_arg,
-        inference_rate_arg, latency_k_arg, min_smooth_steps_arg,
+        inference_rate_arg, latency_k_arg, min_smooth_steps_arg, publish_rate_arg,
         cam_fps_arg, enable_head_depth_arg, enable_left_depth_arg, enable_right_depth_arg,
         fast_obs_pipeline_arg, pipelined_obs_arg, transport_arg,
         execution_mode_arg, urdf_path_arg, calibration_yaml_arg,

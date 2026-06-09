@@ -70,8 +70,24 @@ if [ ! -f "$CKPT_DIR/state_dict.pt" ]; then
   fi
   exit 1
 fi
+# sidecar / image_norm parity 闸: 缺 sidecar 或缺 image_norm 字段时, serve 会静默把
+# imagenet_norm 默认成 ON, 对训练时未做 ImageNet 归一化的 ckpt 是真机静默错位。
+# observe-only 放行 (仅形状联调); --execute 一律硬拒。
+_HAS_EXEC=0; case " $* " in *" --execute "*) _HAS_EXEC=1 ;; esac
 if [ ! -f "$CKPT_DIR/sidecar.json" ]; then
-  echo "WARN: $CKPT_DIR/sidecar.json 缺失 — server 将回退默认 (domain_id=20, 通用 prompt)。" >&2
+  if [ "$_HAS_EXEC" = 1 ]; then
+    echo "ERROR: $CKPT_DIR/sidecar.json 缺失 — 无法确认 image_norm/prompt/domain parity, 禁止 --execute 上真机。" >&2
+    echo "       补 sidecar.json (含 image_norm: imagenet|none) 后再测; 仅形状联调请去掉 --execute。" >&2
+    exit 1
+  fi
+  echo "WARN: $CKPT_DIR/sidecar.json 缺失 — server 将回退默认 (domain_id=20, 通用 prompt, imagenet_norm=ON)。observe-only 放行。" >&2
+elif ! grep -q '"image_norm"' "$CKPT_DIR/sidecar.json"; then
+  if [ "$_HAS_EXEC" = 1 ]; then
+    echo "ERROR: $CKPT_DIR/sidecar.json 缺 image_norm 字段 — serve 会默认 imagenet_norm=ON, 与训练不一致则真机静默错位, 禁止 --execute。" >&2
+    echo "       在 sidecar.json 加 \"image_norm\": \"imagenet\" 或 \"none\" (与训练一致) 后再测。" >&2
+    exit 1
+  fi
+  echo "WARN: $CKPT_DIR/sidecar.json 缺 image_norm 字段 — serve 默认 imagenet_norm=ON。observe-only 放行。" >&2
 fi
 
 # stage_a 旧 buggy 管线 ckpt 兜底拦截 (动作不正确, 禁止上真机)。

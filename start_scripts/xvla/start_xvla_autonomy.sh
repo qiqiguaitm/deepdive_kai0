@@ -34,7 +34,7 @@ SERVE="$KAI0/scripts/serve_policy_xvla.py"
 DEFAULT_PORT=8003
 
 if [ ! -x "$VENV_PY" ]; then
-  echo "ERROR: $VENV_PY not found / not executable. Need kai0/.venv_5090 (torch 2.12+cu128)." >&2
+  echo "ERROR: $VENV_PY not found / not executable. Need kai0/.venv_xvla (torch 2.12+cu128)." >&2
   exit 1
 fi
 
@@ -48,7 +48,7 @@ case "$MODE" in
       exit 1
     fi
     if [ ! -f "$CKPT_DIR/sidecar.json" ]; then
-      echo "WARN: $CKPT_DIR/sidecar.json missing — server will fall back to defaults (dataset_id=0, generic prompt)." >&2
+      echo "WARN: $CKPT_DIR/sidecar.json missing — server will fall back to defaults (domain_id=20, generic prompt)." >&2
     fi
     : "${CUDA_VISIBLE_DEVICES:=3}"
     export CUDA_VISIBLE_DEVICES

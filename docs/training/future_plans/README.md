@@ -28,7 +28,8 @@
 | 优先级 | 计划 | 状态 | 资源 | ETA | 关联 task |
 |---|---|---|---|---|---|
 | ⭐ P1 | [PyTorch 原生训练 pi05 vis_v2_full R1+R2](plans/pytorch_native_vis_v2_full.md) | ⏳ pending (config 未加) | Robot-North-H20 16 H20 串行 | ~4-5 day | `#18` |
-| 🔴 P0 | [Track X X-VLA 官方架构 Curriculum](plans/xvla_track_x_curriculum.md) | smooth_800 三件套训练+eval 完成 (X3.C offline 健康); **X3.C 真机失败** → 根因 R1 缺 ImageNet 归一化 (analysis/xvla_vs_official_gap_rootcause.md) → **🔄 P0 重训 `X3C_smooth800_p0` (修 R1+对齐官方 60k, uc01 运行中, §0.NEW.6)** | uc01 8 A800 | 运行中 | `#17` |
+| 🔴 P0 | [Track X X-VLA 官方架构 Curriculum](plans/xvla_track_x_curriculum.md) | smooth_800 三件套训练+eval 完成 (X3.C offline 健康); **X3.C 真机失败** → 根因 R1 缺 ImageNet 归一化 (analysis/xvla_vs_official_gap_rootcause.md) → **🔄 P0 重训 `X3C_smooth800_p0` (修 R1+对齐官方 60k, uc01 运行中, §0.NEW.6)**; ⚠️ **2026-06-09 p0+d5anchor 真机仍失败, 根因实为 proprio 捷径 vision-blind, R1 只是表层 → 见下行** | uc01 8 A800 | 运行中 | `#17` |
+| 🔴 P0 | [**X-VLA proprio 捷径 / vision-blind 开环修复**](plans/xvla_proprio_shortcut_openloop_fix.md) | 📝 根因已认证 (离线 ablation: p0/d5anchor 视觉影响比 **0.000**, 非数据非部署); 待跑 E1 `use_proprio=False` 确诊 | 8 GPU | (见 plan) | `#17` |
 | P2 | [Track A SSL Phase 0-3 Pretrain Pipeline](plans/ssl_phase_pretrain_pipeline.md) | 🔄 Phase 0 部分 done (kai0 base+dagger CoTracker3+SAM2), 余下 pending | uc02 8 GPU + Robot-North-H20 | ~3-5 day Phase 0, 后续待评估 | `#11/12/13/14` |
 
 ---
