@@ -361,15 +361,40 @@ def main(args):
 
     # Model
     if is_main(rank): print(f"loading {CKPT_INIT}...")
-    # use_proprio 是 init ckpt config.json 的字段 (默认 True)。cfg 显式给 False 时 (E1
-    # vision-blind 确诊) 覆盖 config 后再构造: proprio_dim=0, _prepare_state 返回空 → 强制读视觉。
-    # strict=False (from_pretrained 默认) → init ckpt 的 proprio 投影权重变 unexpected, 不报错。
+    # use_proprio 是 init ckpt config.json 的字段 (默认 True)。cfg 给 False 时 (E1 vision-blind 确诊)
+    # 用 use_proprio=False 构造 → proprio_dim=0, _prepare_state 返回空 → 强制读视觉。
+    # 关键: proprio 不是独立层, 而是 action_encoder.fc 这个共享 per-domain Linear 的输入列
+    #   (输入 = cat[action, proprio, time], soft_transformer.py:381; fc.weight 形状随 proprio_dim 变)。
+    # lerobot from_pretrained 把 strict 写死成 True (modeling_xvla.py:489) → 无法吞下这个形状变化
+    #   (不是 unexpected key, 是 present key 的 shape mismatch)。故手动加载: 把 init ckpt 的
+    #   action_encoder.fc.weight 切掉 proprio 那几列再 load (保留 action/time 预训练列), 其余照常。
     if cfg.get("use_proprio", True) is False:
+        import os, safetensors.torch
         from lerobot.configs.policies import PreTrainedConfig
         _ovr = PreTrainedConfig.from_pretrained(CKPT_INIT)
         _ovr.use_proprio = False
-        if is_main(rank): print("⭐ use_proprio=False override (E1 vision-blind 确诊): proprio_dim→0")
-        model = XVLAPolicy.from_pretrained(CKPT_INIT, config=_ovr).to(device)
+        model = XVLAPolicy(_ovr)
+        sd = safetensors.torch.load_file(os.path.join(CKPT_INIT, "model.safetensors"))
+        ek = "model.vlm.language_model.model.encoder.embed_tokens.weight"
+        shk = "model.vlm.language_model.model.shared.weight"
+        if ek in sd: sd[shk] = sd[ek]
+        _T = model.model.transformer
+        da, dt, dp = _T.dim_action, _T.dim_time, _ovr.max_state_dim   # init-ckpt proprio block width
+        out = _T.hidden_size
+        key = "model.transformer.action_encoder.fc.weight"
+        nd = sd[key].shape[0]
+        assert sd[key].shape[1] == (da + dp + dt) * out, \
+            f"fc layout mismatch: {tuple(sd[key].shape)} vs ({da}+{dp}+{dt})*{out}"
+        # forward views fc as [in, out] (soft_transformer.py:251); input cols = [action, proprio, time]
+        w = sd[key].view(nd, da + dp + dt, out)
+        w = torch.cat([w[:, :da, :], w[:, da + dp:, :]], dim=1)       # drop proprio rows
+        sd[key] = w.reshape(nd, (da + dt) * out).contiguous()
+        missing, unexpected = model.load_state_dict(sd, strict=False)
+        model.model._apply_dtype()
+        model = model.to(device)
+        if is_main(rank):
+            print(f"⭐ E1 use_proprio=False: proprio_dim→0, sliced action_encoder.fc {da+dp+dt}→{da+dt} cols/domain "
+                  f"(load missing={len(missing)} unexpected={len(unexpected)})")
     else:
         model = XVLAPolicy.from_pretrained(CKPT_INIT).to(device)
     if world > 1:
