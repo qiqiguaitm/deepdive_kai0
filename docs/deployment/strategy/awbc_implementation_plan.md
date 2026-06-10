@@ -37,6 +37,30 @@
 ### 与 SFT 基线对照
 warm-start 从 0.0089 SFT 续训 → 任何 < 0.0089 的离线改进 + 真机成功率提升,干净归因到 advantage 加权。**主判据 = 真机 rollout**(positive-prompt 推理)。
 
+### ✅ 结果回填 (2026-06-09) — `pi05_flatten_fold_awbc` (smooth800+全dagger, 1117ep)
+- **数据集**: `A_smooth800_dagger_all_awbc`(1117 ep / 1.468M frames;advantage 按帧 `ra≥0` 离散:**25.2%neg / 74.8%pos**)。warm-start `task_a_new_smooth_800_step49999`,50k/bs128/fsdp8。
+- ⚠️ **inline-eval 全程失败**(`Prompt is required`:config `default_prompt=None` + `prompt_from_task=True`,inline-eval 路径不读 per-frame task)→ 训练正常、但**无 inline MAE**。**离线补评**(gf0 GPU,val=`vis_v2_merged_val` 30ep,prompt=`Advantage: positive`,MAE@1/10/25/50):
+
+| step | MAE@1 | MAE@10 | MAE@25 | MAE@50 |
+|---|---|---|---|---|
+| 10000 | 0.0084 | 0.0153 | 0.0236 | 0.0331 |
+| 20000 | 0.0082 | 0.0147 | 0.0223 | 0.0308 |
+| 30000 | 0.0081 | 0.0142 | 0.0215 | 0.0294 |
+| 40000 | 0.0080 | 0.0139 | 0.0210 | 0.0287 |
+| **49999** ⭐ | **0.0079** | 0.0136 | 0.0205 | 0.0278 |
+
+- **最佳 ckpt**(单调下降,末步最好):`kai0/checkpoints/pi05_flatten_fold_awbc/pi05_awbc_cnsh/49999`(@1=0.0079,略优于 SFT 基准 0.0089)。
+- ⚠️ MAE 对 AWBC 不敏感(positive-prompt 离线 MAE 看不出 advantage 加权的真实收益)→ **主判据仍是真机 rollout**。结果 json:`logs/awbc_eval_mae.json`。
+
+### 🔬 新实验 (2026-06-09) — AWBC ablation: 只用 smooth800 (无 dagger)
+> **动机(控制变量)**: 本方案核心假设 = "dagger 段提供 estimator 区分高/低 advantage 所需的失败/纠错信号;纯 demo-only smooth800 的 advantage 方差 η²≈3%(天花板),信号弱"(见上 + viva 计划 §3)。本实验**去掉 dagger,只留 smooth800 的 advantage-labeled 帧**,直接对照 `pi05_flatten_fold_awbc`(smooth800+全dagger)→ 量化 dagger 段对 AWBC 的贡献。
+
+- **数据集 `A_smooth800_awbc`**(**806 ep / 925k frames**):从已标注的 `A_smooth800_dagger_all_awbc` 里**按内容指纹抽出 smooth800 那部分**(estimator 是 **per-episode 独立**打标 → 抽出的 advantage 标签 = 重跑 smooth800-only 估计器的结果,等价且零成本)。811 中 806 唯一匹配(另 5 ep 因 build 时 squeeze 改了 action 数组、指纹不命中,占 0.6%,已记录)。norm_stats 在 806 子集上**重算**。
+- **advantage 分布**: **22.0%neg / 78.0%pos** —— 比含 dagger 版(25.2%neg)**neg 更少**,正印证"demo-only 失败信号更弱"的假设(可作实验观察点之一)。
+- **config**: `pi05_flatten_fold_awbc_smooth800only`(与 `pi05_flatten_fold_awbc` **逐字段一致,仅 repo_id 不同** → 唯一变量 = 有无 dagger)。warm-start 同、50k/bs128/fsdp8、`default_prompt=None`(inline-eval 同样 skip,训完离线评 MAE 口径一致)。
+- **提交**: cnsh 8卡 `train_scripts/kai/volc/pi05_awbc_smooth800only_cnsh_8gpu.yaml`。
+- **判据**: ① 离线 MAE 对照(sanity);② **真机 rollout 成功率 vs 含-dagger AWBC**(决定性)。预期:若含-dagger 显著赢 → 证实 dagger 失败信号是 AWBC 关键;若打平 → demo-only 的 advantage 已够(或两者都没真正用上 advantage,需回看 estimator 信号强度)。
+
 ---
 
 ## 1. 算法定位 (一句话)

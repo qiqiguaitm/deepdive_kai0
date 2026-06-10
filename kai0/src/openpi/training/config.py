@@ -1851,6 +1851,38 @@ _CONFIGS = [
         inline_eval_every=4,
     ),
 
+    # AWBC ablation (awbc_implementation_plan.md §当前执行计划 / smooth800-only): 控制变量 = 去掉 dagger,
+    # 只用 smooth800 的 advantage-labeled 帧 (806 ep, 22%neg/78%pos)。测 demo-only 数据的 advantage 信号
+    # (η²≈3% 天花板) 是否足以让 AWBC 学到东西 —— 直接对照 pi05_flatten_fold_awbc (smooth800+全dagger).
+    # 与上面 config 逐字段一致, 仅 repo_id 不同 (A_smooth800_awbc, advantage label 从 dagger_all 版按帧抽取,
+    # estimator 是 per-episode 独立 → 标签等同). default_prompt=None → inline-eval 同样会 skip, 训完离线评 MAE.
+    TrainConfig(
+        name="pi05_flatten_fold_awbc_smooth800only",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_smooth800_awbc",
+            default_prompt=None,
+            base_config=DataConfig(prompt_from_task=True),
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS/tim/workspace/deepdive_kai0/kai0/checkpoints/task_a_new_smooth_800_step49999/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6,
+        ),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=16,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
+
     # v3.2 idle-trimming Step-2 (idle_data_trimming §3): front-trim (v3) + middle selective idle-downsample.
     # Single-variable vs the v3 baseline. init mixed_1_clean, 50k, norm 各自重算. cnbj 8卡.
     # Exp-1: ≤5-10 early "work" window v3.2 (985 ep).
