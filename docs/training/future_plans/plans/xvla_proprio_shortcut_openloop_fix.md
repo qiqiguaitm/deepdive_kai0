@@ -88,6 +88,19 @@
 - **判据**: 训完跑 `eval_xvla_vision_ablation_offline.py`, **视觉/本体影响比从 0.000 抬到 ≳0.5** = 根因坐实。再上真机看是否会"找衣服"。
 - **风险**: 丢掉 proprio 平滑信号, 连续控制可能更抖 (可叠 publish-time EMA 缓解)。
 
+> #### ❌ 结果 (2026-06-10) — E1 **未能让模型读视觉, 假设被推翻**
+> 训完 60k(`xvla_x3c_smooth800_noproprio/step_final`,loss 109→~5),离线 vision-ablation(trace `2026-06-01_192213`,n=12,imagenet-norm,`--no-proprio` 加载 proprio_dim=0 ckpt,load missing=0/unexpected=0):
+>
+> | ckpt | swap-IMAGE d_img | swap-STATE d_state | 解读 |
+> |---|---|---|---|
+> | **p0**(proprio ON,对照) | 0.04mm | **278.6mm** | 视觉盲 + proprio 开环(复现 §1 基线 ✅,验证门禁/trace 可信) |
+> | **E1**(proprio OFF) | **0.00mm** | **0.00mm** | proprio 依赖被拿掉(d_state 279→0,符合设计),但 **视觉仍没起来(d_img 仍 ~0)** |
+>
+> - **比值 3605 是假阳**(d_img/d_state = 0.00/~0 的数值伪影);**真正指标 d_img 没有上升** → E1 **不通过门禁**(视觉没活)。
+> - **结论**: "拿掉 proprio 捷径 → 模型就会读视觉"(§4.4 "断架构链不依赖数据")**被实测推翻**。模型在无 proprio 下**换了一种开环方式 = 复述记忆里的平均折叠轨迹**(对任何输入近乎常量输出)。
+> - **含义(强化 E0)**: 任务太程式化 + 数据 `action≡state` → **视觉从来不被需要**,光断架构链不够,模型总能找到开环解。**根因主要在数据链 → E0(真实 action≠state)从"推荐"升级为"必需"**;E2(proprio-dropout)预计同样不够。
+> - 结果 json:`logs/xvla_e1_vision_ablation.json`。门禁脚本已加 `--no-proprio/--imagenet-norm/--prompt` + `XVLA_BART_TOK` 支持。
+
 ### 4.2 实验 E2 — proprio-dropout (更好的最终模型, 需 patch)
 - **做法**: patch lerobot XVLA 训练, 对每个样本以概率 `p_drop` (起步 0.5) 把 `observation.state` 置零/替换占位 token; 推理仍可给 proprio。
 - **目的**: 保留 proprio 收益 (平滑/精度) 又强制模型读视觉。causal confusion 的标准解。
@@ -105,11 +118,11 @@
 |---|---|---|---|---|---|
 | **baseline (现状)** | True | — | ≡state | 无 | 视觉比 **0.000** ❌ |
 | **E0 (数据正解)** | True | — | **真实 action (≠state)** | **加** | 视觉比 ≳0.5 + 真机找衣服 + 保 proprio 精度 |
-| **E1 (确诊, 已就绪)** | **False** | — | ≡state | 无 | 视觉比 ≳0.5? (断架构链, 不依赖数据) |
-| **E2** | True | **0.5** | ≡state | 无 | 视觉比 ≳0.5 + 真机成功率 |
+| **E1 (确诊, 已跑)** | **False** | — | ≡state | 无 | ❌ **d_img 仍 0.00mm**(视觉没活)— 断架构链**不够**, 模型转常量开环 |
+| **E2** | True | **0.5** | ≡state | 无 | 视觉比 ≳0.5 + 真机成功率(E1 已示警: 单断 proprio 恐不够) |
 | **E3** | True/dropout | 0.5 | 真实+位置多样 | 加 | 跨位置泛化 |
 
-> E1 断架构链 (不管数据如何, 无 proprio 就没法复制) → 最快确诊; E0 断数据链 (官方做法) → 保 proprio 收益的治本。两者正交, 都成立则根因 = "action≡state × proprio 早融合" 双重确证。
+> ~~E1 断架构链 → 最快确诊~~ → **实测推翻 (2026-06-10)**: 无 proprio 模型并不读视觉, 而是复述记忆里的平均轨迹(d_img 仍 ~0)。说明 **数据链 (action≡state + 任务程式化 → 视觉从不被需要) 才是主因**, 单断架构链不足以唤起视觉。**E0 (真实 action≠state) 从"治本可选"升为"必需主路径"**。
 
 ---
 
@@ -130,7 +143,7 @@ CUDA_VISIBLE_DEVICES=<free> kai0/.venv_xvla/bin/python \
 ## 6. 行动顺序
 
 1. **停止盲调 X-VLA ckpt** (换 qdur/norm/数据日期都不会改变 vision-blind, 根因在 action≡state × 架构)。
-2. 跑 **E1 (`use_proprio=False`, 已就绪)** 做确诊 → ablation 比值是否抬起 (断架构链, 不依赖数据, 最快验根因)。
-3. **查原始 action 是否还在** (vePFS `A_new_smooth_800/base` 的 action 列是否被 relabel 覆盖) → 决定 E0 是否需从上游重建数据。
-4. E1 确诊成立 → 走 **E0 (真实 action + static-skip)** 做治本的最终模型 (保 proprio 收益); 原始 action 已丢则退 **E2 (proprio-dropout)**。
+2. ✅ **E1 (`use_proprio=False`) 已跑 (2026-06-10) → 推翻"断架构链就够"**: 无 proprio 模型 d_img 仍 0.00mm(不读视觉),转成常量开环。**根因主要在数据链**。
+3. ⭐ **下一步 = E0 (真实 action≠state + static-skip)**, 现在是**必需主路径**(不是可选)。**先查原始 action 是否还在**: vePFS `A_new_smooth_800/base` 的 `action` 列是否 = 当时 commanded/leader, 还是被 relabel 成 ≡state — 决定 E0 直接重建还是要回更上游采集 parquet。
+4. E0 出 ckpt → 过 §5 门禁(视觉比 ≳0.5)再上真机。E2 (proprio-dropout) 降级为"E0 不可行时的退路", 且 E1 已示警单断 proprio 恐不足, E2 需配合数据侧。
 5. 把 §5 门禁纳入 X-VLA 上机流程。
