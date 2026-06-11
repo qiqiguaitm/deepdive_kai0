@@ -1,0 +1,139 @@
+# WAM offline MAE 偏高:根因定量排查 + 优化路线(2026-06-11)
+
+背景:abs-best@45k 收敛 mae@48=0.1285,差于 pi0.5(0.1155)与 delta-5x(0.1128);
+lookahead(action_attends_video)@26k 仍 ~0.15,追平 abs 但未见长程突破。本文用 4 个实证探针
+(`_diag_deep.py`、`_diag_teacher_force.py`)+ 文献调研定量回答「MAE 为什么高、还能怎么降」。
+
+注:探针用 24/16 窗口子集(比全量 60-ep 容易,abs-best 子集 @48=0.0913 vs 全量 0.1285),
+所有结论取**组内对比**,绝对值不跨表比较。
+
+## 一、根因(按贡献排序,全部有数)
+
+### 1. 任务前向多模态 = 误差主体(指标问题,非模型问题)
+- trivial **stay baseline**(保持当前 state 48 步):@1=0.0000(`action[0]≡state` 数据约定!)、
+  @10=0.0430、@24=0.1033、@48=0.1780(全量 818 窗)。
+  - **mae@1 是伪指标**:地板为 0,只测 state 透传精度。pi0.5 的 @1=0.0219 只是透传糙。
+  - @48 各模型只比"原地不动"好 28-37%(abs-best 28%、delta 37%、pi0.5 35%)——
+    单帧+state 对 1.6s 后的折叠动作(抓哪个角、何时抓)本质不可预测。
+- **best-of-4 seeds**:abs-best 0.0913→0.0750(**-17.9%**);lookahead 0.1522→0.1015(**-33.3%**)。
+  N=4 即砍掉 18-33% 误差 → 相当部分是「采到不同合法未来」的模式错配,N 越大降越多。
+- 误差在 60 ep 上均匀(mean/median=1.04,top-25% 只占 34.8%),不是坏样本问题。
+- 文献:SIMPLER 等明确 offline MSE 与闭环 SR 相关性不稳定(r −0.98~−0.73 摇摆);
+  GigaWorld 官方闭环赢 pi0.5 14 点而 offline MAE 输——与我们观察一致。
+  **⇒ 优化目标应改为 best-of-N MAE / 闭环 SR,raw mae@48 继续压意义有限。**
+
+### 2. lookahead 模型:世界模型质量是唯一瓶颈(teacher-forcing 探针,本次最大发现)
+把去噪循环的视频 latents 每步替换为「加噪 GT 未来视频」(flow-matching 前向,分布与训练一致):
+
+| ckpt | normal @24/@48 | teacher-forced @24/@48 | Δ@48 |
+|---|---|---|---|
+| lookahead@25k | 0.0894 / 0.1542 | **0.0496 / 0.0598** | **−61%** |
+| abs-best@45k(对照,不 attend 视频) | 0.0619 / 0.0946 | 0.0619 / 0.0946(逐位相同) | 0(探针有效性验证) |
+
+- lookahead 的 action 解码器**已经学会了从未来视频提取大量信息**:给 GT 视频时 @48=0.0598,
+  远好于同子集 abs-best@45k(0.0946)和任何已有模型——**架构上限非常高**。
+- 但推理时换成自预测视频,增益全部被吃掉(0.1542)——**exposure bias 实锤,且根因是
+  视频预测质量/模式发散**(lookahead best-of-4 降 33% >> abs 的 18%:采视频=采未来模式)。
+- GigaWorld 官方 Table 6 与此吻合:naive「action attend 噪声未来视频」SR 0.83→0.81 略负。
+  我们的 A/B(job-i3ngi7f23gi5)大概率打平——但 TF 探针证明**奖品是真的,只是要修通路**。
+
+### 3. 已排除的嫌疑
+- **NFE/采样步数**:10 vs 30 无差异(abs 0.0913/0.0915;lookahead 0.1522/0.1562)。
+- **逐维病理**:误差按行程分布在大关节(L/R j1,j2,j3,j5 ~0.1-0.3),夹爪 ~0.005-0.012,无单维爆炸。
+- **train/eval 帧数失配**:latent 缓存实测 T=2(5 帧→ref+1 未来 latent 帧),训推一致。
+- **norm/repr bug**:delta/abs roundtrip 此前已验 ~0。
+
+## 二、优化路线(按证据强度×性价比)
+
+| # | 干预 | 证据 | 预期 | 成本 |
+|---|---|---|---|---|
+| 1 | **X-WAM 非对称时间步耦合**:训练时 `t_video = t_act + (1−t_act)·Beta(1.5,1)`(视频恒 ≥ 动作噪声,另以小概率 t_act=0);推理 action 5 步先出、视频可选续 | X-WAM Table 4b 同架构 +1.4 SR、**4.5× 提速**;直接修我们 TF 探针证实的 exposure bias | lookahead 的 0.0598 上限部分兑现;延迟降一半以上 | 一次 5n8g 重训 |
+| 2 | **指标换轨**:eval 加 best-of-N(N=8)mae@48 + 上闭环 SR;@1 弃用 | SIMPLER/本文探针 | 正确排序模型,可能"消解"大半 gap | 零(改 eval) |
+| 3 | **action 分支独立时间步分布**(π0 式 Beta(1.5,1) 偏高噪声;视频 shift 5.0→~3,低分辨率该降) | π0 App.B / SD3 §5.3.2 | 小-中幅 MAE | 廉价重训(可并入 #1) |
+| 4 | **末段 ckpt soup/EMA**(abs-best 46-50k 平均) | diffusion 通行;model soups | 1-3% | 零重训 |
+| 5 | AdamW betas=(0.85,0.9) 对齐官方 | GigaWorld App.A | 未知,小 | 并入下次训练 |
+| 6 | 更深 action decoder / 小 DiT 头(现为 3 层 MLP) | 文献无对照消融,speculative | 未知 | 架构 |
+| 7 | 闭环侧:RTC/谨慎 ensembling(BID 警告跨模式平均有害) | 直接证据 | 执行质量 | 零重训 |
+
+不建议:继续加密未来帧(GigaWorld Table 5:K=12 比 K=4 掉 7 个点)、SDE 采样、min-SNR(无证据)。
+
+## 三、五种 action↔视频 耦合方式对比(选型依据)
+
+```
+Token 序列:  [State | Ref帧 | Action×48 | 噪声视频×T]
+① action_only 推理路径     :  [State | Ref | Action]            ← 视频 token 直接丢弃
+② 严格因果(GigaWorld官方):  action ─✗→ 视频(mask 切断)
+③ naive lookahead          :  action ──→ 视频,训练/推理同一 σ(锁步)
+④ teacher-forcing(诊断)  :  action ──→ 视频,但视频 = 加噪GT(不可部署)
+⑤ X-WAM 异步耦合(建议)  :  action ──→ 视频,训练 σ_video ≥ σ_action(上三角)
+```
+
+| | ②严格因果 + ①action_only | ③naive lookahead(sync σ) | ④teacher-forcing | ⑤X-WAM 异步耦合 |
+|---|---|---|---|---|
+| action 能看到什么 | 当前帧+state,无未来 | 自预测未来视频(同σ) | **GT** 未来视频 | 自预测未来视频(更高σ,只取可靠低频) |
+| 训练 (σ_a,σ_O) 覆盖 | σ_O 无关(action 看不见) | 仅对角线 σ_a=σ_O | 同对角线 | **整个上三角** + (0,U) 端点 |
+| exposure bias | 无(不用视频) | **有,实锤**(TF 差 61%) | 无(作弊:用 GT) | 训练分布覆盖推理状态 → 修复 |
+| mae@48 实测(同子集) | 0.0913(45k) | 0.1522(25k,步数少~半) | **0.0598** ← 上限 | 待跑;预期 (0.06,0.15) 偏下 |
+| 全量 eval @48 | 0.1285(abs-best) | 0.1494(@26k,仍在降) | — | — |
+| 闭环 SR(文献) | GigaWorld 0.83 | GigaWorld Table 6:**0.81** | — | X-WAM 67.8 vs 同步 66.4,视频指标也最好 |
+| action 延迟 | **536ms**(10步,序列最短) | 644-680ms(10步,带视频 token) | — | **~330ms**(5步)可调 |
+| 提速工具适配 | ✅ prefix-KV/BAC/FP8 全套 | ❌ 噪声视频 KV 每步变 | — | 部分适配(步数减半是大头) |
+| 训练成本 | 已有 | 已有(A/B 进行中) | 零(纯推理探针) | 一次 5n8g 重训,模型侧零改动 |
+| 证据强度 | 官方配方+我们复现 | 官方消融+我们 A/B | 我们实测,对照组验证 | 同架构论文消融,未在我们数据上验 |
+
+要点:
+- **①对②无损**:mask 切断 ⇒ action 对视频 softmax 权重严格为 0,丢弃视频 token 数学等价
+  (`prefix_cache.py` "lossless" 的依据);对③⑤非法(forward 已加报错兜底)。
+- **③的价值**是把奖品量化:action 解码器确实学会重度依赖视频(TF −61%),但同步训练
+  只覆盖对角线,推理时自预测视频供不上 → 复现官方 Table 6 的轻微负收益。25k vs 45k
+  步数不对等,终值以 50k 收敛后为准,但方向已定。
+- **⑤独有的部署旋钮**:p 分支(σ_a=0, σ_O~U)训过"干净 action × 任意噪视频"全组合 ⇒
+  同一 ckpt 可选「快档」action 5 步先出(~330ms)或「准档」视频先走若干步再解 action
+  (逼近 0.0598 上限),延迟-精度按场景调。
+- **选型**:现在部署用②+①;下一实验⑤(lookahead 配置仅改 timestep 采样,与③构成第二个
+  干净 A/B);③跑完留档不投产;长线备选 FLARE 式 latent 对齐(GR00T N1.5 路线)。
+
+### 附:X-WAM 异步噪声采样(ANS)详解(arXiv 2604.26694,backbone 同为 Wan2.2-TI2V-5B)
+
+**分叉的重述**:GigaWorld 只测了「不看未来」(causal,SR 0.83)vs「naive 看」(同步噪声,0.81)。
+X-WAM 证明 naive 差的根因不是"看未来"错了,而是**训练时的噪声配对**错了。
+
+**训练(Eq.4)**——每样本采两个噪声水平(t=1 纯噪):
+```
+以概率 p:    t_a = 0,        t_O ~ U(0,1)                       ← 分支A:动作已干净、视频还在去噪
+以概率 1−p:  t_a ~ U(0,1),   t_O = t_a + (1−t_a)·b, b~Beta(1.5,1) ← 分支B:视频恒比动作噪
+```
+- 重标到 [t_a,1] ⇒ **t_O ≥ t_a 恒成立**;Beta(1.5,1) 右偏(均值0.6)⇒ 视频通常噪得多;
+- 损失:各模态用**自己的 t** 做 velocity prediction(要求 per-token timestep——Wan2.2 TI2V
+  的 expand_timesteps 原生支持,模型架构零改动);p 值论文未公开(需自扫,0.1 量级起步)。
+
+**推理**:动作 T_a 步(步长 1/T_a)先走完直接下发;视频 T_O 步(T_a<T_O)继续,动作此后
+作为 clean modality 固定不再加噪。σ_a(i)=1−i/T_a ≤ σ_O(i)=1−i/T_O 自然满足训练约束。
+
+**消融(Table 4b, RoboCasa)**:
+| 训练→推理 | SR | 延迟 | PSNR | AbsRel |
+|---|---|---|---|---|
+| 同步→同步(25 joint 步) | 66.4 | 4665ms | 23.48 | 0.0375 |
+| naive 独立采样→异步 | 67.2 | 1033ms | 22.60↓ | 0.0430↓ |
+| **ANS 耦合→异步(动作5步)** | **67.8** | 1033ms | **23.46** | **0.0349** |
+行1→2:异步本身不掉 SR 且 4.5×提速;行2 代价:一半训练预算浪费在推理永不出现的 t_O<t_a
+区域,视频质量崩;行3:只训上三角 ⇒ SR 最高且视频追平同步。
+
+**为什么治我们的 exposure bias**(连接 §一.2 TF 探针):同步训练教会模型"σ 之下藏着完美
+GT,细节可信"→ 推理时藏的是带误差的自预测,细节恰恰错。ANS 两层修复:①分布覆盖——推理
+轨迹 (σ_a低, σ_O高) 完全在训练上三角内;②信息选择——只见过"比自己更噪的视频" ⇒ 动作只学
+提取高噪下仍可辨认的低频信息(物体往哪去),而自预测视频恰是低频对、高频错 ⇒ "对高噪 GT
+鲁棒"≈"对自预测误差鲁棒"。等效一个不需 rollout 的隐式 scheduled sampling。
+
+**Caveats**:p 未公开;证据来自 RoboCasa 仿真(K=32/H=8 vs 我们 48/5)——同 backbone 同机制,
+方向可信、幅度待验;X-WAM attention 为动作↔视频双向,与我们打开 lookahead 后一致。
+
+## 四、探针复现
+```bash
+CUDA_VISIBLE_DEVICES=0 PYTHONPATH=. python scripts/wam_pipeline/_diag_deep.py \
+  --ckpt <transformer_dir> --stats_path assets_visrobot01/norm_stats_vis_abs.json --n 24
+CUDA_VISIBLE_DEVICES=1 PYTHONPATH=. python scripts/wam_pipeline/_diag_teacher_force.py \
+  --ckpt <transformer_dir> --stats_path assets_visrobot01/norm_stats_vis_abs.json --n 16
+```
+日志:`.wam_run/diag_deep_{absbest,lookahead}.log`、`.wam_run/tf_probe_{lookahead,absbest}.log`。
+调研报告(GigaWorld/X-WAM/π0/UVA/UWM/FLARE/SIMPLER 等,含 arXiv 链接)见会话记录。
