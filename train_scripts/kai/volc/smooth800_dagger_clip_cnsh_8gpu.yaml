@@ -14,7 +14,7 @@ Framework: "PyTorch"
 TaskRoleSpecs:
   - RoleName: "worker"
     RoleReplicas: 1
-    Flavor: "ml.hpcpni2.28xlarge"   # 8× A100-80G single node
+    Flavor: "ml.hpcpni2.28xlarge"   # 8× A100-80G + 112 vCPU (Preset 整机; CreateJob 不允许自定义 CPU)
 
 ActiveDeadlineSeconds: 259200      # 50k step 单机 ~26h + 余量
 EnableTensorBoard: false
