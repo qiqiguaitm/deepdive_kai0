@@ -613,6 +613,7 @@ class CasualWorldActionTransformer(
         rope_max_seq_len: int = 1024,
         pos_embed_seq_len: Optional[int] = None,
         action_attends_video: bool = False,
+        async_noise: bool = False,  # X-WAM ANS:ckpt 自描述用(训练侧由 trainer 读 model_config)
     ) -> None:
         super().__init__()
 
