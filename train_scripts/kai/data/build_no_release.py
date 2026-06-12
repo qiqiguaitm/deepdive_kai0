@@ -106,6 +106,9 @@ def trim_video_pyav(src_mp4: Path, dst_mp4: Path, cut: int, expected_frames: int
     for frame in in_c.decode(video=0):
         if idx >= cut:
             new = frame.reformat(format="yuv420p")
+            new.pts = None  # reset PTS → encoder assigns sequential-from-0 (else trimmed video keeps
+                            # original pts≈cut/fps, desyncing the 0-start parquet → lerobot timestamp
+                            # video-decode tolerance error in AdvantageLerobotDataset. see reset_video_pts.py)
             for pkt in out_stream.encode(new):
                 out_c.mux(pkt)
             written += 1
