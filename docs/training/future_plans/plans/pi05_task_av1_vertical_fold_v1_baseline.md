@@ -38,7 +38,7 @@
 |---|---|
 | 模型 | **pi05**(`Pi0Config(pi05=True)`)|
 | 数据 | `Task_AV1` 取 **200 ep** 子集(见 §3)|
-| init | **warm-start `mixed_1_clean/params`**(沿用现有 flatten-fold pi05 配方;❓ 待确认:warm-start 还是别的)|
+| init | ✅ **warm-start `mixed_1_clean/params`**(用户定,沿用现有 flatten-fold pi05 配方)|
 | steps | **50,000** |
 | 目标 | 新 SOP 数据的可部署基线 + 摸清新折法的 offline/真机表现 |
 
@@ -46,20 +46,18 @@
 
 ## 3. 数据准备:取 200 ep
 
-- **来源**: `kai0/data/Task_AV1/base/{2026-06-11-v2, 2026-06-12-v2}/`(245 ep 可选)。
-- **选 200 ep(❓ 待确认方式)**:
-  - **默认推荐**:**随机 200**(固定 seed,跨两日期混合,代表性好)→ 合并成单数据集 `Task_AV1_200`(lerobot v2.1,episode_index 重排)。
-  - 备选:按日期取(如全 06-11 的 133 + 06-12 的 67)。
-- **val(留出)**:剩余 **45 ep 作 held-out val**(新 SOP 是新分布,**用 Task_AV1 自己的留出集**做 in-distribution eval,比用旧 `vis_v2_merged_val` 更对口)。
+- **来源**: `kai0/data/Task_AV1/base/{2026-06-11-v2, 2026-06-12-v2}/`(≥245 ep,仍在增长)。
+- ✅ **选 200 ep = 按日期顺序取前 200**(用户定):**全 06-11-v2 的 133 ep + 06-12-v2 的前 67 ep** → 合并成单数据集 `Task_AV1_200`(lerobot v2.1,episode_index 重排)。
+- ✅ **val = Task_AV1 留出**(用户定):取**剩余 ep 的末 ~45 个作 held-out val**(= 06-12-v2 第 68 个起;新 SOP 是新分布,用自家留出集做 in-distribution eval)。⚠️ 因 train 按日期顺序取前 200,val 落在 06-12 末段——同 SOP 同本体,分布一致 OK。
 - **norm_stats**:对 `Task_AV1_200` **重算**(`compute_norm_states_fast.py`)。
-- **build 脚本**:复用 `build_no_release.py --mode raw --merge-*` 或写薄脚本合并指定 200 个 ep + 重排 + 视频 symlink。
-- ⚠️ **夹爪(决策点)**:本数据 action≡state、夹爪抓取停在布厚(给不到力,见 §1.1)。**首次基线先用原始 action**(不裁),把夹爪裁剪(≤5mm→0)作为**后续对照**(已有独立 plan)——除非你现在就想基线即用裁剪版。
+- **build 脚本**:复用 `build_no_release.py --mode raw --merge-*` 或薄脚本,按日期顺序合并前 200 ep + 重排 + 视频 symlink;val 单独建。
+- ✅ **夹爪 = 原始 action**(用户定,不裁):本数据 action≡state、夹爪抓取停在布厚(见 §1.1),**首次基线用原始 action**;夹爪裁剪(≤5mm→0)作为**后续独立对照**(见 `gripper_action_clip_experiment.md`)。
 
 ---
 
 ## 4. 训练规格(克隆现有 flatten-fold pi05 config)
 - **config** 新建 `pi05_task_av1_vfold_v1_200`(克隆 `pi05_flatten_fold_A_smooth800_dagger_full` config.py:1798):
-  - `repo_id` → `Task_AV1_200`;`default_prompt="Flatten and fold the cloth. Vertical Flod v1."`(对齐数据 prompt);`use_delta_joint_actions=False`。
+  - `repo_id` → `Task_AV1_200`;`default_prompt` = **§7.5 待定**(A 原样 / B 规范化,推荐 B `"Flatten and fold the cloth. Vertical Fold v1."`);`use_delta_joint_actions=False`。
   - init `CheckpointWeightLoader("mixed_1_clean/params")`;cosine **warmup 1k / peak 1.5e-5 / decay 50k → 1.5e-6**;EMA **0.9999**;**50k step**;batch **128**;**fsdp 8**;save 每 2k / keep 10k;`inline_eval_val_root` → Task_AV1 留出 val。
 - **资源**:单节点 **8 卡**(cnsh A100 / cnbj H20)。
 
@@ -82,12 +80,15 @@
 
 ---
 
-## 7. 待确认(动手前)
-1. **选 200 ep 方式**:随机 200(默认推荐)还是按日期?
-2. **init**:warm-start `mixed_1_clean`(默认)还是别的(如从 PaliGemma base / 别的 ckpt)?
-3. **夹爪**:首次基线用原始 action(默认)还是直接用裁剪版(≤5mm→0)?
-4. **val**:用 Task_AV1 留出 45 ep(默认推荐)还是旧 `vis_v2_merged_val`?
-5. **prompt**:训练用数据原 prompt "Flatten and fold the cloth. Vertical Flod v1."(默认对齐)还是规范化(去掉 typo "Flod"→"Fold"、去尾空格)?
+## 7. 决策定档(✅ 2026-06-12 用户确认)
+1. ✅ **选 200 ep = 按日期顺序取前 200**(06-11 全 133 + 06-12 前 67)。
+2. ✅ **init = warm-start `mixed_1_clean/params`**。
+3. ✅ **夹爪 = 原始 action**(不裁;裁剪版留作后续独立对照)。
+4. ✅ **val = Task_AV1 留出**(末 ~45 ep)。
+5. ⏳ **prompt(待用户定,我已介绍区别)**:
+   - **A. 原样**:`"Flatten and fold the cloth. Vertical Flod v1. "`(含 typo "Flod" + 尾空格)。
+   - **B. 规范化(推荐)**:`"Flatten and fold the cloth. Vertical Fold v1."`(修 typo + 去尾空格)。
+   - **要点**:决定性的是 **train==deploy prompt 一字不差**;typo "Flod" 非真词、VLM 无 grounding,规范化能蹭 warm-start pi05 的语言理解 + 更干净;但单任务单 prompt 下两者都 work。**训练实际用的是 config `default_prompt`**(覆盖数据 tasks.jsonl 的 "Flod"),所以这是"default_prompt 设成哪串"的选择。→ **建议 B**,待你拍板。
 
 ---
 
