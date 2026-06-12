@@ -52,8 +52,15 @@ Entrypoint: |
   set -x
   nvidia-smi -L
   REPO=/vePFS/tim/workspace/deepdive_kai0
+  # uv-managed .venv interpreter resolves its packages via /home/tim/.local/share/uv;
+  # on GPU node that lives at /root/.local/share/uv → symlink it (else ModuleNotFoundError: pyarrow).
+  if [ ! -x "$HOME/.local/bin/uv" ]; then curl -LsSf https://astral.sh/uv/install.sh | sh; fi
+  export PATH="$HOME/.local/bin:$PATH"
+  uv python install 3.11.15 2>&1 | tail -1
+  mkdir -p /home/tim/.local/share && ln -sfn /root/.local/share/uv /home/tim/.local/share/uv
   cd "$REPO/kai0"
   source .venv/bin/activate
+  python -c "import pyarrow, torch; print('pyarrow+torch OK', torch.__version__)"
   export TORCH_HOME=/vePFS/tim/workspace/openpi_cache/torch_hub
 
   SRC=$REPO/kai0/data/Task_A/self_built/vis_awbc_merged
