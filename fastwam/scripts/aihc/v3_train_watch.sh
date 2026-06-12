@@ -13,7 +13,7 @@ OUT="$REPO/runs/visrobot01_fold_uncond_1e-4/${RUN_NAME}"
 last_step=-1; stall=0
 while :; do
   st=$(cd "$GWP" && source env.sh >/dev/null 2>&1 && python3 scripts/aihc/job_status.py "$JOB" 2>/dev/null | awk -F': ' '/^status/{print $2}')
-  line=$(grep -aoE "step=[0-9]+/[0-9]+ loss=[0-9.]+" "$OUT/pod_0.stdout" 2>/dev/null | tail -1)
+  line=$(grep -aoE "step=[0-9]+/[0-9]+" "$OUT/pod_0.stdout" 2>/dev/null | tail -1)
   step=$(echo "$line" | grep -oE "step=[0-9]+" | grep -oE "[0-9]+" | head -1); step=${step:--1}
   nck=$(ls "$OUT/checkpoints/weights/"step_*.pt 2>/dev/null | wc -l)
   echo "[$(date '+%m-%d %H:%M')] job=${st:-?} $line ckpts=$nck"

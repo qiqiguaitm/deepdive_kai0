@@ -33,26 +33,29 @@ def build_model(weights, device="cuda"):
         cfg = compose(config_name="train",
                       overrides=["data=visrobot01_fold", "model=fastwam", "task=visrobot01_fold_uncond_1e-4"])
     model = instantiate(cfg.model)  # create_fastwam(已含 ActionDiT backbone 初始化)
-    sd = torch.load(weights, map_location="cpu", weights_only=False)
-    for key in ("model", "state_dict", "dit"):
-        if isinstance(sd, dict) and key in sd and isinstance(sd[key], dict):
-            sd = sd[key]
-            break
-    tgt = model.mot if all(k.startswith(("mixtures", "video", "action")) for k in list(sd)[:3]) else model
-    missing, unexpected = tgt.load_state_dict(sd, strict=False)
-    print(f"[load] missing={len(missing)} unexpected={len(unexpected)} (前3: {missing[:3]} / {unexpected[:3]})", flush=True)
+    sd = torch.load(weights, map_location="cpu", weights_only=False, mmap=True)
+    # trainer 落盘结构:{"mot": mixtures.video/action.* 全量, "proprio_encoder": ..., "step", "torch_dtype"}
+    model.mot.load_state_dict(sd["mot"], strict=True)
+    if "proprio_encoder" in sd and getattr(model, "proprio_encoder", None) is not None:
+        model.proprio_encoder.load_state_dict(sd["proprio_encoder"], strict=True)
+    print(f"[load] mot keys={len(sd['mot'])} step={sd.get('step')} strict OK", flush=True)
     return model
 
 
 def prep_image(frames_by_cam):
-    """复刻 RobotVideoDataset 'robotwin' 拼图:top 256x320 + 左右 128x160 → 384x320 → resize 240x320。
-    输入: {cam: HxWx3 uint8};输出 [3,240,320] float [0,1]。"""
-    t = {k: torch.from_numpy(v).permute(2, 0, 1).float() / 255.0 for k, v in frames_by_cam.items()}
+    """严格复刻训练像素链(与 compute_latents.window_pixels 一致):
+    per-cam ToTensor(/255)+Resize(240,320) → top 256x320 / 腕 128x160 → 拼 [3,384,320]。
+    输入: {cam: HxWx3 uint8};输出 [3,384,320] float [0,1](infer_action 内部转 [-1,1]?
+    —— 不,VAE 期望 [-1,1],infer_action 直接 encode → 调用方给 [-1,1])。"""
+    t = {}
+    for k, v in frames_by_cam.items():
+        x = torch.from_numpy(v).permute(2, 0, 1).float().unsqueeze(0) / 255.0
+        t[k] = TF.resize(x, [240, 320], antialias=True)[0]
     top = TF.resize(t["cam_high"].unsqueeze(0), [256, 320], antialias=True)[0]
     lf = TF.resize(t["cam_left_wrist"].unsqueeze(0), [128, 160], antialias=True)[0]
     rt = TF.resize(t["cam_right_wrist"].unsqueeze(0), [128, 160], antialias=True)[0]
-    img = torch.cat([top, torch.cat([lf, rt], dim=-1)], dim=-2)  # [3,384,320]
-    return TF.resize(img.unsqueeze(0), [240, 320], antialias=True)[0]
+    img = torch.cat([top, torch.cat([lf, rt], dim=-1)], dim=-2)  # [3,384,320] in [0,1]
+    return img * 2.0 - 1.0  # [-1,1],对齐训练 Normalize((x-0.5)/0.5)
 
 
 def main():
@@ -89,10 +92,12 @@ def main():
     # t5 缓存(单 prompt)
     cache = list(Path("data/text_embeds_cache/visrobot01_fold").glob("*.pt"))[0]
     t5 = torch.load(cache, map_location="cpu", weights_only=False)
-    ctx = t5.get("context") if isinstance(t5, dict) else t5
-    cmask = t5.get("context_mask") if isinstance(t5, dict) else None
+    ctx = t5["context"]                  # [L,D];缓存键 = context/mask(对齐 _get_cached_text_context)
+    cmask = t5["mask"].bool()            # [L]
+    ctx = ctx.clone(); ctx[~cmask] = 0.0  # 复刻训练约定:padding 清零后 mask 置全 1
+    cmask = torch.ones_like(cmask)
     if ctx.ndim == 2: ctx = ctx.unsqueeze(0)
-    if cmask is not None and cmask.ndim == 1: cmask = cmask.unsqueeze(0)
+    if cmask.ndim == 1: cmask = cmask.unsqueeze(0)
 
     model = build_model(args.weights)
     from torchcodec.decoders import VideoDecoder
@@ -123,7 +128,7 @@ def main():
                          context_mask=None if cmask is None else cmask.to(model.device),
                          num_inference_steps=args.nfe, seed=0)
             lat_ms.append((time.time() - t0) * 1000)
-            pa = out["action"][0].float().cpu().numpy() * (a_std + 1e-8) + a_mean  # z-score 逆 + 全 abs(无 delta)
+            pa = out["action"].float().cpu().numpy() * (a_std + 1e-8) + a_mean  # infer_action 返回已是 [48,14];z-score 逆 + 全 abs
             gt = gt_all[f : f + 48]
             n = min(len(pa), len(gt)); ae = np.abs(pa[:n] - gt[:n])
             for h in HOR:
