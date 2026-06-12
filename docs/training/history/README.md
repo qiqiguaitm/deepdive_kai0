@@ -47,9 +47,14 @@
 
 ### AWBC
 
+> 活跃 AWBC 执行计划在 [`../deployment/strategy/awbc_implementation_plan.md`](../../deployment/strategy/awbc_implementation_plan.md)(future_plans 侧);以下为**已完成/废弃、2026-06-12 归档**的实验。
+
 | 实验 | 状态 | 文件 |
 |---|---|---|
-| gf0 AWBC baseline v2 | ✅ done | [gf0_awbc_baseline_v2_results.md](experiments/gf0_awbc_baseline_v2_results.md) |
+| gf0 AWBC baseline v2 (结果) | ✅ done (提前停 21k) | [gf0_awbc_baseline_v2_results.md](experiments/gf0_awbc_baseline_v2_results.md) |
+| AWBC π0.7-style 实验 | ⛔ FAILED/superseded | [awbc_pi07style_experiment.md](experiments/awbc_pi07style_experiment.md) 🗄️2026-06-12归档 |
+| awbc_v2 训练计划 (base+dagger+mirror) | 🗄️ superseded | [awbc_v2_training_plan.md](experiments/awbc_v2_training_plan.md) 🗄️2026-06-12归档 |
+| uc01 Advantage+AWBC 复现方案 | 🗄️ superseded | [gf2_advantage_awbc_plan.md](experiments/gf2_advantage_awbc_plan.md) 🗄️2026-06-12归档 |
 
 ### Conditioning × Action Representation Ablation
 

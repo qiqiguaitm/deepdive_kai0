@@ -155,9 +155,9 @@ docs/
 | [`data_root_cause_probe_experiments.md`](training/future_plans/plans/data_root_cause_probe_experiments.md) | 数据问题排查实验系列 |
 | [`advantage_pipeline_and_visual_subgoal.md`](training/future_plans/plans/advantage_pipeline_and_visual_subgoal.md) | Advantage pipeline + 视觉 subgoal 增强 |
 | [`awbc_viva_value_comparison_plan.md`](training/future_plans/plans/awbc_viva_value_comparison_plan.md) | AWBC × ViVa value model 对比 |
-| [`awbc_v2_training_plan.md`](training/future_plans/plans/awbc_v2_training_plan.md) | awbc_v2 训练计划 |
-| [`awbc_pi07style_experiment.md`](training/future_plans/plans/awbc_pi07style_experiment.md) | AWBC π0.7-style 实验 (已 superseded) |
-| [`gf2_advantage_awbc_plan.md`](training/future_plans/plans/gf2_advantage_awbc_plan.md) | Advantage estimator + AWBC 复现 (原 uc01) |
+| [`awbc_v2_training_plan.md`](training/history/experiments/awbc_v2_training_plan.md) | awbc_v2 训练计划 |
+| [`awbc_pi07style_experiment.md`](training/history/experiments/awbc_pi07style_experiment.md) | AWBC π0.7-style 实验 (已 superseded) |
+| [`gf2_advantage_awbc_plan.md`](training/history/experiments/gf2_advantage_awbc_plan.md) | Advantage estimator + AWBC 复现 (原 uc01) |
 | [`stage_classifier_plan.md`](training/future_plans/plans/stage_classifier_plan.md) | Stage classifier 训练方案 |
 | [`pytorch_native_vis_v2_full.md`](training/future_plans/plans/pytorch_native_vis_v2_full.md) | PyTorch 原生训练 pi05 (R1 abs + R2 delta) |
 | [`pytorch_ema_patch_and_retrain.md`](training/future_plans/plans/pytorch_ema_patch_and_retrain.md) | PyTorch EMA patch + 重训 |

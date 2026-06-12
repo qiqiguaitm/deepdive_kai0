@@ -1,4 +1,5 @@
 # awbc_v2 训练计划
+> 🗄️ **已归档 (2026-06-12)**: 本 AWBC 实验已完成/废弃, 从 future_plans 迁入 history。活跃 AWBC 执行计划见 [`../../../deployment/strategy/awbc_implementation_plan.md`](../../../deployment/strategy/awbc_implementation_plan.md)。
 
 **状态**: 🔄 **实施中** (2026-04-19)
 **决策**: Option 1 — gf0 继续跑 v1 作 baseline，gf1 切换到 v2 全量数据 + Mirror，获得干净 A/B 对比
@@ -565,6 +566,6 @@ uv run scripts/train.py pi05_flatten_fold_awbc_v2 \
 
 ## 参考
 
-- [stage_advantage/README.md](../stage_advantage/README.md)
+- [stage_advantage/README.md](../../../../kai0/stage_advantage/README.md)
 - [train_deploy_alignment/data_augment/](../train_deploy_alignment/data_augment/)
-- [training_plans.md](training_plans.md) — kai0_mixed_1 / kai0_full 方案（含 MA 路线）
+- [training_plans.md](../../future_plans/plans/training_plans.md) — kai0_mixed_1 / kai0_full 方案（含 MA 路线）

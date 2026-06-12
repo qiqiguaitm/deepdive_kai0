@@ -1,4 +1,5 @@
 # uc01 复现方案：Advantage Estimator + AWBC
+> 🗄️ **已归档 (2026-06-12)**: 本 AWBC 实验已完成/废弃, 从 future_plans 迁入 history。活跃 AWBC 执行计划见 [`../../../deployment/strategy/awbc_implementation_plan.md`](../../../deployment/strategy/awbc_implementation_plan.md)。
 
 ## 背景
 

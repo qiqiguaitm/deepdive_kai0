@@ -1,4 +1,5 @@
 # AWBC π0.7-style 实验方案与跟进
+> 🗄️ **已归档 (2026-06-12)**: 本 AWBC 实验已完成/废弃, 从 future_plans 迁入 history。活跃 AWBC 执行计划见 [`../../../deployment/strategy/awbc_implementation_plan.md`](../../../deployment/strategy/awbc_implementation_plan.md)。
 
 **创建时间**: 2026-04-18
 **状态**: ⛔ **SUPERSEDED / FAILED** — 后继方案见 [awbc_v2_training_plan.md](awbc_v2_training_plan.md)

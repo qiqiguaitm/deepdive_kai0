@@ -49,8 +49,8 @@
 
 | 计划 | 文件 | 备注 |
 |---|---|---|
-| AWBC v2 训练 plan | [awbc_v2_training_plan.md](plans/awbc_v2_training_plan.md) | 第二代 AWBC 实验设计 |
-| AWBC pi0.7-style 实验 | [awbc_pi07style_experiment.md](plans/awbc_pi07style_experiment.md) | 仿 pi0.7 风格 AWBC 变体 |
+| AWBC v2 训练 plan | [awbc_v2_training_plan.md](../history/experiments/awbc_v2_training_plan.md) 🗄️归档 | 第二代 AWBC 实验设计 |
+| AWBC pi0.7-style 实验 | [awbc_pi07style_experiment.md](../history/experiments/awbc_pi07style_experiment.md) 🗄️归档 | 仿 pi0.7 风格 AWBC 变体 |
 | Advantage Estimator + visual subgoal pipeline | [advantage_pipeline_and_visual_subgoal.md](plans/advantage_pipeline_and_visual_subgoal.md) | AWBC 上游 advantage 训练 + visual subgoal |
 | Stage classifier 训练 plan | [stage_classifier_plan.md](plans/stage_classifier_plan.md) | 阶段分类器 (AWBC 状态分段) |
 
@@ -60,7 +60,7 @@
 |---|---|---|
 | gf0 normal training plan | [gf0_normal_training_plan.md](plans/gf0_normal_training_plan.md) | gf0 8×A100 baseline 训练流程 |
 | gf1 training plan | [gf1_training_plan.md](plans/gf1_training_plan.md) | gf1 8×A100 训练流程 |
-| gf2 advantage + AWBC plan | [gf2_advantage_awbc_plan.md](plans/gf2_advantage_awbc_plan.md) | gf2 跑 advantage estimator + AWBC |
+| gf2 advantage + AWBC plan | [gf2_advantage_awbc_plan.md](../history/experiments/gf2_advantage_awbc_plan.md) 🗄️归档 | gf2 跑 advantage estimator + AWBC |
 | Multinode distributed training | [multinode_distributed_training_plan.md](plans/multinode_distributed_training_plan.md) | 多节点分布式训练设计 |
 | Parallel execution plan | [parallel_execution_plan.md](plans/parallel_execution_plan.md) | 多机并发执行调度 |
 
