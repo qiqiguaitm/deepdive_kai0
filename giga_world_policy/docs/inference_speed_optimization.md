@@ -1,6 +1,7 @@
 # GigaWorld-Policy 推理加速研究
 
 > 目标:在**不重新训练、不损失精度**的前提下,优化 GigaWorld-Policy 的动作推理延迟。
+> **2026-06-13 更新:全部精度悬置项已在真实 ckpt + 200ep 协议上终审,见文末 §9(部署选型:gwp_ans 87ms / gwp_ori 103ms)。**
 > 成果阶梯:**530ms → 100ms 内(127ms 逐位无损 / 84ms 近无损)→ 50ms 内(39ms,NFE5+全图prepare+FP8)**。
 > 最快全栈:**530ms → 39ms(13.5×)**,单次推理稳定。
 
@@ -332,3 +333,40 @@ CUDA_VISIBLE_DEVICES=3 $PY -m scripts.test_bac --skip_middle 12 --fuse --fp8 --c
 6. 数据侧:把 LeRobot 数据(相机键 `top_head/hand_*`)转成服务端期望的 `cam_high/cam_*_wrist` 以跑端到端(含 VAE)闭环。
 
 **未做的边际项**:文本 cross-attn KV 缓存(精确)、bf16 LayerNorm(近无损)——在 48-token/decode regime 下各仅省 ~0.3-1ms,对达标非必要。
+
+---
+
+## 9. 真实 checkpoint 终审与部署定稿(2026-06-13,jpsz 4×RTX5090)
+
+本节闭环 §8 的全部"需真实 checkpoint"事项。载体:`scripts/opt_ans.py` ——
+- 把本工具集接到**真实权重**与 **gwp_ans 全量路径**(AnsPrefixRunner:掩码保证 prefix 不 attend
+  action/noisy ⇒ 全量路径 prefix 同样跨步恒定可缓存;active=192 tok,t_a/t_O per-token);
+- eval 集成 `episode_report --engine opt --opt_tier {eager,exact,fp8} --opt_bac N`,
+  200ep 同协议精度闸门 = stock 基线 ±0.0015(horizons ≥10)。
+
+### §8 待办逐项结论
+
+| §8 事项 | 终审结论 |
+|---|---|
+| 1. NFE 缩减验证 | ✅ **通过且长程更优**:ori NFE5 @48 .0905→.0887(scheduler 本就是 UniPC,无需换);ans T_a 5→3 @48 .0932→.0881。两路复现"少步长程更好"(更少随机累积);@1 +.001 为首步变糙(伪指标) |
+| 2. FP8 精度复核 | ✅ **损失≈0**(Δ@48 ≤.0009):全层 W8A8 rowwise 无校准直接过闸——§6 的 6.4% 随机权重上界纯属悲观,无需敏感层混合精度 |
+| 3. BAC 标定 | ⚠️ **半否决**:ans-BAC12 长程过闸但 @1 全场最差(.0090),仅备选;**ori-BAC12 @10 +.0040 出带,否决**。缓存步占比(ori 9/10 vs ans 4/5)决定误差累积;且 4 进程 max-autotune refresh 编译会耗尽 pinned 内存(NVRM NV_ERR_NO_MEMORY 实录)。**结论:NFE 缩减完胜 BAC,BAC 不进部署线** |
+| 4. 封装进 serving | ✅ `opt_ans.opt_call()`(复用 WAPipeline 预处理/调度器,仅换去噪循环);eval 已切换,inference_server 接入同构 |
+| 5. ori fp8 小 GEMM | 确认:reduce-overhead 下无收益(117≈118.5ms),需 max-autotune(未追加——ori 非部署首选) |
+
+### 部署定稿(200ep 全过闸;延迟 = serving 全栈含 VAE/预处理 / 纯 transformer 循环)
+
+| 模型 | 保守档(零近似) | **推荐档** | 对 stock |
+|---|---|---|---|
+| **gwp_ans** | exact 131ms | **fp8+T_a3:87 / 47.7ms,@48=.0881** | 251ms → **2.9×**,精度反升 |
+| gwp_ori | exact 163ms | **exact+NFE5:103 / 66.6ms,@48=.0887** | 488ms → **4.7×**,精度反升 |
+
+> 当年"进 50ms"的目标(§5 第 5 档 39ms,随机权重)以真实权重 47.7ms + 200ep 精度背书兑现。
+> 全表(10 配置)与方法学见 `docs/wam_mae_root_cause_and_optimization.md` §四;
+> 工件:jpsz `/data2/gwp_eval/out/opt200_*/summary.json`。
+
+### 新增工程要点(本轮沉淀)
+- **eval 管线 GPU 占空比**:CPU AV1 解码与 GPU 推理串行是利用率低的根因 → `EpisodeFrameCache`
+  多线程解码(thread_type=AUTO)+ 下一 episode 后台预取(`prefetch()`),解码完全藏入计算;
+- **BAC×多进程×max-autotune 是危险组合**(pinned 内存耗尽),若启用 BAC 须单进程标定后静态部署;
+- 跨机注意:32G 消费卡上 exact 档 CUDA-Graph 池 ~12.2G/进程,与桌面/他人任务共卡时留余量。
