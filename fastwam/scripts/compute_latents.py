@@ -29,6 +29,10 @@ REPO = Path(__file__).resolve().parents[1]
 os.chdir(str(REPO))
 sys.path.insert(0, "src")
 
+# 多进程并行时必须限线程:torch 默认 intra-op=全核(128)→ 16 进程 2000+ 线程互踩(load 400+)
+_NT = int(os.environ.get("OMP_NUM_THREADS", "8"))
+torch.set_num_threads(_NT)
+
 DATA = str((REPO / ".." / "kai0" / "data" / "wam_fold_v1" / "visrobot01_train").resolve())
 CAMS = ("cam_high", "cam_left_wrist", "cam_right_wrist")
 VID_IDX = np.arange(0, 49, 4)  # 13 帧/窗(action_video_freq_ratio=4)
@@ -49,7 +53,10 @@ def dec_episode(ep):
     out = {}
     for cam in CAMS:
         c = av.open(f"{DATA}/videos/chunk-000/observation.images.{cam}/episode_{ep:06d}.mp4")
-        frames = [f.to_ndarray(format="rgb24") for packet in c.demux(c.streams.video[0]) for f in packet.decode()]
+        stream = c.streams.video[0]
+        stream.thread_type = "AUTO"
+        stream.codec_context.thread_count = 4  # 上限:16 进程×3 流×AUTO 会线程爆炸(load 353/128 核)
+        frames = [f.to_ndarray(format="rgb24") for packet in c.demux(stream) for f in packet.decode()]
         c.close()
         out[cam] = np.stack(frames, axis=0)
     return out
