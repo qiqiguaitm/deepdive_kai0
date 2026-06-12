@@ -73,7 +73,10 @@ Entrypoint: |
   [ -d "$TORCH_HOME/hub/facebookresearch_vjepa2_main" ] || { echo "FATAL: torch.hub vjepa2 repo missing (offline)" >&2; exit 13; }
   echo "[$(date)] preflight OK"
 
+  # clean output dir (prior failed runs left 0-parquet shell) for a fresh, unambiguous run
+  rm -rf "$OUT"
   # 8-way GPU shard (episode % 8 == worker_id); resume-aware (skips done parquet).
+  # --dtype float32: V-JEPA backbone weights must match float32 input frames (bf16 default → dtype mismatch).
   cd "$REPO"
   pids=""
   for i in 0 1 2 3 4 5 6 7; do
@@ -83,6 +86,7 @@ Entrypoint: |
       --ckpt "$CKPT" \
       --backbone vjepa2_1_large \
       --camera-key top_head \
+      --dtype float32 \
       --num-workers 8 --worker-id $i \
       --metrics-out "$OUT/_label_metrics" &
     pids="$pids $!"
