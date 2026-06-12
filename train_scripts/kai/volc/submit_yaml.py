@@ -142,6 +142,10 @@ def main():
             "ResourceQueueId": queue_id,
             "MaxRuntimeSeconds": int(cfg.get("ActiveDeadlineSeconds", 86400)),
             "Roles": build_role_specs(cfg.get("TaskRoleSpecs"), zone_id),
+            # 闲时任务 (preemptible): borrow other queues' idle resources, can be preempted anytime
+            # (training resumes from latest ckpt). Set Preemptible: true (+ optional Priority) in yaml.
+            **({"Preemptible": True} if cfg.get("Preemptible") else {}),
+            **({"Priority": int(cfg["Priority"])} if cfg.get("Priority") is not None else {}),
         },
         "RuntimeConfig": {
             "Framework": cfg.get("Framework", "Custom"),
