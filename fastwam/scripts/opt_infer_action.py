@@ -217,6 +217,7 @@ def _build_model(args, device, dtype):
     register_default_resolvers()
     with initialize_config_dir(version_base="1.3", config_dir=str(REPO / "configs")):
         cfg = compose(config_name="train", overrides=[
+            "data=visrobot01_fold",
             "task=visrobot01_fold_uncond_1e-4",
             "model.load_text_encoder=false",
             "model.skip_dit_load_from_pretrain=true",
@@ -229,7 +230,7 @@ def _build_model(args, device, dtype):
     asched = OmegaConf.to_container(cfg.model.action_scheduler, resolve=True)
 
     video_expert = WanVideoDiT(**vdc).to(device=device, dtype=dtype)
-    action_expert = ActionDiT(**adc, action_dim=14).to(device=device, dtype=dtype)
+    action_expert = ActionDiT(**adc).to(device=device, dtype=dtype)  # action_dim already in adc (from data config)
     vae = WanVideoVAE38().to(device=device, dtype=dtype)
     mot = MoT(mixtures={"video": video_expert, "action": action_expert},
               mot_checkpoint_mixed_attn=False)
