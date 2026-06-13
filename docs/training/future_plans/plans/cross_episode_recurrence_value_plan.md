@@ -5,7 +5,7 @@
 > **上游**:AWBC pipeline([awbc_implementation_plan.md](../../../deployment/strategy/awbc_implementation_plan.md));ViVa 对比([awbc_viva_value_comparison_plan.md](awbc_viva_value_comparison_plan.md),其 DSM-r30 变体**手标** milestone——本方案已证明可自动挖出,§2.3)。
 > **动机(现有 pipeline 病根)**:pi0-AE 是单帧视觉回归器,`absolute_advantage = V(t+50)−V(t)` 二阶差分放大噪声(corr 0.896→0.3-0.4);完全不利用跨 episode 结构;且 AE 训练数据在完成瞬间截止 → vis episode 尾段 value 系统性下坠(end-drop,已实证)。
 
-图像目录:`docs/visualization/cross_episode_recurrence_value/`(本文图 1-43 均相对引用,GitHub 直接渲染);视频默认不入 git(路径见附录 A),**阶段示例视频已入 git**:[milestone_ep_s800_660_final_v4gated_sync.mp4](../../../visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4)(终版配方 + 置信门控,held-out ep660,图33 为抽帧)。
+图像目录:`docs/visualization/cross_episode_recurrence_value/`(本文图 1-44 均相对引用,GitHub 直接渲染);视频默认不入 git(路径见附录 A),**阶段示例视频已入 git**:[milestone_ep_s800_660_final_v4gated_sync.mp4](../../../visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4)(终版配方 + 置信门控,held-out ep660,图33 为抽帧)。
 
 ---
 
@@ -710,6 +710,10 @@ hybrid 取得最优 τ/Pearson 组合(段内增量来自状态对齐而非时间
 
 **两线合体(V2.2 终形)**:value 主体 = §4.4.9 清洁连续读出(趋势);负 advantage 事件 = 本节退步规则(离散、稀疏、语义干净)——连续值给 AWBC 的 value 条件,离散事件给负标签,各取所长。
 
+**图44 — F2 同步视频**(`make_f2_value_sync_video.py`,视频 `temp/f2_rollout_value_sync.mp4`,7676 帧全程;抽帧为退步事件 1 瞬间):rollout 播放 + V2.1(绿)/monotone(红)双曲线游标同步;**进入退步事件 ±2s 时标题变红 "⚠ REGRESSION DETECTED"**,画面恰为布被扰动瞬间——回落与扰动的对齐肉眼可核。
+
+![图44](../../../visualization/cross_episode_recurrence_value/f2_value_sync_preview.png)
+
 #### 4.4.11 多模式别名簇 + task-agnostic 连续性 DP — 解决高位误吸(用户提议+批评驱动,2026-06-13)
 
 > 用户洞察①:V 把"起始(臂原位+衣物成团)"与"终止(臂原位+衣物叠好)"混淆 → 应作多 value 簇消歧;初始因杂乱程度不定不应默认 0,终止可默认 1。
@@ -836,7 +840,7 @@ hybrid 取得最优 τ/Pearson 组合(段内增量来自状态对齐而非时间
 
 ## 附录 A — 工件清单
 
-**图像**(图1-43):`docs/visualization/cross_episode_recurrence_value/`(40+ 张,命名规范 `<阶段>_<数据集>_<内容>`)。
+**图像**(图1-44):`docs/visualization/cross_episode_recurrence_value/`(40+ 张,命名规范 `<阶段>_<数据集>_<内容>`)。
 
 **示例视频(入 git)**:`docs/visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4`(终版配方 + 门控,held-out ep660,~2MB,图33 为抽帧)。
 
@@ -856,8 +860,9 @@ hybrid 取得最优 τ/Pearson 组合(段内增量来自状态对齐而非时间
 | `milestone_ep_smooth800_{660,193,724,169}_v4gated_sync.mp4` | 终版 + 置信门控;后三条 = 随机泛化测试 | 图33/34 为抽帧 |
 | `milestone_ep_s800_660_v5_calibrated_sync.mp4` | V2 校准标签版(P_k 非均匀阶梯 + 循环灰显 + V1/V2 对照) | 图37 为抽帧 |
 | `tcc_align_kai0_87_97.mp4` | TCC v3 两 episode 对齐演示(实时对齐帧 + 路径图 raw/TCC 对照) | 图39 为抽帧 |
+| `f2_rollout_value_sync.mp4` | F2 真机 rollout × V2.1 退步回落同步(事件时刻红色警示) | 图44 为抽帧 |
 
-**脚本**(`train_scripts/kai/data/`):`recurrence_v0_probe.py`(探针)· `recurrence_v0_gt_validation.py`(GT 验证)· `recurrence_value_on_rollout.py`(rollout 迁移)· `recurrence_vs_dsm_milestones.py`(手标对比)· `recurrence_full_mining.py`(全量挖掘)· `tcc_train_features.py`(TCC 适配 + 集群分片)· `build_arm_prototypes.py` / `extract_masked_features.py` / `armmask_compare.py`(臂掩膜三件套)· `recurrence_cluster_audit.py`(聚类审计,图23-25)· 视频脚本五代:`make_milestone_ep_video.py`(M=10,图26)/ `_all48.py`(全簇,图27)/ `_v2.py`(⊕proprio,图31)/ `_v3.py`(N/k/M 参数化,图32)/ `_v4.py` + `_v4_batch.py`(置信门控 + 批量,图33/34)/ `_v5.py`(V2 校准标签,图37)· `tcc_v3_armmask.py`(TCC v3 复活,§2.4.1 图36)· `make_tcc_align_video.py`(两 ep 对齐演示,图39)· `v2_tcc_hybrid_value.py`(两线合流 + advantage 层分析,§4.4.7 图40)· `f2_rollout_regression_test.py`(F2 真机退步事件检验,§4.4.10 图42/43)。集群 YAML:`train_scripts/kai/volc/recurrence_*.yaml`。
+**脚本**(`train_scripts/kai/data/`):`recurrence_v0_probe.py`(探针)· `recurrence_v0_gt_validation.py`(GT 验证)· `recurrence_value_on_rollout.py`(rollout 迁移)· `recurrence_vs_dsm_milestones.py`(手标对比)· `recurrence_full_mining.py`(全量挖掘)· `tcc_train_features.py`(TCC 适配 + 集群分片)· `build_arm_prototypes.py` / `extract_masked_features.py` / `armmask_compare.py`(臂掩膜三件套)· `recurrence_cluster_audit.py`(聚类审计,图23-25)· 视频脚本五代:`make_milestone_ep_video.py`(M=10,图26)/ `_all48.py`(全簇,图27)/ `_v2.py`(⊕proprio,图31)/ `_v3.py`(N/k/M 参数化,图32)/ `_v4.py` + `_v4_batch.py`(置信门控 + 批量,图33/34)/ `_v5.py`(V2 校准标签,图37)· `tcc_v3_armmask.py`(TCC v3 复活,§2.4.1 图36)· `make_tcc_align_video.py`(两 ep 对齐演示,图39)· `v2_tcc_hybrid_value.py`(两线合流 + advantage 层分析,§4.4.7 图40)· `f2_rollout_regression_test.py`(F2 真机退步事件检验,§4.4.10 图42/43)· `make_f2_value_sync_video.py`(F2 同步视频,图44)。集群 YAML:`train_scripts/kai/volc/recurrence_*.yaml`。
 
 **特征/挖掘缓存**(`temp/`):`tcc_{smooth800,kai0,dagger_*}/feat_cache`(原始)· `tcc_{smooth800,kai0}_armmask/feat_cache`(臂掩膜)· `full_mining_*/mining.npz` · `armmask/arm_prototypes.npz`。
 
