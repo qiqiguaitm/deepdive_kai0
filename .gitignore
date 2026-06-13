@@ -105,3 +105,8 @@ calib/verify_out/
 cosmos/wam_fold_policy_runs/
 **/__pycache__/
 *.pyc
+
+# wam_fold_wm training outputs (checkpoints/reports/exports, 100s of GB)
+cosmos/wam_fold_wm_runs/
+# fastwam local conda ffmpeg install (vendored libs, ~420M)
+fastwam/ffmpeg-libs/
