@@ -114,7 +114,25 @@ class GwpPolicy:
             action_num_inference_steps=self.steps_act, is_ans=self.LOOK, bac_skip=a.opt_bac)
         pa = add_state_to_action(denormalize_action(act[0].float(), self.norm, mode=a.norm_mode),
                                  st[0].float(), action_chunk=a.action_chunk, mask=self.dm)
-        return {"actions": pa.cpu().numpy().astype(np.float32)}
+        pa = pa.cpu().numpy().astype(np.float32)
+
+        # --- 在线诊断 ---
+        # 每次都打印动作"运动量"(相邻步均绝对差) + state 是否落在 norm 范围内 -> 看是否塌缩/OOD。
+        self._n = getattr(self, "_n", 0) + 1
+        motion = float(np.abs(np.diff(pa, axis=0)).mean())          # ~0 = 静止塌缩 -> "停顿"
+        s_np = state.cpu().numpy()
+        z = (s_np - self.norm.state_mean.cpu().numpy()) / (self.norm.state_std.cpu().numpy() + 1e-8)
+        ood = float(np.abs(z).max())                                 # state 偏离训练分布的最大 z 分数
+        if self._n <= 5 or self._n % 20 == 0:
+            print(f"[infer #{self._n}] action_motion={motion:.4f} state_max|z|={ood:.2f} "
+                  f"act[0,:7]={pa[0,:7].round(3).tolist()}", flush=True)
+        if a.debug_dump_dir and self._n <= a.debug_dump_n:
+            import os
+            os.makedirs(a.debug_dump_dir, exist_ok=True)
+            ref.save(os.path.join(a.debug_dump_dir, f"ref_{self._n:03d}.png"))   # 看颜色/左右/构图/场景
+            np.savez(os.path.join(a.debug_dump_dir, f"io_{self._n:03d}.npz"), state=s_np, action=pa)
+            print(f"[infer #{self._n}] dumped ref+io -> {a.debug_dump_dir}", flush=True)
+        return {"actions": pa}
 
 
 # --- openpi WebsocketPolicyServer 的最小复制 (只依赖 openpi_client + websockets, 无 JAX) ---
@@ -181,6 +199,8 @@ def main():
     ap.add_argument("--opt_bac", type=int, default=0)
     ap.add_argument("--norm_mode", default="zscore", choices=["minmax", "zscore"])
     ap.add_argument("--warmup", type=int, default=2)
+    ap.add_argument("--debug_dump_dir", default="")   # 落盘头 N 次的 ref图+state+action 做诊断
+    ap.add_argument("--debug_dump_n", type=int, default=10)
     args = ap.parse_args()
 
     policy = GwpPolicy(args)

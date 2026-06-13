@@ -21,6 +21,7 @@ MODEL="ans"
 SERVER_GPU="${KAI0_GWP_SERVER_GPU:-0}"
 WS_PORT="${KAI0_GWP_WS_PORT:-8003}"      # 8000 常被占; 8001=FLASH 8002=V1, gwp 用 8003
 OPT_TIER="fp8"; STEPS_ACT=3
+DEBUG_DUMP=""            # --debug-dump DIR: 落盘头 15 次在线 ref图+state+action 做诊断
 # gwp 默认控制节奏 (与 kai0 的 12/40/20 不同 —— gwp 重规划更勤补长程弱、发布贴 30fps 数据、推理封顶 ~10Hz)
 INFER_RATE=10            # 推理(重规划)Hz 上限; gwp_ans ~90ms/次 → 实际天花板 ~10-11Hz
 EXEC_HORIZON=8           # 每块执行步数 (-> rtc_execute_horizon); gwp 用 8 (kai0=12)
@@ -47,6 +48,7 @@ while [[ $# -gt 0 ]]; do
     --inference-rate) INFER_RATE="$2"; shift 2 ;;
     --exec-horizon)   EXEC_HORIZON="$2"; shift 2 ;;
     --publish-rate)   PUBLISH_RATE="$2"; shift 2 ;;
+    --debug-dump)     DEBUG_DUMP="$2"; shift 2 ;;
     --execute)     EXECUTE_FLAG="--execute"; shift ;;
     --no-execute)  EXECUTE_FLAG=""; shift ;;
     *)             EXTRA_ARGS+=("$1"); shift ;;
@@ -84,6 +86,7 @@ echo "[gwp] starting ws server (compile/warmup ~1-2min)..."
       --transformer_path "$TRANSFORMER" --model_id "$MODEL_ID" --stats_path "$STATS" \
       --t5_embedding_pkl "$T5_PKL" --opt_tier "$OPT_TIER" --steps_act "$STEPS_ACT" \
       --port "$WS_PORT" --warmup 2 \
+      ${DEBUG_DUMP:+--debug_dump_dir "$DEBUG_DUMP" --debug_dump_n 15} \
 ) > log/gwp_server.log 2>&1 &
 SERVER_PID=$!
 echo "[gwp] server pid=$SERVER_PID, log: log/gwp_server.log"
