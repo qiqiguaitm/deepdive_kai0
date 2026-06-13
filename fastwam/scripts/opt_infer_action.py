@@ -27,6 +27,82 @@ sys.path.insert(0, str(REPO / "src"))
 
 from fastwam.models.wan22.wan_video_dit import sinusoidal_embedding_1d
 
+import torch.nn as nn
+
+# ---------------------------------------------------------------------------
+# FP8 — tensorwise fallback (sm_120/jpsz only supports per-tensor scale_a/scale_b)
+# ---------------------------------------------------------------------------
+
+_FP8_MAX = 448.0  # e4m3 max
+
+class _FP8LinearTensorwise(nn.Module):
+    """Per-tensor W8A8 FP8 Linear via torch._scaled_mm with scalar scales.
+
+    Rowwise (per-token activation) scaling is not supported on all sm_120 builds;
+    tensorwise is universally available and gives ~same bandwidth win at bs=1.
+    Weight scale is fixed at init (offline); activation scale is computed per forward.
+    """
+    def __init__(self, lin: nn.Linear):
+        super().__init__()
+        N, K = lin.weight.shape
+        w = lin.weight.data.float()
+        amax_w = w.abs().max().clamp(min=1e-8)
+        scale_w = amax_w / _FP8_MAX
+        wq = (w / scale_w).clamp(-_FP8_MAX, _FP8_MAX).to(torch.float8_e4m3fn)
+        self.register_buffer("wq", wq)
+        self.register_buffer("scale_w", scale_w.to(torch.float32).reshape(1))
+        self.bias = nn.Parameter(lin.bias.data.clone()) if lin.bias is not None else None
+        self.N, self.K = N, K
+
+    def forward(self, x):
+        shape = x.shape
+        x2 = x.reshape(-1, self.K).float()
+        amax_x = x2.abs().max().clamp(min=1e-8)
+        scale_x = (amax_x / _FP8_MAX).reshape(1)
+        xq = (x2 / scale_x).clamp(-_FP8_MAX, _FP8_MAX).to(torch.float8_e4m3fn)
+        out = torch._scaled_mm(xq, self.wq.t(), scale_a=scale_x, scale_b=self.scale_w,
+                               bias=self.bias.to(x.dtype) if self.bias is not None else None,
+                               out_dtype=x.dtype)
+        return out.reshape(*shape[:-1], self.N)
+
+
+def _swap_fp8(module, min_k=256):
+    """Try rowwise FP8 (gwp); fall back to tensorwise if not supported on this GPU."""
+    # Try rowwise first (highest accuracy)
+    _rowwise_ok = None
+    def _can_rowwise():
+        nonlocal _rowwise_ok
+        if _rowwise_ok is None:
+            try:
+                a = torch.ones(16, 16, dtype=torch.float8_e4m3fn, device="cuda")
+                torch._scaled_mm(a, a.t(),
+                                 scale_a=torch.ones(16, 1, device="cuda"),
+                                 scale_b=torch.ones(1, 16, device="cuda"),
+                                 out_dtype=torch.bfloat16)
+                _rowwise_ok = True
+            except Exception:
+                _rowwise_ok = False
+        return _rowwise_ok
+
+    if _can_rowwise():
+        gwp = REPO.parent / "giga_world_policy" / "scripts"
+        sys.path.insert(0, str(gwp))
+        from fp8_linear import swap_linears_to_fp8
+        return swap_linears_to_fp8(module, min_k=min_k), "rowwise"
+
+    # Tensorwise fallback
+    n = 0
+    for name, child in list(module.named_children()):
+        if isinstance(child, nn.Linear):
+            N, K = child.weight.shape
+            if K >= min_k and K % 16 == 0 and N % 16 == 0:
+                setattr(module, name, _FP8LinearTensorwise(child).to(child.weight.device))
+                n += 1
+        else:
+            sub_n, _ = _swap_fp8(child, min_k)
+            n += sub_n
+    return n, "tensorwise"
+
 
 # ---------------------------------------------------------------------------
 # Pure step function (compilable, no self-mutation issues)
@@ -301,16 +377,11 @@ def main():
     model = _build_model(a, dev, dtype)
 
     if a.tier == "fp8":
-        gwp_scripts = REPO.parent / "giga_world_policy" / "scripts"
-        sys.path.insert(0, str(gwp_scripts))
-        from fp8_linear import swap_linears_to_fp8
-        n = swap_linears_to_fp8(model.action_expert.blocks)
-        print(f"[fp8] swapped {n} linears in action_expert.blocks")
-        # also swap action_expert MLP layers (text_embedding, time_embedding, time_projection)
-        n2 = swap_linears_to_fp8(model.action_expert.text_embedding)
-        n3 = swap_linears_to_fp8(model.action_expert.time_embedding)
-        n4 = swap_linears_to_fp8(model.action_expert.time_projection)
-        print(f"[fp8] also swapped text_emb={n2} time_emb={n3} time_proj={n4}")
+        n, fp8_mode = _swap_fp8(model.action_expert.blocks)
+        n2, _ = _swap_fp8(model.action_expert.text_embedding)
+        n3, _ = _swap_fp8(model.action_expert.time_embedding)
+        n4, _ = _swap_fp8(model.action_expert.time_projection)
+        print(f"[fp8/{fp8_mode}] blocks={n} text_emb={n2} time_emb={n3} time_proj={n4}")
 
     runner = ActionStepRunner(model)
     if a.tier in ("exact", "fp8"):

@@ -112,12 +112,12 @@ def main():
         import sys; gwp_scripts = Path(__file__).resolve().parents[2] / "giga_world_policy" / "scripts"
         sys.path.insert(0, str(gwp_scripts))
         if args.opt_tier == "fp8":
-            from fp8_linear import swap_linears_to_fp8
-            n = swap_linears_to_fp8(model.action_expert.blocks)
-            n2 = swap_linears_to_fp8(model.action_expert.text_embedding)
-            n3 = swap_linears_to_fp8(model.action_expert.time_embedding)
-            n4 = swap_linears_to_fp8(model.action_expert.time_projection)
-            print(f"[fp8] blocks={n} text_emb={n2} time_emb={n3} time_proj={n4}", flush=True)
+            from opt_infer_action import _swap_fp8
+            n, fp8_mode = _swap_fp8(model.action_expert.blocks)
+            n2, _ = _swap_fp8(model.action_expert.text_embedding)
+            n3, _ = _swap_fp8(model.action_expert.time_embedding)
+            n4, _ = _swap_fp8(model.action_expert.time_projection)
+            print(f"[fp8/{fp8_mode}] blocks={n} text_emb={n2} time_emb={n3} time_proj={n4}", flush=True)
         opt_runner = ActionStepRunner(model)
         if args.opt_tier in ("exact", "fp8"):
             opt_runner.compile_step("reduce-overhead")
