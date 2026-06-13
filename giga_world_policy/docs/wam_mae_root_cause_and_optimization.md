@@ -294,7 +294,59 @@ attend action/noisy,跨步恒定,全量路径同样可缓存;active=192 tok,t_a/
 部署王牌:**gwp_ans @ fp8+T_a3 = 87ms 全栈 / 47.7ms 纯循环,@48=.0881(优于一切历史配置)**。
 工件:`/data2/gwp_eval/out/opt200_*/summary.json`(jpsz);引擎 `scripts/opt_ans.py`。
 
-## 五、探针复现
+## 五、FastWAM 对比(2026-06-13,AIHC 5n8g A100,visrobot01_fold abs-angle)
+
+FastWAM(arXiv 2603.16666):MoT 双专家(视频 DiT 3072-dim + ActionDiT 1024-dim,各 30 层),
+联合视频+动作训练,测试期 `infer_action` 跳过视频想象(首帧 KV 缓存)。
+与 gwp_ans/gwp_ori 的关键差异:**独立专用动作头 vs 共享大 backbone + 无测试期想象 vs ANS 半去噪**。
+
+训练配置:abs-angle 输出,chunk 48,robotwin 布局 384×320,VAE latent 预计算缓存(0.43 step/s),
+5n8g A100 × 25510 步(job-byelfgmyc9lx),eval 协议严格同 200-ep,`infer_action` NFE=20。
+
+### 终局结果 v3 —— FastWAM 200-ep 同协议终评(2026-06-13,official)
+
+**Official 终表(200 eps,终 ckpt step_025510,infer_action NFE=20)**:
+
+| 模型 | @1 | @10 | @24 | @48 | action 延迟(NFE=20) |
+|---|---|---|---|---|---|
+| **fastwam step25510** | **0.0038** | 0.0297 | 0.0595 | **0.0912** | 931ms |
+| fastwam step25000 | 0.0036 | 0.0297 | 0.0598 | 0.0915 | 883ms |
+| gwp_ans step50000(参照) | 0.0063 | **0.0288** | **0.0574** | 0.0918 | **283ms**(fp8+T_a3:87ms) |
+| gwp_ori step50000(参照) | 0.0053 | 0.0298 | 0.0595 | 0.0916 | 532ms(exact+NFE5:103ms) |
+| pi0.5(参照) | 0.0219 | 0.0425 | 0.0743 | 0.1155 | — |
+
+**训练曲线(@48,每 2500 步)**:
+
+| step | @1 | @10 | @24 | @48 |
+|---|---|---|---|---|
+| 2500 | 0.0270 | 0.0628 | 0.1027 | 0.1336 |
+| 5000 | 0.0208 | 0.0539 | 0.1003 | 0.1279 |
+| 7500 | 0.0172 | 0.0440 | 0.0844 | 0.1159 |
+| 10000 | 0.0142 | 0.0419 | 0.0794 | 0.1096 |
+| 12500 | 0.0114 | 0.0407 | 0.0744 | 0.1068 |
+| 15000 | 0.0086 | 0.0367 | 0.0717 | 0.1040 |
+| 17500 | 0.0069 | 0.0319 | 0.0632 | 0.0958 |
+| 20000 | 0.0050 | 0.0311 | 0.0619 | 0.0934 |
+| 22500 | 0.0041 | 0.0299 | 0.0603 | 0.0919 |
+| **25000** | **0.0036** | 0.0297 | 0.0598 | **0.0915** |
+| **25510** | 0.0038 | 0.0297 | 0.0595 | **0.0912** |
+
+三条结论:
+1. **@48:fastwam 0.0912 < gwp_ans 0.0918,达到并超越 gwp_ans 精度**。@10/@24 仍略逊
+   (分别差 0.0009 / 0.0021,后者接近运行间方差 ±0.0015 边界);@1 显著领先(0.0038 vs 0.0063)。
+2. **延迟短板**:NFE=20 时 931ms,约为 gwp_ans stock(283ms)的 3.3×。需 NFE 缩减:
+   类比 gwp_ori exact+NFE5 → 5× 提速,fastwam NFE=5 预计 ~190ms(论文声称值),
+   **接近 gwp_ans stock,且 gwp_ans 已可用 fp8+T_a3=87ms**,fastwam 延迟仍处于劣势;
+   NFE=5 精度代价未测(设置矩阵待补)。
+3. **MoT 专用动作头 vs 共享 backbone**:两者在同一真实双臂数据上 @48 精度打平(差值 <噪声带),
+   支持"专用小动作专家无损精度"论点;测试期想象(gwp_ans ANS)在当前测试下亦无统计显著优势——
+   差异主要体现在延迟(gwp_ans 更优)与 @1/@24 细节取舍。
+   **当前最优部署推荐不变:gwp_ans fp8+T_a3 @ 87ms,@48=0.0881**。
+
+待补设置矩阵:`infer_joint`(带想象)vs `infer_action` × NFE{20,10,5} → 完整精度-延迟曲线。
+eval 工件:`fastwam/runs/visrobot01_fold_uncond_1e-4/aihc_5n8g_v3/report_step25510/summary.json`。
+
+## 六、探针复现
 ```bash
 CUDA_VISIBLE_DEVICES=0 PYTHONPATH=. python scripts/wam_pipeline/_diag_deep.py \
   --ckpt <transformer_dir> --stats_path assets_visrobot01/norm_stats_vis_abs.json --n 24

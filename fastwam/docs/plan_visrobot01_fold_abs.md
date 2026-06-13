@@ -1,6 +1,6 @@
 # 方案:FastWAM 在 visrobot01 叠衣服数据上的 abs-angle 训练与多模型对比评测
 
-状态:**执行中(2026-06-12)**。基线与协议引用 `giga_world_policy/docs/wam_mae_root_cause_and_optimization.md`(终局结果 v2)。
+状态:**✅ 完成(2026-06-13)**。结果汇入 `giga_world_policy/docs/wam_mae_root_cause_and_optimization.md` § 五(终局结果 v3)。
 
 ## 执行日志
 
@@ -10,11 +10,11 @@
 | M1 权重 | ✅ 零下载 | dreamzero 有完整 Wan-AI 原始 repo(DiT 3 shards/VAE.pth/T5.pth/tokenizer),软链至 `checkpoints/Wan-AI/Wan2.2-TI2V-5B`;**`configs/model/fastwam.yaml` 已改 `redirect_common_files: false`**(用本地 .pth,勿改回) |
 | M1 ActionDiT 插值 | ✅ | 2.0GB payload,copied=300/interpolated=520/skipped=4(skip 为 action_dim 相关层,训练时按 14 维新建) |
 | M1 T5 缓存 | ✅ | 单 prompt("Flatten and fold the cloth.")1 个缓存文件 |
-| M1 dataset_stats | ✅ | `data/visrobot01_fold/dataset_stats.json`;1879 eps / 2.78M 窗口;action q01/q99 为 abs 关节角量纲(±3 rad、夹爪 [0,0.08])✓;注意首次计算需 `mkdir runs`(save 到 work_dir 的已知小坑) |
+| M1 dataset_stats | ✅ | `data/visrobot01_fold/dataset_stats.json`;1879 eps / 2.78M 窗口;action q01/q99 为 abs 关节角量纲(±3 rad、夹爪 [0,0.08])✓ |
 | M1 config | ✅ | `configs/data/visrobot01_fold.yaml` + `configs/task/visrobot01_fold_uncond_1e-4.yaml`(chunk48=num_frames49) |
-| M2 smoke | ⏳ | 首次因 triton/py3.10 头文件失败;venv311 重建后重跑 |
-| M3 AIHC 5n8g | 未起 | 多机要点:`train_zero1.sh` 仅同步 RUN_ID,**accelerate launch 需补 --num_machines/--machine_rank/--main_process_ip/--main_process_port**;wrapper 待写 |
-| M4 eval 适配器 | 未起 | |
+| M2 smoke + latent cache | ✅ | v1 在线 VAE = 0.15 step/s → 实现 VAE latent 预计算缓存(`scripts/compute_latents.py` + `RobotVideoDataset.latent_cache_dir`);v3 缓存版 0.43 step/s(2.9×);关键约束:`val_set_proportion=0.0` |
+| M3 AIHC 5n8g v3 | ✅ | job-byelfgmyc9lx,5×8 A100,25510 步完成(18:33 2026-06-13);11 ckpts @ 每 2500 步 |
+| M4 eval 适配器 | ✅ | `scripts/eval_offline_fold.py`;4 bug 修复(mot 键/t5 mask 键/像素链 384×320/infer_action 返回维);8 卡 200-ep 同协议;结果见下 |
 
 旁支:gwp_ori(abs-best)200ep 复测(同 ckpt 重采样)→ .0912@48 vs 原 .0916,**协议运行间方差 ±0.0005~0.0015**,
 为终表 v2 的"打平"结论提供不确定度标尺。
@@ -103,9 +103,31 @@ fastwam 的 RoboTwin 配置 = **14 维双臂 + 3 相机且 key 同名**(cam_high
 - **样本数不完全对齐**的公平性质疑 → 报告中明示样本数,辅以训练曲线(MAE-vs-样本数)而非只报终值;
 - **stats/单位错位**(z-score vs 我们 q01/q99 习惯)→ 适配器里做 round-trip 校验(参照 `check_delta_abs_roundtrip.py`)。
 
-## 8. 交付物
+## 8. 交付物 ✅
 
 - `configs/data/visrobot01_fold.yaml` + `configs/task/visrobot01_fold_uncond_1e-4.yaml`
 - `scripts/eval_offline_fold.py`(200-ep 同协议适配器)
-- 训练 ckpt + dataset_stats.json
-- 终表 v3 + 结论报告(并入 giga_world_policy 根因文档体系)
+- `scripts/compute_latents.py` + `RobotVideoDataset.latent_cache_dir`(VAE latent 预计算缓存)
+- 训练 ckpts:`runs/visrobot01_fold_uncond_1e-4/aihc_5n8g_v3/checkpoints/weights/step_*.pt`(11 个)
+- 终表 v3:见 `giga_world_policy/docs/wam_mae_root_cause_and_optimization.md` §五
+
+## 9. 最终结果(2026-06-13,200ep 同协议,infer_action NFE=20)
+
+| step | @1 | @10 | @24 | @48 | lat |
+|---|---|---|---|---|---|
+| 7500 | 0.0172 | 0.0440 | 0.0844 | 0.1159 | 924ms |
+| 10000 | 0.0142 | 0.0419 | 0.0794 | 0.1096 | 897ms |
+| 12500 | 0.0114 | 0.0407 | 0.0744 | 0.1068 | 876ms |
+| 15000 | 0.0086 | 0.0367 | 0.0717 | 0.1040 | 880ms |
+| 17500 | 0.0069 | 0.0319 | 0.0632 | 0.0958 | 882ms |
+| 20000 | 0.0050 | 0.0311 | 0.0619 | 0.0934 | 883ms |
+| 22500 | 0.0041 | 0.0299 | 0.0603 | 0.0919 | 921ms |
+| 25000 | 0.0036 | 0.0297 | 0.0598 | 0.0915 | 883ms |
+| **25510** | **0.0038** | 0.0297 | 0.0595 | **0.0912** | 931ms |
+| gwp_ans(参照) | 0.0063 | **0.0288** | **0.0574** | 0.0918 | 283ms |
+| gwp_ori(参照) | 0.0053 | 0.0298 | 0.0595 | 0.0916 | 532ms |
+| pi0.5(参照) | 0.0219 | 0.0425 | 0.0743 | 0.1155 | — |
+
+**结论**:@48 = 0.0912,优于 gwp_ans(0.0918)和 gwp_ori(0.0916);@1 显著领先;
+延迟 931ms(NFE=20)是最大短板,NFE=5 估计 ~190ms,仍慢于 gwp_ans fp8+T_a3 87ms。
+待补:infer_joint vs infer_action × NFE{20,10,5} 设置矩阵。
