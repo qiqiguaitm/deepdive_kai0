@@ -13,6 +13,7 @@
 | 优先级 | 计划 | 状态 | 资源 | ETA | 目的 |
 |---|---|---|---|---|---|
 | ⭐⭐ P1 | [**Cosmos3 三模型 I2V 世界预测评测**](plans/cosmos3_three_model_i2v_eval_plan.md) | 📝 待评审 (设计定稿, P0 env 已解) | 当前主机(b2)+b1 = 16×A100 | ~7–9h | 叠衣 val 上横比 Nano/Super/Super-I2V；3 ep × 3 cam × horizon(1s/3s/7s) **滑窗覆盖整段** teacher-forced rollout，metric-vs-horizon + PSNR/SSIM/LPIPS/temporal/FVD |
+| ⭐⭐⭐ P0 | [**Cosmos3 FD 叠衣世界模型**](plans/cosmos3_wam_fold_world_model_plan.md) | 🔄 执行中 (2026-06-12 启动, 本机先行: baseline ✅ / FD 数据通路 ✅ / smoke 运行中) | 本机 8×A100 验证 → AIHC 4n8g 正式 | ~2-3 周到可用评测器 | forward_dynamics 后训练 Nano → 动作可控柔性衣物世界模型; 终极门禁 = 策略评测相关性 r≥0.8; 代码 `cosmos/wam_fold_wm/`, 状态见 plan §7 |
 
 ### 🔥 v7/v8 真机失败验证实验 (2026-05-27 新)
 

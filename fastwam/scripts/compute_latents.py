@@ -51,8 +51,9 @@ def dec_episode(ep):
     """顺序解码一个 episode 的 3 条 mp4(无 seek)→ {cam: [T,H,W,3] uint8}。"""
     import av
     out = {}
+    chunk = ep // 1000  # LeRobot chunks_size=1000:ep≥1000 在 chunk-001
     for cam in CAMS:
-        c = av.open(f"{DATA}/videos/chunk-000/observation.images.{cam}/episode_{ep:06d}.mp4")
+        c = av.open(f"{DATA}/videos/chunk-{chunk:03d}/observation.images.{cam}/episode_{ep:06d}.mp4")
         stream = c.streams.video[0]
         stream.thread_type = "AUTO"
         stream.codec_context.thread_count = 4  # 上限:16 进程×3 流×AUTO 会线程爆炸(load 353/128 核)
