@@ -925,6 +925,31 @@ ep7 过程(抓起→摊开→叠好)对照四 value:
 ![图55](../../../visualization/cross_episode_recurrence_value/vis0526_v24_milestones.png)
 ![图56](../../../visualization/cross_episode_recurrence_value/vis0526_ep7_v24_value.png)
 
+### 4.4.19 段内 value 细化是否必要——文献 deep-research + V2.4 实测否决(2026-06-13)
+
+**问题(用户)**:DP 输出是段内平台的阶梯,不能只用离散 milestone;充分利用过程帧与前后两个 milestone 的相似度/聚类距离来细化段内 value 是否合理、是否有必要?(承接 §4.4.15 双锚插值,但这次用 **cosine 相似度** 而非欧氏,且 milestone 已是 V2.4 进度均匀集。)
+
+**实测(V2.4 kai0 held-out GT,`/tmp/kai0_refine.py`)**:
+
+| 方法 | MAE↓ | Pearson↑ | **τ↑** | 平滑 ΔVstd↓ |
+|---|---|---|---|---|
+| DP 阶梯(V2.4 现状) | 0.105 | 0.928 | **0.841** | 0.0354 |
+| 段内 cosine 细化(DP 定位前后 milestone + 相似度比插值,med5) | 0.103 | 0.929 | **0.805** | 0.0345 |
+| 软相似度加权(softmax cos/0.08 over 全 milestone · P) | 0.179 | 0.840 | **0.665** | 0.0380 |
+
+- cosine 段内细化:MAE 0.105→0.103(噪声内无真改善)、平滑几乎不变,**τ 0.841→0.805(降 0.036)**。τ≈0.805 与 §4.4.15 欧氏双锚 0.807 **几乎一致**——换 cosine、嵌进 DP 定位也救不回。
+- 软加权:全面垮(脱 DP 全局约束,回到 §4.4.15 老失败)。
+
+**文献 deep-research 解释(为何实测如此)**:
+1. **势函数不变性**(Ng 1999 potential-based shaping):V 作势函数,smooth/staircase **不改变最优策略**,只改 credit assignment → 细化上限是"信号质量"非"对错"。
+2. **细信号必须低噪声**(CRR binary-vs-exp 消融 [NeurIPS2020];稀疏→稠密 reward [2501.17842]):细粒度只在高维长 horizon 且信号准时有用,否则"小 reward 差异主导 advantage 梯度噪声"。**我们 frozen DINOv2 局部信号噪声 ≈ 增益** → 净伤 τ。
+3. **frozen 局部插值理论合法但无净增益**:全局 frozen 距离不可靠(XIRL/VIP/LIV/PROGRESSOR/TimeRewarder 都要训 progress encoder),但*任务相邻*两锚之间是 locally-Euclidean(LLE 局部线性,Roweis&Saul 2000),cosine 局部插值不算乱来——可"合法"≠"有净增益",实测印证。
+4. **AWBC 恰恰关心排序**:advantage `A=R+γV'−V`,段内相邻帧排序错则符号错;τ 即排序保真度,细化伤的正是它。
+
+**正解方向(但违背零训练)**:不是事后插值,而是把连续性**内建进对齐**——soft-DP(soft-DTW [1703.01541] / Drop-DTW [2108.11996] / **GTCC** CVPR2024 原生吐连续 progress + 处理 idle 帧)。GTCC 需训练 → 违背当前零训练约束,列 V2 未来增强。
+
+**结论**:段内 value 细化对零训练+AWBC 用途 **(b) nice-to-have 但非必需,且事后插值净伤 τ**。保持 DP 阶梯为更优基线。真要做走 soft-DP(需训练)或学习 progress 度量,且以真机 AWBC 策略 + val MAE 验证,不以"更平滑好看"为据。
+
 ## 4.5 V2 完整实现配方表(收口 §4.4.6-4.4.18,2026-06-13)
 
 **输入**:demo episodes(lerobot:top_head 视频 + observation.state 14维)。**特征本地/集群 GPU 提,挖掘+value CPU。**
