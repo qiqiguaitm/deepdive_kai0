@@ -11,6 +11,7 @@
 # 用法:
 #   ./start_scripts/kai/start_autonomy_gwp.sh --model ans            # observe-only
 #   ./start_scripts/kai/start_autonomy_gwp.sh --model ans --execute  # 真机执行 (手臂会动!)
+#   --inference-rate N : 重规划 Hz 上限 (默认 10; gwp_ans ~90ms/次 实际封顶 ~10-11Hz, 设>11 无效)
 #   急停: ros2 topic pub /policy/execute std_msgs/Bool "data: false"
 set -uo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"   # repo root
@@ -20,13 +21,15 @@ MODEL="ans"
 SERVER_GPU="${KAI0_GWP_SERVER_GPU:-0}"
 WS_PORT="${KAI0_GWP_WS_PORT:-8003}"      # 8000 常被占; 8001=FLASH 8002=V1, gwp 用 8003
 OPT_TIER="fp8"; STEPS_ACT=3
+INFER_RATE=10            # 推理(重规划)Hz 上限; gwp_ans ~90ms/次 → 实际天花板 ~10-11Hz
 EXECUTE_FLAG=""
 GWP_VENV_PY="${GWP_VENV_PY:-/home/tim/gwp_eval_env/venv/bin/python}"
 GWP_REPO="${GWP_REPO:-/data2/gwp_eval/repo/giga_world_policy}"
 CKPT_ROOT="${GWP_CKPT_ROOT:-/data2/gwp_eval/checkpoints}"
 T5_PKL="${GWP_T5_PKL:-/data2/gwp_eval/data/visrobot01_val/t5_embedding/episode_000000.pt}"
 # 控制参数 (与 kai0 V1 一致, 便于公平对比); enable_rtc=false 因 gwp 不消费 RTC 引导。
-CTRL_ARGS=( "inference_rate:=20.0" "latency_k:=6" "min_smooth_steps:=8" "rtc_execute_horizon:=12"
+# inference_rate 由 --inference-rate 注入 (见下); 其余固定。
+CTRL_ARGS=( "latency_k:=6" "min_smooth_steps:=8" "rtc_execute_horizon:=12"
             "publish_rate:=40" "publish_smooth_alpha:=0.7" "enable_rtc:=false"
             "cam_fps:=30" "fast_obs_pipeline:=true"
             "obs_image_h:=480" "obs_image_w:=640" )   # gwp 要近原生帧 (server 拼 768x192)
@@ -39,6 +42,7 @@ while [[ $# -gt 0 ]]; do
     --ws-port)     WS_PORT="$2"; shift 2 ;;
     --opt-tier)    OPT_TIER="$2"; shift 2 ;;
     --steps-act)   STEPS_ACT="$2"; shift 2 ;;
+    --inference-rate) INFER_RATE="$2"; shift 2 ;;
     --execute)     EXECUTE_FLAG="--execute"; shift ;;
     --no-execute)  EXECUTE_FLAG=""; shift ;;
     *)             EXTRA_ARGS+=("$1"); shift ;;
@@ -52,9 +56,10 @@ case "$MODEL" in
 esac
 MODEL_ID="$CKPT_ROOT/Wan2.2-TI2V-5B-Diffusers"
 STATS="$GWP_REPO/assets_visrobot01/norm_stats_vis_abs.json"
+CTRL_ARGS+=( "inference_rate:=${INFER_RATE}" )   # 重规划 Hz 上限 (gwp 实际 ~10-11Hz 封顶)
 
 echo "=========================================================="
-echo " gwp autonomy (同 kai0 栈): model=gwp_${MODEL} tier=${OPT_TIER} T_a=${STEPS_ACT}"
+echo " gwp autonomy (同 kai0 栈): model=gwp_${MODEL} tier=${OPT_TIER} T_a=${STEPS_ACT} infer_rate=${INFER_RATE}Hz"
 echo " ws server: GPU${SERVER_GPU} :${WS_PORT}   execute=${EXECUTE_FLAG:-observe-only}"
 echo "=========================================================="
 for p in "$GWP_VENV_PY" "$TRANSFORMER" "$MODEL_ID" "$STATS" "$T5_PKL"; do
