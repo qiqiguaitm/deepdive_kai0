@@ -20,7 +20,7 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"   # repo root
 MODEL="ans"
 SERVER_GPU="${KAI0_GWP_SERVER_GPU:-0}"
 WS_PORT="${KAI0_GWP_WS_PORT:-8003}"      # 8000 常被占; 8001=FLASH 8002=V1, gwp 用 8003
-OPT_TIER="fp8"; STEPS_ACT=3
+OPT_TIER="fp8"; STEPS_ACT=3; STEPS_INF=10   # gwp_ans: fp8/T_a3/T_O10; gwp_ori: exact/steps_inf=5/steps_act=5(NFE5)
 DEBUG_DUMP=""            # --debug-dump DIR: 落盘头 15 次在线 ref图+state+action 做诊断
 # gwp 默认控制节奏 (与 kai0 的 12/40/20 不同 —— gwp 重规划更勤补长程弱、发布贴 30fps 数据、推理封顶 ~10Hz)
 INFER_RATE=10            # 推理(重规划)Hz 上限; gwp_ans ~90ms/次 → 实际天花板 ~10-11Hz
@@ -45,6 +45,7 @@ while [[ $# -gt 0 ]]; do
     --ws-port)     WS_PORT="$2"; shift 2 ;;
     --opt-tier)    OPT_TIER="$2"; shift 2 ;;
     --steps-act)   STEPS_ACT="$2"; shift 2 ;;
+    --steps-inf)   STEPS_INF="$2"; shift 2 ;;
     --inference-rate) INFER_RATE="$2"; shift 2 ;;
     --exec-horizon)   EXEC_HORIZON="$2"; shift 2 ;;
     --publish-rate)   PUBLISH_RATE="$2"; shift 2 ;;
@@ -67,7 +68,7 @@ case "$INFER_RATE" in *.*) ;; *) INFER_RATE="${INFER_RATE}.0" ;; esac
 CTRL_ARGS+=( "inference_rate:=${INFER_RATE}" "rtc_execute_horizon:=${EXEC_HORIZON}" "publish_rate:=${PUBLISH_RATE}" )
 
 echo "=========================================================="
-echo " gwp autonomy (同 kai0 栈): model=gwp_${MODEL} tier=${OPT_TIER} T_a=${STEPS_ACT}"
+echo " gwp autonomy (同 kai0 栈): model=gwp_${MODEL} tier=${OPT_TIER} T_a=${STEPS_ACT} T_O/steps_inf=${STEPS_INF}"
 echo " 控制: infer_rate=${INFER_RATE}Hz exec_horizon=${EXEC_HORIZON} publish_rate=${PUBLISH_RATE}Hz"
 echo " ws server: GPU${SERVER_GPU} :${WS_PORT}   execute=${EXECUTE_FLAG:-observe-only}"
 echo "=========================================================="
@@ -86,7 +87,7 @@ echo "[gwp] starting ws server (compile/warmup ~1-2min)..."
     TORCHINDUCTOR_CACHE_DIR=/data2/gwp_eval/.inductor \
     "$GWP_VENV_PY" scripts/serve_gwp_ws.py \
       --transformer_path "$TRANSFORMER" --model_id "$MODEL_ID" --stats_path "$STATS" \
-      --t5_embedding_pkl "$T5_PKL" --opt_tier "$OPT_TIER" --steps_act "$STEPS_ACT" \
+      --t5_embedding_pkl "$T5_PKL" --opt_tier "$OPT_TIER" --steps_act "$STEPS_ACT" --steps_inf "$STEPS_INF" \
       --port "$WS_PORT" --warmup 2 \
       ${DEBUG_DUMP:+--debug_dump_dir "$DEBUG_DUMP" --debug_dump_n 15} \
 ) > log/gwp_server.log 2>&1 &
