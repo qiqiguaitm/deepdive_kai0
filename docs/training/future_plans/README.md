@@ -19,6 +19,7 @@
 
 | 优先级 | 计划 | 状态 | 资源 | ETA | 目的 |
 |---|---|---|---|---|---|
+| ⭐⭐⭐ P0 | [**Task_A + Task_AV1 混合 1:1 co-train**](plans/pi05_task_a_av1_mixed_1to1_plan.md) | 📝 待确认 | BJ 8× H20 | — | 横向折(1033ep)+竖向折新SOP(304ep)pre-merge + domain_weights=(1,3.256) frame-1:1 过采样, JAX 加权采样 |
 | ⭐⭐⭐ P0 | [**AWBC 完整流程 on vis Task_A**](plans/awbc_vis_task_a_full_pipeline_plan.md) | 📝 待确认 | 8× GPU | ~1 周 | vis-native 重建打标走完整 Stage 0→4(标注→estimator→打标→discretize→AWBC),对照复用版/SFT |
 | ⭐⭐⭐ P0 | [**AWBC × ViVa value model 对比**](plans/awbc_viva_value_comparison_plan.md) | 📝 待评审 | (见 plan) | (见 plan) | 只换 advantage label 来源 (pi0-AdvEst → ViVa) 的受控 A/B |
 | ⭐⭐ P1 | [**A_mirror200_pi05_pytorch** (pure_200 PyTorch 对照)](plans/A_mirror200_pi05_pytorch.md) | ✅ done (见 §8 results + postmortem) | 8× GPU | — | 已完成: PyTorch 同协议比 JAX 差 4.1× (@50), EMA 假说证伪 |
