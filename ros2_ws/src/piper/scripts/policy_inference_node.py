@@ -486,6 +486,10 @@ class PolicyInferenceNode(Node):
         self.declare_parameter('enable_rtc', True)
         self.declare_parameter('rtc_execute_horizon', 16)
         self.declare_parameter('rtc_max_guidance_weight', 0.5)
+        # obs 图像 resize 目标 (resize_with_pad). 默认 224x224 (openpi 模型输入, kai0 不变)。
+        # gwp 世界模型 server 侧拼成 768x192, 需要近原生帧 → 用更大值 (如 480x640) 少损失。
+        self.declare_parameter('obs_image_h', 224)
+        self.declare_parameter('obs_image_w', 224)
         # Layer 1.1B — chunk overlap smoothing method. Default 'min_jerk' (quintic
         # smoothstep 6t^5 - 15t^4 + 10t^3, 1st+2nd derivatives vanish at endpoints →
         # minimum-jerk chunk-boundary transition; LiPo paper arXiv:2506.05165).
@@ -580,6 +584,8 @@ class PolicyInferenceNode(Node):
         self._enable_rtc = _to_bool(self.get_parameter('enable_rtc').value)
         self._rtc_execute_horizon = int(self.get_parameter('rtc_execute_horizon').value)
         self._rtc_max_guidance_weight = float(self.get_parameter('rtc_max_guidance_weight').value)
+        self._obs_image_h = int(self.get_parameter('obs_image_h').value)
+        self._obs_image_w = int(self.get_parameter('obs_image_w').value)
         self.gripper_offset = self.get_parameter('gripper_offset').value
         self._ee_grip_binarize = bool(self.get_parameter('ee_gripper_binarize').value)
         self._ee_grip_open_m = float(self.get_parameter('ee_gripper_open_m').value)
@@ -2233,10 +2239,11 @@ class PolicyInferenceNode(Node):
             ]
             imgs = [cv2.cvtColor(im, cv2.COLOR_BGR2RGB) for im in imgs]
         # 与原版一致: 相同分辨率时走 batch resize, 否则逐张
+        _ih, _iw = self._obs_image_h, self._obs_image_w
         if imgs[0].shape == imgs[1].shape == imgs[2].shape:
-            imgs = list(image_tools.resize_with_pad(np.array(imgs), 224, 224))
+            imgs = list(image_tools.resize_with_pad(np.array(imgs), _ih, _iw))
         else:
-            imgs = [image_tools.resize_with_pad(im[np.newaxis], 224, 224)[0] for im in imgs]
+            imgs = [image_tools.resize_with_pad(im[np.newaxis], _ih, _iw)[0] for im in imgs]
 
         qpos = np.concatenate((
             np.array(joint_left_msg.position),
