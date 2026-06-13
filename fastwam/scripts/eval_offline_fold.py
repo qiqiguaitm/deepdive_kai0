@@ -31,8 +31,9 @@ def build_model(weights, device="cuda"):
     from hydra.utils import instantiate
     with initialize(version_base=None, config_path="../configs"):
         cfg = compose(config_name="train",
-                      overrides=["data=visrobot01_fold", "model=fastwam", "task=visrobot01_fold_uncond_1e-4"])
-    model = instantiate(cfg.model)  # create_fastwam(已含 ActionDiT backbone 初始化)
+                      overrides=["data=visrobot01_fold", "model=fastwam", "task=visrobot01_fold_uncond_1e-4",
+                                 "model.skip_dit_load_from_pretrain=true"])  # skip Wan2.2 backbone weights (overwritten by ckpt anyway)
+    model = instantiate(cfg.model)  # create_fastwam — architecture only, no pretrained weights
     sd = torch.load(weights, map_location="cpu", weights_only=False, mmap=True)
     # trainer 落盘结构:{"mot": mixtures.video/action.* 全量, "proprio_encoder": ..., "step", "torch_dtype"}
     model.mot.load_state_dict(sd["mot"], strict=True)
