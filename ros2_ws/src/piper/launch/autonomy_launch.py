@@ -326,7 +326,7 @@ def generate_launch_description():
             'checkpoint_dir': LaunchConfiguration('checkpoint_dir'),
             'host': LaunchConfiguration('host'),
             'port': LaunchConfiguration('port'),
-            'prompt': LaunchConfiguration('prompt'),
+            'prompt': ParameterValue(LaunchConfiguration('prompt'), value_type=str),
             'dataset_id': ParameterValue(LaunchConfiguration('dataset_id'), value_type=int),
             'gpu_id': LaunchConfiguration('gpu_id'),
             'img_front_topic': '/camera_f/camera/color/image_raw',

@@ -326,6 +326,24 @@ vis_dagger/
 
 > **2026-06-03 重构 SOP** (同 §6.8 v2/v3 教训): 建 `vis_dagger/v2/` → mv 现有 `<date>-v2` 进去 → 改脚本 DST `vis_dagger` → `vis_dagger/v2` (commit `653c655`) → 跑一次追平 (gf0/gf3 各补 06-02 +25 ep & 全新 06-03 24 ep) → 装 cron。**uc 待补**: 同流程 (建 v2 + 装 cron `27 * * * *`)。
 
+### 6.10 sim01 `hot_sync_latest` — 当天活跃目录近实时上传 TOS ⭐ (2026-06-12)
+
+**目的**: 让**正在采集的当天日期目录**在几分钟内到 TOS, 不必等每小时全量 `sync_kai0_to_tos.sh` (~90min/轮) 绕回来。解决"最新日期数据非实时同步"。
+
+| 项 | 值 |
+|---|---|
+| 机器 | **sim01** (数据源头) |
+| 脚本 | `/data1/DATA_IMP/sync/hot_sync_latest.sh` (upload-only, 不做 delete-mirror) |
+| 触发 | systemd user timer `kai0-tos-hotsync.timer` (`OnUnitInactiveSec=3min`, lingering=yes 扛重启) |
+| 目标 | `find Task_*/<subset>/<date>/` 中**最近 `ACTIVE_WINDOW_MIN`(默认 360)分钟内有文件改动**的日期目录 → `tosutil cp -r -flat -u` |
+| **排除** | **`-exclude=*top_head_depth*`** ⭐ (见下, 决定性) |
+| 锁 | 独立 `flock -n` (`/tmp/kai0_tos_hotsync.lock`), 与全量 sync 并发无冲突 (二者幂等, 仅全量删) |
+| 日志 | `/data1/tim/.tos_fix/sync_logs/hotsync_*.log` (留最近 200) |
+
+> ⭐ **决定性: 必须排除 depth zarr**。V1 数据集 (`Task_AV1` 等) 单日期 `top_head_depth/` 含 **~15.5 万个小 chunk 文件 (23G)**, tosutil 逐对象列举要 **~2.5h** → "每 3min 高频"形同虚设。排除 depth 后只追 parquet+RGB+meta (~450 对象): **空跑 3s / 有新 ep ~44s** (实测 158min → 44s)。depth 体量大且非实时刚需, 交给每小时全量 sync 兜底。
+>
+> **分工**: 全量 `sync_kai0_to_tos.sh` (每小时, 含 depth + delete-mirror 对账, 权威) ‖ `hot_sync_latest.sh` (每 3min, 仅当天活跃目录 RGB, 实时)。
+
 ---
 
 

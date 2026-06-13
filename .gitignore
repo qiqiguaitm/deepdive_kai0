@@ -78,6 +78,7 @@ node_modules/
 xvla/X-VLA-env/
 xvla/xvla_ckpts/
 xvla/ckpts/
+xvla/ckpts_official/
 
 # WAM training outputs (large checkpoints)
 giga_world_policy/runs/

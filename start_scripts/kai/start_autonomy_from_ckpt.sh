@@ -44,11 +44,18 @@ fi
 # Absent (old sidecars / plain pi05) → no dataset_id:= arg, launch default -1 (disabled). Backward-compatible.
 DATASET_ID=$(/data1/miniconda3/bin/python -c "import json; v=json.load(open('$CKPT_DIR/train_config.json')).get('deploy_dataset_id'); print('' if v is None else int(v))")
 
-echo "[start_autonomy_from_ckpt] config_name=$CONFIG_NAME asset_id=$ASSET_ID dataset_id=${DATASET_ID:-<none>} ckpt_dir=$CKPT_DIR"
+# Optional sidecar key for prompt-conditioned models (e.g. AWBC: advantage carried in the
+# text prompt, not a domain token). "deploy_prompt": "<str>" → overrides the launch prompt
+# default so the model's expected prompt (e.g. "...Advantage: positive") travels with the ckpt.
+# Absent (plain pi05) → no prompt:= arg, launch default "Flatten and fold the cloth.". Backward-compatible.
+DEPLOY_PROMPT=$(/data1/miniconda3/bin/python -c "import json; v=json.load(open('$CKPT_DIR/train_config.json')).get('deploy_prompt'); print('' if v is None else v)")
+
+echo "[start_autonomy_from_ckpt] config_name=$CONFIG_NAME asset_id=$ASSET_ID dataset_id=${DATASET_ID:-<none>} prompt=${DEPLOY_PROMPT:-<default>} ckpt_dir=$CKPT_DIR"
 
 cd "$(dirname "$0")/../.."
 EXTRA_ARGS=()
 [ -n "$DATASET_ID" ] && EXTRA_ARGS+=("dataset_id:=$DATASET_ID")
+[ -n "$DEPLOY_PROMPT" ] && EXTRA_ARGS+=("prompt:=$DEPLOY_PROMPT")
 exec ./start_scripts/kai/start_autonomy.sh --execute \
   "config_name:=$CONFIG_NAME" \
   "checkpoint_dir:=$CKPT_DIR" \

@@ -28,6 +28,23 @@
 
 > 对照健康基线: 同一批 smooth800 数据上, **pi0** 之前测出 blank/real MAE = **13.6×** (视觉健康, 见 `reference_vision_ablation_openloop`)。X-VLA 在同数据上是 **0.000**。
 
+### 1.1 ✅ 阳性对照 (2026-06-11) — 官方原版 X-VLA-SoftFold **读视觉** (≈300–400× 我们)
+
+> 验证"我们 ablation 测出的 `d_img≈0` 是模型属性, 不是 harness 天花板", 同时确认根因在数据链而非架构/部署: 拉官方 raw 2toINF `X-VLA-SoftFold` ckpt (与我们**同架构同任务同机器人**: 双臂 Agilex Piper, flatten+fold), 走**官方自带代码** (`models.modeling_xvla.XVLA` + `XVLAProcessor` → `generate_actions`, `domain_id=5` SoftFold, 官方 instruction), 喂**同一条 KAI0 trace** (`trace_20260601_192213`, 同机器人 → 近 in-distribution; ee6d proprio 直接取 npz `state20`, 20 维布局逐位一致), 固定 seed, n=12。脚本 [`eval_xvla_OFFICIAL_vision_ablation.py`](../../../../train_scripts/kai/eval/eval_xvla_OFFICIAL_vision_ablation.py), 结果 `logs/xvla_official_vision_ablation.json`。
+
+| 扰动 (xyz L2, mm) | **官方 X-VLA-SoftFold** | 我们 smooth800 (§1) | 倍数 |
+|---|---|---|---|
+| **换一张图** (state 不变) `d_img` | **12.87mm** | 0.03mm | **≈320×** |
+| **整图置黑** (state 不变) `d_blank` | **34.20mm** | 0.07–0.08mm | **≈430×** |
+| 换 proprio (图不变) `d_state` | 58.47mm | 248–311mm | — |
+| `d_img/d_state` | 0.220 | **0.000** | — |
+| `d_blank/d_state` | 0.585 | ~0.000 | — |
+
+- **逐帧 12/12 的 `d_img` 都在 9–21mm, 没有一帧塌到 0**; 置黑扰动 > 换帧扰动 (34 > 13mm, 符合"全黑更 OOD"); 夹爪也随图像变 (`g_img` 0.04–0.15)。→ **官方原版模型视觉通路是活的, 没有脱离视觉现象**。
+- **决定性**: 官方与我们**架构/部署/归一化/动作表征/proprio 早融合逐项相同**, 唯一实质差异 = **训练数据 action 语义** (官方真实 action≠state vs 我们 relabel 成 ≡state)。同架构官方能读视觉 → **根因坐实在数据链, 非架构/部署** → 直接支撑 §4.1 (E1) 结论并把 **E0 (真实 action≠state) 锁为必需主路径**。
+- **门禁可信度**: 本对照证明 ablation harness **能**检出视觉敏感 (官方 `d_img` 远 > 0)。因此我们模型的 `d_img≈0` / E1 的 `d_img=0.00` 是**真·vision-blind**, 不是测不出。
+- **caveat**: `ratio 0.220` 未到 1.0 — 因 KAI0 ee6d proprio 喂官方 SoftFold 模型存在坐标系/标定偏差, proprio 偏 OOD 抬高了 `d_state` (且官方本就 `use_proprio=True`, 有 proprio 敏感属健康)。**决定性判据是绝对 `d_img`/`d_blank` ≫ 0** (与本文一贯口径一致, 不看比值伪影)。更干净版本可用真正官方 SoftFold obs, 但 300–400× 量级差已足够定论。
+
 ---
 
 ## 2. 已排除的假设 (为何不是数据/部署/时序)
