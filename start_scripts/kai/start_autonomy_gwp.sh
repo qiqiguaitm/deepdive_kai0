@@ -62,6 +62,8 @@ case "$MODEL" in
 esac
 MODEL_ID="$CKPT_ROOT/Wan2.2-TI2V-5B-Diffusers"
 STATS="$GWP_REPO/assets_visrobot01/norm_stats_vis_abs.json"
+# inference_rate 节点声明为 DOUBLE → 必须带小数 (否则 InvalidParameterTypeException 崩节点)。
+case "$INFER_RATE" in *.*) ;; *) INFER_RATE="${INFER_RATE}.0" ;; esac
 CTRL_ARGS+=( "inference_rate:=${INFER_RATE}" "rtc_execute_horizon:=${EXEC_HORIZON}" "publish_rate:=${PUBLISH_RATE}" )
 
 echo "=========================================================="
