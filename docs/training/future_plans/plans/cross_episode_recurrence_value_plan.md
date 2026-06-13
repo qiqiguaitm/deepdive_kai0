@@ -901,6 +901,25 @@ ep7 过程(抓起→摊开→叠好)对照四 value:
 
 ![图54](../../../visualization/cross_episode_recurrence_value/coverage_correction_compare.png)
 
+#### 4.4.18 V2.4 完整实现验证 — 前段误判通病解决(2026-06-13)
+
+> 实现完整 V2.4 = 增分子 coverage 修正(解 partial 偏差) + 进度均匀分桶(解动作多样) + 三路特征 ⊕ 端点锚 + 连续性 DP,重挖 5-26 验证。
+
+**三验证全通过**:
+| 指标 | 旧版(top-20 cov) | **V2.4** |
+|---|---|---|
+| milestone 前段(P<0.5)数 | 2/20 | **10/20**(进度均匀) |
+| ep7 开头抓取段 value | **0.95(误判)** | **0.15** ✅ |
+| ep7 末段 / 全程 | — | 1.00 / [0,1] |
+| 其他 5 ep 开头 max | 通病 | ep18/73/98/33=0.15, ep9=0.35 ✅ |
+
+**ep7 误判修复且非特例**——5 个随机 ep 开头 max 全 ≤0.35,**前段误判通病彻底解决**。新 milestone 图(图55):前段填补了真实递进(成团 P0→抓起 P0.06-0.22→摊开 P0.33-0.44),不再空洞。机理:前段有了锚点,抓取帧匹配到 P0.06-0.22 的抓起 milestone,不再被迫跳后段。
+
+**V2 配方终态(收口)**:① 三路特征 raw⊕armmask⊕proprio(§4.4.14 撞色鲁棒);② 增分子 coverage 修正(§4.4.17,partial 偏差);③ 进度均匀分桶选 milestone(§4.4.17-18,动作多样致前段低 cov);④ GMM 多模式别名簇 + 端点锚 V[0]=0/V[末]=1(§4.4.13);⑤ 连续性 Viterbi DP(§4.4.11)。否决的死路:value 层平滑插值(双锚/测地/簇内 §4.4.15)、因果约束(顺序非强相关)、task-specific(夹爪/布料门槛)。`v24_complete_milestone.py` 入库。
+
+![图55](../../../visualization/cross_episode_recurrence_value/vis0526_v24_milestones.png)
+![图56](../../../visualization/cross_episode_recurrence_value/vis0526_ep7_v24_value.png)
+
 ## 5. 基础设施与执行记录
 
 **表11 — 集群任务**(均 cnsh;pod venv = `xvla/X-VLA-env/.venv`)
