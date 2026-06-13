@@ -885,6 +885,18 @@ ep7 过程(抓起→摊开→叠好)对照四 value:
 
 ![图52](../../../visualization/cross_episode_recurrence_value/vis0526_20milestones.png)
 
+#### 4.4.17 真根因 = left-truncation 数据偏差 + 进度均匀选法(用户洞察+深查,2026-06-13)
+
+> 用户洞察:vis_base 5-10 及之前数据**只有后半段**(很多 episode 不从 0% 进度开始),first-visit coverage 必然前段偏低 → top-K 选 milestone 偏后段。要求查解决办法。
+
+**统计学命名:left-truncation(左截断)**。一个 50% 才开始的 demo,物理上不可能观测早期状态,却被算进早期簇 coverage 的**分母** → 系统性低估早期 → milestone 前段空洞(§4.4.16 的 0.02-0.56 空洞根源)。这是 McGovern-Barto diverse-density frequency 统计在"轨迹起点不一致"下的已知脆性。
+
+**分桶验证(图53)**:按 tpos 均匀分桶(每 0.1 区间选最高 coverage 簇)重选,**前段空洞被填上**——新增 P0.09-0.44 的 8 个 milestone(c61/c12/c67/c88/c79/c53/c19/c35),代表帧为抓取/摊开早期态,coverage 87-95%(不低!原 top-20 因门槛卡 96%+ 把它们挤掉)。分布从"前空后挤"变均匀。
+
+**完整泛化解法(深查 12 篇,零任务知识)**:① **coverage 分母修正(治本)** = open-begin/open-end DTW(Tormene 2009)+ Drop-DTW(NeurIPS'21) skip,定位每 demo 实际覆盖的进度区间,让早期未观测帧弃权;coverage = 命中 / **at-risk episode 数**(只算覆盖该进度段的 episode)= Kaplan-Meier risk-set 修正——正是用户洞察的形式化;② **进度均匀选**(替代 top-K 频率)= 分位数分桶 / 最远点采样 FPS / 1D k-means on progress(本节分桶=简化版,已验证);③ 规范时间轴(soft-DTW/DBA barycenter, CTW)从异构起点 demo 构建。**待实现 V2.4**:(a) risk-set 分母修正 + (b) 进度均匀选,重挖看 ep7 修复 + 整体改善。`bucketed_milestone.py` 入库。文献:Tormene AIM2009 / Müller subsequence DTW / Drop-DTW 2108.11996 / StepFormer / GTCC / REALIGN partial-GW 2509.24382 / DBA / Kaplan-Meier risk-set。
+
+![图53](../../../visualization/cross_episode_recurrence_value/vis0526_bucketed_milestones.png)
+
 ## 5. 基础设施与执行记录
 
 **表11 — 集群任务**(均 cnsh;pod venv = `xvla/X-VLA-env/.venv`)
