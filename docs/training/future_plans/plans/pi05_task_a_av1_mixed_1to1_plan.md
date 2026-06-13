@@ -3,7 +3,7 @@
 > **建立**: 2026-06-12
 > **目的**: 把 **Task_A `A_smooth800_dagger_full`**(横向折,1033ep)与 **Task_AV1 `base`**(竖向折 Vertical Fold v1 新 SOP,304ep)**混合**提交 **BJ 集群**(Robot-North-H20),通过**提高 Task_AV1 采样概率**让两者 **frame-level 1:1**,co-train 出 pi05 策略。
 > **机制**: 复用已验证的 **`KaiVisMergedDataConfig` + `domain_weights`**(单一 pre-merged 数据集 + 按帧加权采样,**无磁盘复制**;同 `pi05_kaivis_perdsnorm_cond`)。
-> **状态**: 📝 **规划草稿**,待确认决策(§7)。**仅更新文档,不实施**。
+> **状态**: 📋 **规划定稿(6 项决策已定,§7)** — 仅待用户发话"开始实施"即冻快照→build→注册 config→提交 BJ。**本次仍只更新文档,不实施**。
 > ⚠️ **铁律**: 真机为终判;val MAE 先于 train loss。
 > **关联**: Task_AV1 单独基线 [`pi05_task_av1_vertical_fold_v1_baseline.md`](pi05_task_av1_vertical_fold_v1_baseline.md) · 模板 config `pi05_kaivis_perdsnorm_cond`(config.py:1066)。
 
@@ -12,7 +12,7 @@
 ## 0. 为什么这么做(动机 + 风险)
 
 - **动机**: Task_AV1 是新 SOP、数据少(304ep/0.447M 帧);单独训易过拟合/不稳。用 **3.3× 大的 Task_A**(1033ep/1.455M 帧)co-train 提供叠衣通用先验 + 正则;**1:1 过采样**保证新 SOP 信号不被淹没。
-- ⚠️ **两者是不同折法**(Task_A=横向 `"Flatten and fold the cloth."` / Task_AV1=竖向 `"... Vertical Fold v1."`)。**靠 domain 条件(task_index→soft-prompt token + per-domain norm)+ 各自 prompt 区分**,部署时选竖向折那一支。**这是 co-train 助力小数据集,不是要一个模型乱折** → prompt 处理见 §3 + §7-Q3。
+- ⚠️ **两者是不同折法**(Task_A=横向 `"Flatten and fold the cloth."` / Task_AV1=竖向 `"... Vertical Fold v1."`)。**靠 domain 条件(task_index→soft-prompt token + per-domain norm)+ 各自 prompt 区分**,部署时选竖向折那一支。**这是 co-train 助力小数据集,不是要一个模型乱折** → ✅ 保留 per-domain prompt(§7-2)。
 
 ---
 
@@ -54,7 +54,7 @@ TrainConfig(
     data=KaiVisMergedDataConfig(
         repo_id=".../kai0/data/Task_A/self_built/a_av1_merged",
         domain_weights=(1.0, 3.256),   # FRAME-level 1:1: Task_A 1.455M / Task_AV1 0.447M (norm-build 校正)
-        # prompt: 见下方 Q3 决策(per-domain prompt 保留 vs 统一)
+        # ✅ per-domain prompt 保留(§7-2): domain0 横向 / domain1 竖向
     ),
     weight_loader=CheckpointWeightLoader("mixed_1_clean/params"),  # warm-start, 沿用 flatten-fold pi05 配方
     # cosine warmup 1k / peak 1.5e-5 / decay→1.5e-6; EMA 0.9999; batch 128; fsdp 8
@@ -98,13 +98,15 @@ TrainConfig(
 
 ---
 
-## 7. 待确认(动手前)
-1. **Task_AV1 范围**:用当前 `base` 全量 304ep 冻结快照?还是等采集更多再混?
-2. **步数**:50k(默认,warm-start co-train)还是更长?
-3. **prompt 处理(关键)**:**保留 per-domain prompt**(domain0 横向 / domain1 竖向,部署可分别选,**推荐**)还是统一成一条?统一会让模型分不清折法,**不推荐**。
-4. **权重**:严格 frame-level 1:1(3.256)?还是**偏向 AV1**(如 ep-level 或 >1:1,让新 SOP 学更狠)?
-5. **dagger**:Task_A 用 `A_smooth800_dagger_full`(含 dagger)确认?
-6. **init**:warm-start `mixed_1_clean/params`(沿用 flatten-fold pi05 配方)确认?
+## 7. 决策定档(✅ 2026-06-12 用户确认)
+1. ✅ **Task_AV1 范围 = 冻结当前 304ep 快照**(133+171)。开训前停 watchdog / 记录 ep 列表,后续新数据**不进本实验**;以此快照复算精确帧权重。
+2. ✅ **prompt = 保留 per-domain**:domain0 = `"Flatten and fold the cloth."`(横向)/ domain1 = `"Flatten and fold the cloth. Vertical Fold v1."`(竖向)。部署分别选;**train==deploy 一字不差**。
+3. ✅ **权重 = 严格 frame-level 1:1** → `domain_weights=(1.0, 3.256)`(Task_A 1.455M / Task_AV1 0.447M;最终以 norm-build 实数微调)。
+4. ✅ **步数 = 50k**。
+5. ✅ **init = pi05 warm-start `mixed_1_clean/params`**(沿用 flatten-fold pi05 配方)。
+6. ✅ **Task_A = 含 dagger 版** `A_smooth800_dagger_full`(1033ep)。
+
+> 全部定档。仅待"开始实施":① 冻 AV1 快照 + 复算权重 → ② `build_a_av1_merged.py` → ③ `build_a_av1_norm.py` → ④ 注册 config `pi05_task_a_av1_mixed_1to1` → ⑤ BJ(Robot-North-H20)8卡 **JAX** 训练。
 
 ---
 
