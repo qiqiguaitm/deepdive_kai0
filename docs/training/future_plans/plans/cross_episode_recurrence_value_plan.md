@@ -799,6 +799,23 @@ hybrid 取得最优 τ/Pearson 组合(段内增量来自状态对齐而非时间
 
 ![图46](../../../visualization/cross_episode_recurrence_value/vis0520_ep37_v23_fixed.png)
 
+#### 4.4.15 连续化评估:双锚特征距离插值 vs DP vs pi0-AE(用户提议,2026-06-13)
+
+> 用户提议:非 milestone 帧 value = 前后 milestone 间按特征空间距离比插值 `V=V_prev + d_prev/(d_prev+d_next)·(V_next−V_prev)`;问是否比 AWBC(pi0-AE)更好。
+
+**实验(kai0 held-out 50 GT ep)**:
+| 方法 | MAE↓ | Pearson↑ | τ↑ | 平滑度↓ |
+|---|---|---|---|---|
+| 当前连续性 DP | 0.113 | 0.906 | **0.862** | 0.0290 |
+| **双锚距离插值(用户)** | **0.107** | 0.909 | **0.807** | **0.0281** |
+| pi0-AE(监督) | **0.054** | 0.971 | 0.881 | — |
+
+→ 插值 MAE/平滑小胜 DP,但 **τ(单调性)明显劣(0.807<0.862)**——欧氏距离在弯曲特征流形上非单调的直接表现。
+
+**文献(10 篇,调研一致)**:① XIRL/VIP/LIV 的"距离=value"是**靠训练 encoder(TCC/time-contrastive)把 embedding 造成进度单调**才成立,frozen DINOv2 无此前提;② ICCV2025 **PROGRESSOR** 双锚(init+goal)估进度但用**学习回归器**+对抗 refinement,非固定距离比——双锚思想对、欧氏比是弱环节;③ **欧氏 vs 测地**:弯曲流形上弦距离有偏非单调,正解=沿轨迹累积的测地距离;④ Drop-DTW/GTCC 专为单调+连续+outlier 剔除而生,逐点距离比重引入 aliasing/振荡(τ 降铁证);⑤ cloth-folding 专论(Verleysen 2023)、TimeRewarder(ICML2026)均**学习度量、beat raw 距离**。
+
+**裁决**:双锚欧氏插值 **likely worse than DP 与 pi0-AE**。vs pi0-AE 的 MAE 0.054 是循环论证(absolute_value=pi0-AE 输出、stage_progress_gt=其训练目标),真优劣在鲁棒性(pi0-AE end-drop/跨域失效 §4.4.8 vs 零训练跨天 16/16)+ 标注成本。**正解=geodesic-ize DP**:把 DP 内欧氏特征距离换成"沿 demo 轨迹累积帧间距离"(milestone 间真实流形长度),既保 DP 全局单调/连续/抗噪,又让段内插值基于真进度。用户连续化直觉对,实现应为测地距离嵌入 DP 而非逐点欧氏插值替代 DP。**列 V2.4 待验证**。文献入 §6 续。
+
 ## 5. 基础设施与执行记录
 
 **表11 — 集群任务**(均 cnsh;pod venv = `xvla/X-VLA-env/.venv`)
