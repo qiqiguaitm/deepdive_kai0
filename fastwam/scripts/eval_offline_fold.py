@@ -65,6 +65,10 @@ def main():
     ap.add_argument("--n_metric_eps", type=int, default=200)
     ap.add_argument("--nfe", type=int, default=20)
     ap.add_argument("--joint", action="store_true", help="用 infer_joint(带视频想象)替代 infer_action")
+    ap.add_argument("--engine", default="stock", choices=["stock", "opt"],
+                    help="stock=model.infer_action  opt=opt_infer_action(compile+可选FP8)")
+    ap.add_argument("--opt_tier", default="exact", choices=["eager", "exact", "fp8"],
+                    help="opt 引擎的加速档位(仅 --engine opt 生效)")
     ap.add_argument("--stats", default="data/visrobot01_fold/dataset_stats.json")
     ap.add_argument("--aggregate", action="store_true")
     args = ap.parse_args()
@@ -100,12 +104,31 @@ def main():
     if cmask.ndim == 1: cmask = cmask.unsqueeze(0)
 
     model = build_model(args.weights)
+
+    # opt engine setup
+    opt_runner = None
+    if args.engine == "opt":
+        from opt_infer_action import ActionStepRunner, opt_infer_action as _opt_infer
+        import sys; gwp_scripts = Path(__file__).resolve().parents[2] / "giga_world_policy" / "scripts"
+        sys.path.insert(0, str(gwp_scripts))
+        if args.opt_tier == "fp8":
+            from opt_infer_action import _swap_fp8
+            n, fp8_mode = _swap_fp8(model.action_expert.blocks)
+            n2, _ = _swap_fp8(model.action_expert.text_embedding)
+            n3, _ = _swap_fp8(model.action_expert.time_embedding)
+            n4, _ = _swap_fp8(model.action_expert.time_projection)
+            print(f"[fp8/{fp8_mode}] blocks={n} text_emb={n2} time_emb={n3} time_proj={n4}", flush=True)
+        opt_runner = ActionStepRunner(model)
+        if args.opt_tier in ("exact", "fp8"):
+            opt_runner.compile_step("reduce-overhead")
+        print(f"[engine] opt tier={args.opt_tier} nfe={args.nfe}", flush=True)
+
     from torchcodec.decoders import VideoDecoder
 
     meta = [json.loads(l) for l in open(f"{VAL}/meta/episodes.jsonl")]
     eps = sorted(int(m["episode_index"]) for m in meta)[: args.n_metric_eps]
     my = eps[args.shard_id :: args.num_shards]
-    print(f"[shard {args.shard_id}/{args.num_shards}] eps={len(my)} nfe={args.nfe} joint={args.joint}", flush=True)
+    print(f"[shard {args.shard_id}/{args.num_shards}] eps={len(my)} nfe={args.nfe} engine={args.engine} joint={args.joint}", flush=True)
 
     metric = {}; lat_ms = []
     for ep in my:
@@ -121,12 +144,19 @@ def main():
             img = prep_image(frames)
             prop = torch.from_numpy((st_all[f] - s_mean) / (s_std + 1e-8)).float()
             t0 = time.time()
-            with torch.no_grad():
-                fn = model.infer_joint if args.joint else model.infer_action
-                out = fn(prompt=None, input_image=img, action_horizon=48, proprio=prop,
-                         context=ctx.to(model.device, model.torch_dtype),
-                         context_mask=None if cmask is None else cmask.to(model.device),
-                         num_inference_steps=args.nfe, seed=0)
+            if opt_runner is not None:
+                out = _opt_infer(model, opt_runner,
+                                 context=ctx.to(model.device, model.torch_dtype),
+                                 context_mask=cmask.to(model.device),
+                                 image=img, proprio=prop,
+                                 action_horizon=48, num_inference_steps=args.nfe, seed=0)
+            else:
+                with torch.no_grad():
+                    fn = model.infer_joint if args.joint else model.infer_action
+                    out = fn(prompt=None, input_image=img, action_horizon=48, proprio=prop,
+                             context=ctx.to(model.device, model.torch_dtype),
+                             context_mask=None if cmask is None else cmask.to(model.device),
+                             num_inference_steps=args.nfe, seed=0)
             lat_ms.append((time.time() - t0) * 1000)
             pa = out["action"].float().cpu().numpy() * (a_std + 1e-8) + a_mean  # infer_action 返回已是 [48,14];z-score 逆 + 全 abs
             gt = gt_all[f : f + 48]
