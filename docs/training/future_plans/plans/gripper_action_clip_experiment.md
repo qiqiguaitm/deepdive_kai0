@@ -116,6 +116,30 @@
 
 ---
 
+## 8. 训练结果回填(2026-06-13)
+
+> 状态:✅ **训练完成**(config `pi05_smooth800_dagger_clip_all`,cnsh 8 A100,50k,exp `smooth800_dagger_clip_cnsh`)。
+> ⚠️ **真机对比(脱落/松手,§5)未做** —— 以下 offline MAE 仅作收敛 sanity,不代表夹持是否"给力"。
+
+**Inline-eval MAE**(val = `vis_v2_merged_val`;数据源 `logs/smooth800_dagger_clip_cnsh_20260611_084503.log`):
+
+| step | MAE@1 | MAE@10 | MAE@25 | MAE@50 |
+|---|---|---|---|---|
+| 8000 | 0.0109 | 0.0250 | 0.0451 | 0.0737 |
+| 16000 | 0.0093 | 0.0202 | 0.0327 | 0.0479 |
+| 24000 | 0.0087 | 0.0178 | 0.0272 | 0.0384 |
+| 32000 | 0.0085 | 0.0165 | 0.0244 | 0.0340 |
+| 40000 | 0.0083 | 0.0155 | 0.0225 | 0.0312 |
+| 48000 | 0.0082 | 0.0149 | 0.0214 | 0.0296 |
+| **49999** ⭐ | **0.0082** | **0.0147** | **0.0212** | **0.0293** |
+
+- **最佳 ckpt = step 49999**(单调收敛;@1 与 48000 持平,@10/@25/@50 最低)。
+- **位置**:`kai0/checkpoints/pi05_smooth800_dagger_clip_all/smooth800_dagger_clip_cnsh/49999/params`(cnsh /vePFS,42G,root-owned)。全套保留 10000/20000/30000/40000/49999。
+- **结论(offline 层面)**:夹爪 action 裁剪(≤5mm→0,action-only)**未损害整体精度** —— MAE 与原版 `pi05_flatten_fold_A_smooth800_dagger_full`(@1~0.008)量级一致。是否"夹持更稳/不脱落"须**真机对照**(§5)才能判。
+- ⚠️ 第一次提交(`logs/...055841.log`)早期崩于 episode_index gap(OfflineModeIsEnabled),重建 clip 数据集为连续 episode_index 后重训成功(本表为重训)。
+
+---
+
 ## 关联
 - 诊断图: `temp/gripper_zoom_{kai0,vis}.png`(0–20mm 细看)、`temp/gripper_action_dist_{kai0,vis}.png`(全量)
 - 数据: `kai0/data/Task_A/self_built/A_smooth800_dagger_all`(1117ep/1.47M)
