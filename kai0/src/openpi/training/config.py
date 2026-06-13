@@ -1101,7 +1101,7 @@ _CONFIGS = [
             default_prompt=None,
             base_config=DataConfig(prompt_from_task=True),  # 读 task_index→tasks.jsonl: domain0/1 各自 prompt
             use_delta_joint_actions=False,
-            domain_weights=(1.0, 3.256),  # FRAME-level 1:1: Task_A 1,455,235 / AV1 446,955 = 3.256
+            domain_weights=(1.0, 3.0115),  # FRAME-level 1:1 (norm-build 实数): Task_A 1,345,997 / AV1 446,955 = 3.0115
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader(
             "/vePFS-North-E/vis_robot/shared_ckpt/Task_A/mixed_1_clean/params"
