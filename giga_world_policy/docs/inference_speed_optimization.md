@@ -1,6 +1,7 @@
 # GigaWorld-Policy 推理加速研究
 
 > 目标:在**不重新训练、不损失精度**的前提下,优化 GigaWorld-Policy 的动作推理延迟。
+> **2026-06-13 更新:全部精度悬置项已在真实 ckpt + 200ep 协议上终审,见文末 §9(部署选型:gwp_ans 87ms / gwp_ori 103ms)。**
 > 成果阶梯:**530ms → 100ms 内(127ms 逐位无损 / 84ms 近无损)→ 50ms 内(39ms,NFE5+全图prepare+FP8)**。
 > 最快全栈:**530ms → 39ms(13.5×)**,单次推理稳定。
 
@@ -332,3 +333,137 @@ CUDA_VISIBLE_DEVICES=3 $PY -m scripts.test_bac --skip_middle 12 --fuse --fp8 --c
 6. 数据侧:把 LeRobot 数据(相机键 `top_head/hand_*`)转成服务端期望的 `cam_high/cam_*_wrist` 以跑端到端(含 VAE)闭环。
 
 **未做的边际项**:文本 cross-attn KV 缓存(精确)、bf16 LayerNorm(近无损)——在 48-token/decode regime 下各仅省 ~0.3-1ms,对达标非必要。
+
+---
+
+## 9. 真实 checkpoint 终审与部署定稿(2026-06-13,jpsz 4×RTX5090)
+
+本节闭环 §8 的全部"需真实 checkpoint"事项。载体:`scripts/opt_ans.py` ——
+- 把本工具集接到**真实权重**与 **gwp_ans 全量路径**(AnsPrefixRunner:掩码保证 prefix 不 attend
+  action/noisy ⇒ 全量路径 prefix 同样跨步恒定可缓存;active=192 tok,t_a/t_O per-token);
+- eval 集成 `episode_report --engine opt --opt_tier {eager,exact,fp8} --opt_bac N`,
+  200ep 同协议精度闸门 = stock 基线 ±0.0015(horizons ≥10)。
+
+### §8 待办逐项结论
+
+| §8 事项 | 终审结论 |
+|---|---|
+| 1. NFE 缩减验证 | ✅ **通过且长程更优**:ori NFE5 @48 .0905→.0887(scheduler 本就是 UniPC,无需换);ans T_a 5→3 @48 .0932→.0881。两路复现"少步长程更好"(更少随机累积);@1 +.001 为首步变糙(伪指标) |
+| 2. FP8 精度复核 | ✅ **损失≈0**(Δ@48 ≤.0009):全层 W8A8 rowwise 无校准直接过闸——§6 的 6.4% 随机权重上界纯属悲观,无需敏感层混合精度 |
+| 3. BAC 标定 | ⚠️ **半否决**:ans-BAC12 长程过闸但 @1 全场最差(.0090),仅备选;**ori-BAC12 @10 +.0040 出带,否决**。缓存步占比(ori 9/10 vs ans 4/5)决定误差累积;且 4 进程 max-autotune refresh 编译会耗尽 pinned 内存(NVRM NV_ERR_NO_MEMORY 实录)。**结论:NFE 缩减完胜 BAC,BAC 不进部署线** |
+| 4. 封装进 serving | ✅ `opt_ans.opt_call()`(复用 WAPipeline 预处理/调度器,仅换去噪循环);eval 已切换,inference_server 接入同构 |
+| 5. ori fp8 小 GEMM | 确认:reduce-overhead 下无收益(117≈118.5ms),需 max-autotune(未追加——ori 非部署首选) |
+
+### 部署定稿(200ep 全过闸;延迟 = serving 全栈含 VAE/预处理 / 纯 transformer 循环)
+
+| 模型 | 保守档(零近似) | **推荐档** | 对 stock |
+|---|---|---|---|
+| **gwp_ans** | exact 131ms | **fp8+T_a3:87 / 47.7ms,@48=.0881** | 251ms → **2.9×**,精度反升 |
+| gwp_ori | exact 163ms | **exact+NFE5:103 / 66.6ms,@48=.0887** | 488ms → **4.7×**,精度反升 |
+
+> 当年"进 50ms"的目标(§5 第 5 档 39ms,随机权重)以真实权重 47.7ms + 200ep 精度背书兑现。
+> 全表(10 配置)与方法学见 `docs/wam_mae_root_cause_and_optimization.md` §四;
+> 工件:jpsz `/data2/gwp_eval/out/opt200_*/summary.json`。
+
+### 新增工程要点(本轮沉淀)
+- **eval 管线 GPU 占空比**:CPU AV1 解码与 GPU 推理串行是利用率低的根因 → `EpisodeFrameCache`
+  多线程解码(thread_type=AUTO)+ 下一 episode 后台预取(`prefetch()`),解码完全藏入计算;
+- **BAC×多进程×max-autotune 是危险组合**(pinned 内存耗尽),若启用 BAC 须单进程标定后静态部署;
+- 跨机注意:32G 消费卡上 exact 档 CUDA-Graph 池 ~12.2G/进程,与桌面/他人任务共卡时留余量。
+
+---
+
+## 10. 进一步降延迟:实测瓶颈剖析 + 前沿调研(2026-06-13)
+
+§9 把延迟压到 gwp_ans 全栈 87ms。本节回答"还能怎么降",方法 = **先实测拆解定位靶子,
+再对齐前沿调研**(深度 web 调研,2024-26 论文/库,见会话记录)。
+
+### 10.1 实测延迟剖析(`scripts/prof_latency.py`,jpsz 5090,gwp_ans fp8 T_a=3,纯推理)
+
+```
+preprocess          0.2ms   0%
+VAE encode          8.8ms  14%
+prepare(前缀30层)  12.4ms  19%   一次性
+steps(3)           43.8ms  67%   ← per-step 14.6ms,绝对大头
+TOTAL              65.2ms        (87ms 全栈多出的 ~22ms = episode_report 数据加载/
+                                  GT对齐/CPU拷贝,真实 serving 不含 → 部署延迟 ≈65ms)
+```
+
+**决定性洞察:ANS per-step 14.6ms = action-only(~6ms)的 2.4×**,因为每步算 192 token
+(48 action + 144 noisy-video)。192 token 下**已脱离纯带宽主导、进入计算主导**
+(14.6ms = 5.3× 带宽下限)——这一条直接判定哪些方法有效。
+**勘误:此前估"VAE 占全栈 45%/39ms"是错的(混入了 episode_report 开销);VAE 实测仅 8.8ms。**
+
+### 10.2 候选(按"攻击 67% 大头"× 性价比 × 证据排序)
+
+| # | 候选 | 攻击什么 | 预期 | 成本 | 风险 | 证据 |
+|---|---|---|---|---|---|---|
+| **1** | **few-step 动作蒸馏(SnapFlow 式)** T_a 3→1 | steps 67% | −29ms(43.8→~15) | 一次小蒸馏 ~12 GPU-h,骨干冻结 | 低 | **直接**:SnapFlow(2604.05656)同族 π₀.₅ flow-matching 10→1步,LIBERO 97.75%→98.75%(≥teacher),e2e 274→83ms;OFP(2603.12480)/OneDP(2410.21257)佐证 |
+| **2** | **架构蒸馏→小 action 专家**(去 144 video token 分支) | per-step 计算根因 | 可能 5-20× 全栈 | 一次训练(大) | 中 | 转移:VITA-VLA(2510.09607,精度反升)/TinyVLA(~20×);**与 fastwam 线合流** |
+| **3** | **NVFP4 权重**(FP8 W8A8→4bit) | per-step 带宽部分 | 1.4-1.6× | 推理改(torch2.12+torchao nightly) | 中 | 直接(B200 Flux/LTX);**sm_120 消费卡 FP4 GEMM 不成熟,小 M 常回退,必须实测自身形状** |
+| **4** | **VAE latent 跨控制步缓存 + lighttaew2_2** | VAE 8.8ms | −7ms | 推理改/验证 | 低 | 转移(AdaCache/ReFrame 原理;taew2_2 编码 3.25×);latent 非逐位等价需复核 MSE |
+| 5 | W4 weight-only(action GEMM,M<78) | per-step 带宽 | ≤2×但与 prefix-cache 部分重叠 | 推理改 | 中 | roofline 直接,形状转移 |
+| 6 | GPU 预处理/帧留 GPU | preprocess 0.2ms | ~0(已极小) | 低 | 无 | 本场景不值得 |
+
+### 10.3 机理+证据双负,明确不做
+
+| 方法 | 否定理由 |
+|---|---|
+| W4A4 激活量化 / 任何小 M GEMM 量化 | M=48-192 < 1024,激活量化开销 > 收益(torchao 官方建议 min(M,K,N)<1024 跳过) |
+| FlashAttention-3/4、FlashInfer | 注意力非瓶颈(n<d,FFN O(n·d²) 主导;且无权重读取);FA4 仅 sm_100,5090(sm_120)用不了;cuDNN SDPA 已 ~97% SOL |
+| TensorRT / torch-TRT | 所有公开提速都是 vs eager FP16,其收益(fusion+FP8+消启动开销)CUDA Graphs 已吃掉;且丢失自定义 prefix-KV 缓存 |
+| 张量并行 2×5090 | 无 NVLink,PCIe AllReduce 在 bs=1 小 token 净负;xDiT(2411.01738)明确弃 TP |
+| TeaCache/ToCa/FBCache/Δ-DiT | 动态分支破 CUDA Graphs,或 = 已否决的 BAC 残差缓存族;少步(5-10)regime 也无 30-250 步论文的空间 |
+| 投机/级联扩散 | 仅减半 NFE,我们已在 ~10 步,无空间;且多为 diffusion-LLM 文本解码,非连续 latent |
+| DC-AE/DC-VideoGen 高压缩 VAE | 需重训进新 latent 空间,短期不适用 |
+
+### 10.4 战略读数
+- **最干净的下一步 = #1 few-step 动作蒸馏**:同族直接证据、低成本、唯一攻击 67% steps 大头;
+- 长线天花板 = #2 架构蒸馏(去 video 分支,正是 per-step 贵的根因,与 fastwam 路线天然合流);
+- #3/#4 是边际项(量化看 sm_120 FP4 成熟度;VAE 只 8.8ms 空间有限);
+- **bs=1 小 M decode regime 的特殊性**:图像/视频 DiT 的主流提速(大 M 量化、稀疏注意力、TP)
+  大多不转移——我们的杠杆集中在**步数(蒸馏)**和**模型规模(架构蒸馏)**,而非单步内核优化;
+- 铁律不变:任何蒸馏/量化必须真实 ckpt + 动作 MSE 复核。
+
+## 11. 跨架构对比:kai0 π₀.₅ 推理优化 vs gwp* 优化栈(2026-06-13)
+
+背景:kai0 的部署 ckpt(`A_smooth800_dagger_full_step49999`,π₀.₅ = PaliGemma-2B VLM + flow-matching action expert,**abs 关节**)有一套独立做出来的推理优化(`optimize/v1_triton/pi05_infer.py` 的 `Pi05InferenceTuned`)。把它的招式和本文 gwp\* 栈逐项对齐,判断有无可搬。
+
+### 11.1 逐项对照
+
+| 优化技术 | kai0 `Pi05InferenceTuned`(π₀.₅,2B) | gwp `opt_ans`/本文栈(5B 视频 DiT) | gwp 能否采纳 |
+|---|---|---|---|
+| **前缀 KV 缓存** | ✅ 手写 Triton `softmax_kernel_prefix_suffix`(VLM 视觉+文本前缀缓存,action 去噪 attend) | ✅ `AnsPrefixRunner`/`PrefixCachedRunner`(state+ref 前缀跨步不变,§4.2) | **已有**——同一因果结构,殊途同归 |
+| **CUDA Graph** | ✅ **整推理单图**(`self.infer_graph` 捕获全 10 步去噪循环,replay 一次) | ✅ 逐步 + prepare **分图**(§4.1/§4.5) | **★唯一可借**:整循环单图 |
+| **融合 QKV** | ✅ 手写 Triton kernel | ✅ diffusers `fuse_projections`(§4.1) | 已有 |
+| **算子融合**(Norm/FFN) | ✅ 全手写 Triton(SwiGLU FFN、AdaRMSNorm) | ✅ `torch.compile`/inductor 自动 | 可借但**边际**(inductor 已融) |
+| **量化** | bf16 热路径(推理内核无 FP8/int8) | ✅ **FP8 W8A8** `_scaled_mm`(§4.3) | **gwp 已领先** |
+| **少步/NFE** | **10 步**(未做缩减) | ✅ **3–5 步** UniPC(§4.6) | **gwp 已领先** |
+
+### 11.2 结论:两栈已收敛,无大额免费午餐可搬
+
+1. **三件套(前缀缓存 + CUDA图 + 融合 QKV)两边都有**,且各自独立做出 → 印证这是小-batch decode 推理的标准解;gwp 不缺。
+2. **kai0 唯一 gwp 没有的 = 「整推理单 CUDA 图」**(把全部去噪步捕成一张图、一次 replay,省去步间 Python 往返/启动开销)。**可采纳、中等价值**:
+   - 收益与步数成正比 → gwp_ori(NFE5)有意义,gwp_ans(T_a=3)收益小;
+   - 工程成本中等:需把 scheduler 的 step 算术挪进图 + 展开循环;
+   - 但 gwp per-step 是**计算主导**(§10.1:192 token,14.6ms/步),步间启动开销相对很小 → 预计实际增益 **<几 ms**,优先级低于 §10.4 的少步蒸馏。
+3. **手写 Triton 全融合**:可移植但高成本、对 gwp 边际(torch.compile 已自动融合;gwp 瓶颈是 token 计算量而非融合开销)。
+4. **反向更有价值**:gwp 的 **FP8 + 少步(3–5)kai0 π₀.₅ 都没有**——按本文 §6/§10 实测 FP8 真实损失≈0、少步反更利长程,这两招**反而可移植回 kai0**,有望把它现状再砍一截。
+
+> 一句话:gwp 已覆盖 kai0 的核心招式且在量化/步数上更激进;能从 kai0 借的仅「整循环单图」(中等项)。gwp 真正的下一杠杆(少步蒸馏、架构蒸馏,§10.4)不在 kai0 工具箱内。
+
+### 11.3 同协议参照行(kai0 π₀.₅ abs,visrobot01_val 200ep)
+
+> 协议同 gwp:exec stride=16、action_chunk=48、首 200 ep、raw mae@{1,10,24,48}、abs 约定 action[0]≡state。
+> 复现:jpsz `kai0/.venv`(torch 2.7.1+cu128/sm_120),`/data1/tim/eval_kai0_pi05.py --n_eps 200`(桥接 `serve_policy_v1.py` 的 `Pi05InferenceTuned`)。
+
+| 模型 | repr | @1 | @10 | @24 | @48 | 延迟(纯推理) |
+|---|---|---|---|---|---|---|
+| **kai0 π₀.₅ `A_smooth800`** | abs | 0.0067 | **0.0268** | **0.0502** | **0.0830** | **42.8ms** P50(含预处理) |
+| gwp_ori(参照,§357) | abs | 0.0052 | 0.0292 | 0.0578 | 0.0905 | 66.6ms(exact+NFE5) |
+| gwp_ans(参照,§357) | abs | 0.0063 | 0.0288 | 0.0581 | 0.0932 | 47.7ms(fp8+T_a3) |
+
+> **读数**:同 200ep 同协议下,kai0 π₀.₅ `A_smooth800`(2B,10步 bf16)在 **@10/@24/@48 全面优于两个 gwp 5B WAM**(@48 .0830 vs .0905/.0932,约 −8~11%),@1 与 gwp_ans 持平。
+> 即一个**纯前馈 VLM 策略(无视频分支)**在 offline open-loop MAE 上反而强于带世界模型的 5B WAM——再次印证 §10.4/根因文档的判断:**当前 WAM 的视频分支在 serve 时被因果掩码切断,长程精度瓶颈在视频预测质量而非动作头**;在被切断的前馈 regime 里,更成熟的 VLM 动作专家(π₀.₅)更划算。最终裁决仍需 best-of-N / 闭环 SR(offline MAE 受前向多模态污染,见根因文档一.1)。
+
+
