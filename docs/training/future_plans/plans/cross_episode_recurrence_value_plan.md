@@ -897,6 +897,10 @@ ep7 过程(抓起→摊开→叠好)对照四 value:
 
 ![图53](../../../visualization/cross_episode_recurrence_value/vis0526_bucketed_milestones.png)
 
+**coverage 修正方案对比 + 两子问题澄清(用户增分子提议,2026-06-13)**:用户对文献"减分母"提出反对——应**增大分子**(partial episode 在未覆盖段插补为命中)保持分母=N **对比一致性**,而非减分母(不同簇分母不同→小样本方差→排序不公平)。统计上正确:增分子=imputation(缺失→命中),对"必经 milestone"self-consistent;减分母=complete-case。**实测(图54)却揭示 5-26 数据本身几乎全从 0 开始**(P_start median=0.01,partial 仅 3/99=3%)→ 5-26 前段空洞**不是 partial bias**。三种 coverage 下前段(P<0.5)milestone 数:原始 2 / 减分母 4 / **增分子(用户)4**——增分子与减分母同效但保分母一致(用户对),然仅填 2 个(partial 少)。**两子问题澄清**:A. partial 偏差(5-10 前数据)→ 用户增分子修正(保一致性,partial 数据集显威力);B. 前段动作多样致 coverage 天然低(5-26 主因)→ 进度均匀分桶(填 8 个 >> cov 修正 2 个)。**完整泛化方案 = 增分子修正(解 A)+ 进度均匀分桶(解 B),互补**。`coverage_correction_compare.py` 入库。
+
+![图54](../../../visualization/cross_episode_recurrence_value/coverage_correction_compare.png)
+
 ## 5. 基础设施与执行记录
 
 **表11 — 集群任务**(均 cnsh;pod venv = `xvla/X-VLA-env/.venv`)
