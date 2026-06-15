@@ -10,7 +10,7 @@
 > **上游**:AWBC pipeline([awbc_implementation_plan.md](../../../../deployment/strategy/awbc_implementation_plan.md));ViVa 对比([awbc_viva_value_comparison_plan.md](../awbc_viva_value_comparison_plan.md),其 DSM-r30 变体**手标** milestone——本方案已证明可自动挖出,§2.3)。
 > **动机(现有 pipeline 病根)**:pi0-AE 是单帧视觉回归器,`absolute_advantage = V(t+50)−V(t)` 二阶差分放大噪声(corr 0.896→0.3-0.4);完全不利用跨 episode 结构;且 AE 训练数据在完成瞬间截止 → vis episode 尾段 value 系统性下坠(end-drop,已实证)。
 
-图像目录:`docs/visualization/cross_episode_recurrence_value/`(本文图 1-48 均相对引用,GitHub 直接渲染);视频默认不入 git(路径见附录 A),**阶段示例视频已入 git**:[milestone_ep_s800_660_final_v4gated_sync.mp4](../../../../visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4)(终版配方 + 置信门控,held-out ep660,图33 为抽帧)。
+图像目录:`docs/visualization/cross_episode_recurrence_value/`(本文图 1-49 均相对引用,GitHub 直接渲染);视频默认不入 git(路径见附录 A),**阶段示例视频已入 git**:[milestone_ep_s800_660_final_v4gated_sync.mp4](../../../../visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4)(终版配方 + 置信门控,held-out ep660,图33 为抽帧)。
 
 ---
 
@@ -1105,6 +1105,18 @@ ep7 过程(抓起→摊开→叠好)对照四 value:
 
 视频:`temp/tcc_ae_kai0base_ep2047_30hz_sync.mp4`(30Hz 逐帧解算 × 视频同步)。
 
+**图49 — 端到端 TCC 是 30Hz 连续化的最终形态(验证)**(`tcc_e2e_30hz_ep2047.py`,kai0_base 末4块微调,ep2047 **held-out**,全 2629 帧逐帧 readout + 时序平滑):
+
+| 30Hz 方法 | 单调率 | 抖动(2nd-diff) | 终值 |
+|---|---|---|---|
+| frozen-TCC(逐帧 argmax) | 81% | 0.0042 | 0.96 |
+| **端到端-TCC + 中值(0.9s)** | **88%** | **0.0030** | 0.93 |
+| 端到端-TCC + 因果 EMA | 65% | **0.0002** | 0.73 |
+
+**结论:端到端-TCC(中值)在 30Hz 同时更单调(88%>81%)且更平滑(抖动 0.0030<0.0042)**——验证了"端到端是 30Hz 连续化最终形态":学习得到的 backbone 度量本身帧间噪声更低,frozen 逐帧 argmax 的抖动(§4.6.1 30Hz 单调率掉到 81% 的根因)被端到端从源头压低,而非靠事后平滑硬抹。因果 EMA 抖动最低(0.0002,适合在线)但滞后致单调率 65% + 终值欠读 0.73,故**离线打标用中值版、在线用 EMA 需配前瞻**。这把 §4.6 的"端到端为 30Hz 连续化主投入"从设计判断变为实测结论。
+
+![图49](../../../../visualization/cross_episode_recurrence_value/e2e_30hz_ep2047.png)
+
 ---
 
 ## 5. 基础设施与执行记录
@@ -1172,7 +1184,7 @@ ep7 过程(抓起→摊开→叠好)对照四 value:
 
 ## 附录 A — 工件清单
 
-**图像**(图1-48):`docs/visualization/cross_episode_recurrence_value/`(40+ 张,命名规范 `<阶段>_<数据集>_<内容>`)。
+**图像**(图1-49):`docs/visualization/cross_episode_recurrence_value/`(40+ 张,命名规范 `<阶段>_<数据集>_<内容>`)。
 
 **示例视频(入 git)**:`docs/visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4`(终版配方 + 门控,held-out ep660,~2MB,图33 为抽帧)。
 
