@@ -10,7 +10,7 @@
 > **上游**:AWBC pipeline([awbc_implementation_plan.md](../../../../deployment/strategy/awbc_implementation_plan.md));ViVa 对比([awbc_viva_value_comparison_plan.md](../awbc_viva_value_comparison_plan.md),其 DSM-r30 变体**手标** milestone——本方案已证明可自动挖出,§2.3)。
 > **动机(现有 pipeline 病根)**:pi0-AE 是单帧视觉回归器,`absolute_advantage = V(t+50)−V(t)` 二阶差分放大噪声(corr 0.896→0.3-0.4);完全不利用跨 episode 结构;且 AE 训练数据在完成瞬间截止 → vis episode 尾段 value 系统性下坠(end-drop,已实证)。
 
-图像目录:`docs/visualization/cross_episode_recurrence_value/`(本文图 1-53 均相对引用,GitHub 直接渲染);视频默认不入 git(路径见附录 A),**阶段示例视频已入 git**:[milestone_ep_s800_660_final_v4gated_sync.mp4](../../../../visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4)(终版配方 + 置信门控,held-out ep660,图33 为抽帧)。
+图像目录:`docs/visualization/cross_episode_recurrence_value/`(本文图 1-54 均相对引用,GitHub 直接渲染);视频默认不入 git(路径见附录 A),**阶段示例视频已入 git**:[milestone_ep_s800_660_final_v4gated_sync.mp4](../../../../visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4)(终版配方 + 置信门控,held-out ep660,图33 为抽帧)。
 
 ---
 
@@ -1171,6 +1171,22 @@ ep7 过程(抓起→摊开→叠好)对照四 value:
 
 ![图53](../../../../visualization/cross_episode_recurrence_value/final_continuous_value_ep2047_v2.png)
 
+#### 4.6.3 连续 value 方法的跨数据集泛化(2026-06-15)
+
+> 验证连续 value 方法(CRAVE 离散骨架 + frozen-TCC + 细 bin DP 连续 readout)在三个迥异数据集上的泛化:各取最长 episode。`generic_continuous_generalize.py`(逐字同配方,仅换 feat_cache,无 per-dataset 调参)。
+
+| 数据集 | 本体/任务 | 最长 ep | 连续 value:end / 单调 / adv密度 / corr(value,时间) |
+|---|---|---|---|
+| **xvla_soft_fold** | 新本体+新相机+新布料,折叠 | ep7(3440f≈115s) | 0.98 / 87% / 92% / **0.94** |
+| **vis_base**(0424) | vis 本体,折叠 | ep110(1670f≈56s) | 0.97 / 92% / 91% / **0.97** |
+| **aloha_coffee** | 真实 ALOHA,放咖啡胶囊→按键(全新任务) | ep0(690f≈23s) | 0.98 / 100% / 96% / **1.00** |
+
+![图54a xvla](../../../../visualization/cross_episode_recurrence_value/generalize_continuous_xvla.png)
+![图54b vis_base](../../../../visualization/cross_episode_recurrence_value/generalize_continuous_visbase.png)
+![图54c coffee](../../../../visualization/cross_episode_recurrence_value/generalize_continuous_coffee.png)
+
+**结论:连续 value 方法跨数据集强泛化。** 三个数据集(不同本体/相机/布料/甚至全新咖啡任务)下,连续 TCC+DP value 均**平滑跟随离散 CRAVE 骨架、终值近 1、与归一化时间相关 0.94-1.00**(adv 密度 91-96% = 真连续非阶梯)。咖啡任务最干净(corr 1.00/单调 100%,呼应 GENERALIZATION 文档"强顺序子目标任务 recurrence 更受益")。每数据集仅训了一个 frozen-feature TCC 头(CPU ~2min),配方零调参——印证连续化方法不是 kai0 专用,与 V2.4 离散主线的跨数据泛化(xvla 0.956/coffee 0.988,见 GENERALIZATION 文档)一致。
+
 ---
 
 ## 5. 基础设施与执行记录
@@ -1238,7 +1254,7 @@ ep7 过程(抓起→摊开→叠好)对照四 value:
 
 ## 附录 A — 工件清单
 
-**图像**(图1-53):`docs/visualization/cross_episode_recurrence_value/`(40+ 张,命名规范 `<阶段>_<数据集>_<内容>`)。
+**图像**(图1-54):`docs/visualization/cross_episode_recurrence_value/`(40+ 张,命名规范 `<阶段>_<数据集>_<内容>`)。
 
 **示例视频(入 git)**:`docs/visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4`(终版配方 + 门控,held-out ep660,~2MB,图33 为抽帧)。
 
