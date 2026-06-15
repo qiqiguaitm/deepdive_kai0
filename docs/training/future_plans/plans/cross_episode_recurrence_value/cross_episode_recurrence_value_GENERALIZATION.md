@@ -23,8 +23,8 @@ V2.4 全部组件(三路特征 / KMeans96 / coverage 修正 / 进度分桶 / 端
 
 3 随机视频:ep32 r0.909 / ep122 r0.968 / ep140 r0.982,milestone 命中呈时序对角,value 干净 0→1 阶梯。
 
-![xvla overview](../../../visualization/cross_episode_recurrence_value/generalization/xvla_value_eval_overview.png)
-![xvla ep140](../../../visualization/cross_episode_recurrence_value/generalization/xvla_sync_ep140_preview.png)
+![xvla overview](../../../../visualization/cross_episode_recurrence_value/generalization/xvla_value_eval_overview.png)
+![xvla ep140](../../../../visualization/cross_episode_recurrence_value/generalization/xvla_sync_ep140_preview.png)
 
 ## 测试2 — aloha_static_coffee(互联网真实数据集 / 新本体 / 全新任务)
 
@@ -41,8 +41,8 @@ V2.4 全部组件(三路特征 / KMeans96 / coverage 修正 / 进度分桶 / 端
 
 3 随机视频:ep13 r0.985 / ep30 r0.992 / ep39 r0.984,milestone 命中近乎完美单调对角(咖啡任务时序结构强,recurrence 更受益)。
 
-![coffee overview](../../../visualization/cross_episode_recurrence_value/generalization/coffee_value_eval_overview.png)
-![coffee ep30](../../../visualization/cross_episode_recurrence_value/generalization/coffee_sync_ep30_preview.png)
+![coffee overview](../../../../visualization/cross_episode_recurrence_value/generalization/coffee_value_eval_overview.png)
+![coffee ep30](../../../../visualization/cross_episode_recurrence_value/generalization/coffee_sync_ep30_preview.png)
 
 ## 解读
 
