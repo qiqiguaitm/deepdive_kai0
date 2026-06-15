@@ -10,7 +10,7 @@
 > **上游**:AWBC pipeline([awbc_implementation_plan.md](../../../../deployment/strategy/awbc_implementation_plan.md));ViVa 对比([awbc_viva_value_comparison_plan.md](../awbc_viva_value_comparison_plan.md),其 DSM-r30 变体**手标** milestone——本方案已证明可自动挖出,§2.3)。
 > **动机(现有 pipeline 病根)**:pi0-AE 是单帧视觉回归器,`absolute_advantage = V(t+50)−V(t)` 二阶差分放大噪声(corr 0.896→0.3-0.4);完全不利用跨 episode 结构;且 AE 训练数据在完成瞬间截止 → vis episode 尾段 value 系统性下坠(end-drop,已实证)。
 
-图像目录:`docs/visualization/cross_episode_recurrence_value/`(本文图 1-46 均相对引用,GitHub 直接渲染);视频默认不入 git(路径见附录 A),**阶段示例视频已入 git**:[milestone_ep_s800_660_final_v4gated_sync.mp4](../../../../visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4)(终版配方 + 置信门控,held-out ep660,图33 为抽帧)。
+图像目录:`docs/visualization/cross_episode_recurrence_value/`(本文图 1-47 均相对引用,GitHub 直接渲染);视频默认不入 git(路径见附录 A),**阶段示例视频已入 git**:[milestone_ep_s800_660_final_v4gated_sync.mp4](../../../../visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4)(终版配方 + 置信门控,held-out ep660,图33 为抽帧)。
 
 ---
 
@@ -1079,6 +1079,26 @@ ep7 过程(抓起→摊开→叠好)对照四 value:
 
 **待跑实验(把方向落地的那一个)**:§4.4.7 hybrid 当年用 **frozen** TCC v3;现已有**端到端** TCC(本身连续且追平 CRAVE)。用端到端 TCC 作插值重跑 hybrid,V 层 + advantage 层同评。资产:端到端 ckpt `temp/tcc_e2e_ft/tcc_e2e_finetune.pt`(帧缓存需重建 ~10min)。预期:V 层持平 CRAVE,advantage 密度 24%→显著上升。
 
+#### 4.6.1 实证:单 episode 三方连续化对比(2026-06-14)
+
+**ep808(dagger)初探**(`continuize_ep808_compare.py`):离散 vs IDW距离 vs frozen-TCC。两连续法都把 advantage 密度 26%→89%(3.4×),但 **IDW 距离插值不可靠**(末值 0.36 离 1 太远、与离散仅相关 0.26、最抖)——正是 §4.4.19 frozen 距离噪声 + 首尾混淆的再现,**故 IDW 弃用**。frozen-TCC 末值 0.92、与离散相关 0.76,胜出。
+
+**ep2047(kai0_base,2629f≈88s,随机长 episode)三方对比**(`tcc_vs_ae_kai0base.py`,图47):离散 CRAVE vs frozen-TCC 连续 vs **pi0-AE 监督连续**(advantage_q5 absolute_value,同一 ep):
+
+| 指标 | 离散 CRAVE | **TCC 连续** | pi0-AE 监督 |
+|---|---|---|---|
+| 终值(完成应=1) | **1.00** | **0.97** | 0.90 |
+| 单调率 | **100%** | **98%** | **52%** ❌ |
+| advantage 非零密度 | 15% | **91%** | 97% |
+| corr(·, 离散CRAVE) | — | 0.73 | 0.64 |
+| corr(TCC, AE) | — | — | 0.90 |
+
+**结论:TCC 连续化是离散骨架与监督密度之间的最佳中间形态**——① 连续性达成(adv 密度 15%→91%);② 正确性远胜 AE(终值 0.97 vs 0.90、单调 98% vs **AE 仅 52%**,监督 AE 一半帧在倒退,作 advantage 大量误判退步);③ 同时贴合 CRAVE(0.73,在加密而非改写进度)与 AE(0.90)。验证了"milestone 间用 TCC 连续化"方向:比离散密集、比监督 AE 干净。此处仍是 frozen-feature TCC,端到端版(§2.4.4)预期再升。
+
+![图47](../../../../visualization/cross_episode_recurrence_value/tcc_vs_ae_kai0base_ep2047.png)
+
+视频:`temp/tcc_ae_kai0base_ep2047_sync.mp4`(离散/TCC/AE 三曲线 × top_head 帧同步)。
+
 ---
 
 ## 5. 基础设施与执行记录
@@ -1146,7 +1166,7 @@ ep7 过程(抓起→摊开→叠好)对照四 value:
 
 ## 附录 A — 工件清单
 
-**图像**(图1-46):`docs/visualization/cross_episode_recurrence_value/`(40+ 张,命名规范 `<阶段>_<数据集>_<内容>`)。
+**图像**(图1-47):`docs/visualization/cross_episode_recurrence_value/`(40+ 张,命名规范 `<阶段>_<数据集>_<内容>`)。
 
 **示例视频(入 git)**:`docs/visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4`(终版配方 + 门控,held-out ep660,~2MB,图33 为抽帧)。
 
