@@ -10,7 +10,7 @@
 > **上游**:AWBC pipeline([awbc_implementation_plan.md](../../../../deployment/strategy/awbc_implementation_plan.md));ViVa 对比([awbc_viva_value_comparison_plan.md](../awbc_viva_value_comparison_plan.md),其 DSM-r30 变体**手标** milestone——本方案已证明可自动挖出,§2.3)。
 > **动机(现有 pipeline 病根)**:pi0-AE 是单帧视觉回归器,`absolute_advantage = V(t+50)−V(t)` 二阶差分放大噪声(corr 0.896→0.3-0.4);完全不利用跨 episode 结构;且 AE 训练数据在完成瞬间截止 → vis episode 尾段 value 系统性下坠(end-drop,已实证)。
 
-图像目录:`docs/visualization/cross_episode_recurrence_value/`(本文图 1-50 均相对引用,GitHub 直接渲染);视频默认不入 git(路径见附录 A),**阶段示例视频已入 git**:[milestone_ep_s800_660_final_v4gated_sync.mp4](../../../../visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4)(终版配方 + 置信门控,held-out ep660,图33 为抽帧)。
+图像目录:`docs/visualization/cross_episode_recurrence_value/`(本文图 1-51 均相对引用,GitHub 直接渲染);视频默认不入 git(路径见附录 A),**阶段示例视频已入 git**:[milestone_ep_s800_660_final_v4gated_sync.mp4](../../../../visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4)(终版配方 + 置信门控,held-out ep660,图33 为抽帧)。
 
 ---
 
@@ -1130,6 +1130,24 @@ ep7 过程(抓起→摊开→叠好)对照四 value:
 
 ![图50](../../../../visualization/cross_episode_recurrence_value/four_way_ep2047.png)
 
+#### 4.6.2 端到端 TCC 的 fold 凹口 + CRAVE×TCC 综合(用户观察,2026-06-14)
+
+> 用户观察:端到端 TCC 末段"对折成长条"时 value 骤降骤升(fold 凹口);并指出**正常叠衣存在真回退(松手/回弹),不能一味填平**。
+
+**两个被否决的单帧修法(诚实记录)**:① 形态学闭运算填窄凹口——❌ 会连松手真回退一起抹掉(用户指出);② 置信门控——❌ 实测 fold 凹口处匹配置信仍 ~0.999(图 `e2e_confgate_ep2047.png`):长条半折态**高置信地混叠到真实存在的早期带状态帧**,与松手真回退同样高置信匹配早期时间。**结论:单帧相似度/value 根本无法区分 fold 混叠凹口 vs 松手真回退**(两者都高置信配早帧),判据必须在时序或物理量(夹爪释放)。
+
+**正解 = CRAVE×TCC 综合(图51)**:用户点破——**CRAVE 离散过程没有 fold 凹口,因为 Viterbi-DP 自带时序证据累积**:fold 那几帧瞬时混叠翻不过 DP 转移惩罚(档位不动),松手持续多帧才翻越惩罚使档位下移。即 **CRAVE 的 DP 已天然做了"瞬时混叠 vs 持续真回退"的区分**——正是单帧 TCC 缺的。综合 = TCC 钳制于 CRAVE 骨架 ±0.08 窗口:
+
+| ep2047 30Hz | 单调率 | adv 密度 | fold 凹口 |
+|---|---|---|---|
+| 离散 CRAVE | 100% | 33%(稀疏) | 无 |
+| 连续 TCC(e2e) | 88% | 94% | **0.27** |
+| **综合(TCC×CRAVE 钳制)** | **98%** | **48%** | **0.42**(压制) |
+
+兼得:比离散密(adv 33%→48%)、比纯 TCC 稳(单调 88%→98%、凹口 0.27→0.42);**真回退判别交给 CRAVE 的 DP 而非单帧**,从根上绕过"单帧不可分"死结。CRAVE 给鲁棒骨架(抗瞬时、抓真回退),TCC 给段内连续细节。待办:① 用 CRAVE DP 段边界做硬窗(而非 ±δ)可进一步压凹口;② 在 autonomy rollout(含真松手)验证综合版保留真回退。
+
+![图51](../../../../visualization/cross_episode_recurrence_value/combine_crave_tcc_ep2047.png)
+
 ---
 
 ## 5. 基础设施与执行记录
@@ -1197,7 +1215,7 @@ ep7 过程(抓起→摊开→叠好)对照四 value:
 
 ## 附录 A — 工件清单
 
-**图像**(图1-50):`docs/visualization/cross_episode_recurrence_value/`(40+ 张,命名规范 `<阶段>_<数据集>_<内容>`)。
+**图像**(图1-51):`docs/visualization/cross_episode_recurrence_value/`(40+ 张,命名规范 `<阶段>_<数据集>_<内容>`)。
 
 **示例视频(入 git)**:`docs/visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4`(终版配方 + 门控,held-out ep660,~2MB,图33 为抽帧)。
 
