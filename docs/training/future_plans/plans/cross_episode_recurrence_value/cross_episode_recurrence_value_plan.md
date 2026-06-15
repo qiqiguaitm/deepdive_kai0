@@ -10,7 +10,7 @@
 > **上游**:AWBC pipeline([awbc_implementation_plan.md](../../../../deployment/strategy/awbc_implementation_plan.md));ViVa 对比([awbc_viva_value_comparison_plan.md](../awbc_viva_value_comparison_plan.md),其 DSM-r30 变体**手标** milestone——本方案已证明可自动挖出,§2.3)。
 > **动机(现有 pipeline 病根)**:pi0-AE 是单帧视觉回归器,`absolute_advantage = V(t+50)−V(t)` 二阶差分放大噪声(corr 0.896→0.3-0.4);完全不利用跨 episode 结构;且 AE 训练数据在完成瞬间截止 → vis episode 尾段 value 系统性下坠(end-drop,已实证)。
 
-图像目录:`docs/visualization/cross_episode_recurrence_value/`(本文图 1-49 均相对引用,GitHub 直接渲染);视频默认不入 git(路径见附录 A),**阶段示例视频已入 git**:[milestone_ep_s800_660_final_v4gated_sync.mp4](../../../../visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4)(终版配方 + 置信门控,held-out ep660,图33 为抽帧)。
+图像目录:`docs/visualization/cross_episode_recurrence_value/`(本文图 1-50 均相对引用,GitHub 直接渲染);视频默认不入 git(路径见附录 A),**阶段示例视频已入 git**:[milestone_ep_s800_660_final_v4gated_sync.mp4](../../../../visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4)(终版配方 + 置信门控,held-out ep660,图33 为抽帧)。
 
 ---
 
@@ -1117,6 +1117,19 @@ ep7 过程(抓起→摊开→叠好)对照四 value:
 
 ![图49](../../../../visualization/cross_episode_recurrence_value/e2e_30hz_ep2047.png)
 
+**图50 — 四方连续 value 总对比(ep2047,30Hz)**(`four_way_ep2047.py`):端到端-TCC / frozen-TCC / 簇空间距离(修 bug)/ AWBC-AE 同图。距离法 bug 已修(补 start原型 P=0 / end原型 P=1,原 IDW 缺端点锚致末帧首尾混淆判低),并用锐温度给最佳机会:
+
+| 方法 | 终值 | 单调率 | adv 密度 | 抖动 | 评 |
+|---|---|---|---|---|---|
+| **端到端 TCC** | 0.93 | **88%** | 94% | **0.0030** | **最优**:密集+最单调+最平滑(实跟踪类里) |
+| frozen TCC | **0.96** | 81% | 99% | 0.0042 | 次优:终值/密度最高,略噪 |
+| AWBC pi0-AE | 0.90 | 52% | 97% | 0.0102 | 密集但半数帧倒退、最抖 |
+| 簇空间距离(修+锐) | 0.58 | 73% | 94% | 0.0005 | ❌ **塌成 ~0.5 平线**(端点锚+锐温度都救不回) |
+
+**结论:端到端 TCC 最优。** 排序 端到端TCC > frozen-TCC > AWBC-AE > 簇距离。关键发现:**簇空间距离法即使修了端点锚 bug + 锐化温度,仍塌成 0.5 附近的近平线(抖动 0.0005=几乎不动,动态范围全失)**——根因不是端点锚缺失(那只是表层 bug),而是 **softmax 距离加权对多锚回归到均值** 的固有缺陷(§4.4.19 同结论的再确认)。这反向坐实:**milestone 间连续化只能靠学习对齐(TCC),纯几何距离插值是死路**。端到端 TCC 把"连续(adv 94%)+ 单调(88%)+ 平滑(0.0030)+ 终值近完成(0.93)"四项同时做到,是四者里唯一全面均衡的连续 value。
+
+![图50](../../../../visualization/cross_episode_recurrence_value/four_way_ep2047.png)
+
 ---
 
 ## 5. 基础设施与执行记录
@@ -1184,7 +1197,7 @@ ep7 过程(抓起→摊开→叠好)对照四 value:
 
 ## 附录 A — 工件清单
 
-**图像**(图1-49):`docs/visualization/cross_episode_recurrence_value/`(40+ 张,命名规范 `<阶段>_<数据集>_<内容>`)。
+**图像**(图1-50):`docs/visualization/cross_episode_recurrence_value/`(40+ 张,命名规范 `<阶段>_<数据集>_<内容>`)。
 
 **示例视频(入 git)**:`docs/visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4`(终版配方 + 门控,held-out ep660,~2MB,图33 为抽帧)。
 
