@@ -151,6 +151,7 @@ def adv(v, w=W):
 
 
 crave_adv = adv(crave)
+np.savez(REPO / "temp/_crave_ae_ep808.npz", crave=crave, ae=ae, crave_adv=crave_adv, ae_adv=ae_adv, fps=30.0)
 x = np.arange(NF)
 
 

@@ -148,6 +148,7 @@ def adv(v, w=W):
 
 
 crave_adv = adv(crave); ae_adv = adv(ae)
+np.savez(REPO / "temp/_crave_ae_autonomy.npz", crave=crave, ae=ae, crave_adv=crave_adv, ae_adv=ae_adv, fps=30.0)
 x = np.arange(NF); FPS = 30.0; t = x / FPS
 r_shape = pearsonr(crave, ae)[0]; tau_shape = kendalltau(crave, ae)[0]
 print(f"corr(CRAVE,AE)={r_shape:.3f} tau={tau_shape:.3f}", flush=True)
