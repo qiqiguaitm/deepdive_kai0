@@ -18,13 +18,18 @@
 |---|---|
 | [cross_episode_recurrence_value_METHOD.md](cross_episode_recurrence_value_METHOD.md) | **最终方法 V2.4**(9步配方 + 四场景验证 + 否决死路 + 结论)。干净版,先读这个。 |
 | [cross_episode_recurrence_value_GENERALIZATION.md](cross_episode_recurrence_value_GENERALIZATION.md) | **跨数据集泛化实证**:XVLA soft_fold(新本体)corr 0.956/100%≥0.7;真实 ALOHA coffee(新任务)corr 0.988/单调100%。配方逐字不改。 |
-| [cross_episode_recurrence_value_plan.md](cross_episode_recurrence_value_plan.md) | **完整探索记录**:18 次迭代 + 56 图 + 文献调研 + 所有否决死路的诊断过程。 |
+| [cross_episode_recurrence_value_plan.md](cross_episode_recurrence_value_plan.md) | **完整探索记录**:迭代 + 图 1-55 + 文献调研 + 所有否决死路的诊断过程;§4.6 = **段间连续化(TCC+DP 连续 value)**子线。 |
 | [awbc_milestone_value_AB_plan.md](awbc_milestone_value_AB_plan.md) | **下游落地 A/B 对照 plan**:A=V2.4 直接当 value 源 / B=蒸馏训 AE,对照已跑的 C=pi0-AE。 |
 
+## 两条 value 形态
+- **离散 CRAVE V2.4**(主交付,METHOD 文档):milestone 阶梯,零训练,跨数据集强泛化。
+- **连续 TCC+DP**(plan §4.6,图47-55):端到端/frozen TCC 进度感知特征 + 相似度场 Viterbi-DP + 子bin软期望 → 逐帧连续 value;消 fold 凹口、保留真回退;跨数据集泛化(xvla/vis_base/coffee corr 0.94-1.00)。
+
 ## 关联资源(目录外)
+- **统一计算库**:`train_scripts/kai/data/crave_value.py`(`FeatureSpace` + `DiscreteValue` + `ContinuousValue`,高内聚低耦合;`verify_refactor.py` 验证与旧实现 bit 级一致)
 - 可视化图/预览帧:[`docs/visualization/cross_episode_recurrence_value/`](../../../../visualization/cross_episode_recurrence_value/)(含 `generalization/` 子目录)
 - 评估脚本(任意 HDF5 / LeRobot-v3 数据集即插即用):`train_scripts/kai/data/{hdf5,lerobot_v3}_extract_features.py` + `{hdf5,lerobot}_v24_eval.py`
 - 上游 AWBC 总纲:[`awbc_implementation_plan.md`](../../../../deployment/strategy/awbc_implementation_plan.md)
 
 ## 状态
-✅ 方法收口(V2.4)· ✅ 四场景验证 · ✅ 跨数据集强泛化 · ⏳ AWBC A/B 真机对照(plan 已就绪,待执行)
+✅ 离散 V2.4 收口/四场景/跨数据集 · ✅ 连续 TCC+DP 收口(§4.6,跨数据集泛化) · ✅ value 计算重构为统一库(crave_value.py) · ⏳ AWBC A/B 真机对照(plan 已就绪,待执行)
