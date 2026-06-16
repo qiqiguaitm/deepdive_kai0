@@ -30,7 +30,17 @@ def adv(v, w=W):
 def three(a): return np.where(a > EPS, 1, np.where(a < -EPS, -1, 0))
 
 
-cv = np.load(MV / f"ep{EP}.npy").astype(float)
+SMOOTH = 41   # 与 build_ds_A_from_mv.py 一致(已建 dagger_all_mvA 连续 value): 阶梯→连续 ramp
+
+
+def smooth_monotone(v, w=SMOOTH):   # build_ds_A_from_mv.py 同款: 边缘填充移动平均 + re-clip[0,1]
+    if len(v) < 3 or w < 2: return v.astype(np.float32)
+    h = w // 2; vp = np.concatenate([np.full(h, v[0]), v, np.full(h, v[-1])])
+    k = np.ones(w, dtype=np.float64) / w; vs = np.convolve(vp, k, mode="valid")[: len(v)]
+    return np.clip(vs, 0.0, 1.0).astype(np.float32)
+
+
+cv = smooth_monotone(np.load(MV / f"ep{EP}.npy").astype(float))   # 连续化(established 法)
 d = pd.read_parquet(AW / "data" / f"chunk-{EP//csAW:03d}" / f"episode_{EP:06d}.parquet", columns=["absolute_value"])
 ae_v = d["absolute_value"].to_numpy().astype(float); n = min(len(cv), len(ae_v)); cv, ae_v = cv[:n], ae_v[:n]
 ccls = three(adv(cv)); acls = three(adv(ae_v))
