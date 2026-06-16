@@ -24,6 +24,7 @@
 | [CRAVE_roadmap_and_positioning.md](CRAVE_roadmap_and_positioning.md) | **定位与可行方案**:重定位为"零标签结构/技能引擎"(value 是副产品)+ 四组工作流(能做什么/怎么做/对标 SOTA 优势)+ 分阶段安排 + B1 决定性实验。 |
 | [frequency_window_params.md](frequency_window_params.md) | **频率相关参数**:不同图像频率需不同窗(lam ∝ fps、时间窗按秒);3Hz/30Hz 落表 + 标定规则 + 离线/在线读出 + 实测(窗标定让抖动降 8×)。 |
 | [CRAVE_frontier_positioning_and_scenarios.md](CRAVE_frontier_positioning_and_scenarios.md) | **前沿定位与场景分析**:调研 VLA/世界模型/价值学习前沿(GVL/RECAP/VIP/世界模型/HIL-SERL);CRAVE vs GVL 互补;6 大场景 × SOTA × 优缺点 + 实施方案。 |
+| [CRAVE_doable_items_verification.md](CRAVE_doable_items_verification.md) | **可做项验证审查**:快速/零大GPU 项数据+文献核验(B1 milestone=动作技能相位✅; B2 弱失败信号❌否决; A2 keyframe✅); 逐项怎么对比/实现/处理。 |
 
 ## 两条 value 形态
 - **离散 CRAVE V2.4**(主交付,METHOD 文档):milestone 阶梯,零训练,跨数据集强泛化。

@@ -31,9 +31,9 @@
 - 对标优势:RECAP 要数千次真机自主 rollout + 失败标注才拿到 action-aware 优势;此法**零 RL 零标签**拿到(相关非因果的)action 级信号,且在**可解释的基元粒度**(RECAP 帧级黑箱)。
 - ⚠️ 边界:相关非因果(milestone 在动作 A 后推进 ≠ A 好);它给"基元级 credit 定位",不是真因果优势——但比 AE 帧级噪声 advantage 可操作得多。
 
-**B2 终点可达性 + OOD 残差 → 弱成败信号**
+**B2 终点可达性 + OOD 残差 → 弱成败信号** ❌**已验·降级**(见 [验证审查](CRAVE_doable_items_verification.md))
 - 怎么做:没到终止 milestone 簇的 episode = 弱失败;`CRAVE_value × 到达终点指示` → 能区分成败的粗 advantage。
-- 对标优势:把 CRAVE 从"progress"推向"近似 return",无需 RECAP 的 RL 闭环。
+- **实测否决**:细微 dagger 失败 on-manifold,OOD 残差不分 neg/pos(0.981 vs 0.979),终点 corr 仅 0.13、仅 2% 未完成。→ **只对粗失败/OOD 场景有效**(那些 CRAVE value 自己就掉),廉价补 neg 洞不成立。真 neg 仍需 RL/结果信号(C2)。
 
 ### C 组 · 模型化 / 规模化
 
