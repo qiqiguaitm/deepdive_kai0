@@ -5,7 +5,7 @@
 > **机制**: 复用已验证的 **`KaiVisMergedDataConfig` + `domain_weights`**(单一 pre-merged 数据集 + 按帧加权采样,**无磁盘复制**;同 `pi05_kaivis_perdsnorm_cond`)。
 > **状态**: 📋 **规划定稿(6 项决策已定,§7)** — 仅待用户发话"开始实施"即冻快照→build→注册 config→提交 BJ。**本次仍只更新文档,不实施**。
 > ⚠️ **铁律**: 真机为终判;val MAE 先于 train loss。
-> **关联**: Task_AV1 单独基线 [`pi05_task_av1_vertical_fold_v1_baseline.md`](pi05_task_av1_vertical_fold_v1_baseline.md) · 模板 config `pi05_kaivis_perdsnorm_cond`(config.py:1066)。
+> **关联**: Task_AV1 单独基线 [`pi05_fold_sop_paradigm_baselines.md`](pi05_fold_sop_paradigm_baselines.md) · 模板 config `pi05_kaivis_perdsnorm_cond`(config.py:1066)。
 
 ---
 
@@ -81,7 +81,7 @@ TrainConfig(
 |---|---|
 | Tier 1 offline | **两域分别留出 val** 逐 ckpt val MAE:domain1(竖向折,主目标)+ domain0(横向折,看不退化)。⚠️ 喂对应域 prompt + domain_id。 |
 | Tier 3 真机 | 部署 best ckpt:**竖向折(domain1 prompt)** 成功率/各 sub-phase 通过/夹持稳定 = 主判据;可选横向折 sanity。 |
-| 对照 | ① Task_AV1 **单独基线**(`pi05_task_av1_vertical_fold_v1_baseline`,200ep);② 本混合 1:1。→ 判"co-train 是否提升竖向折"。 |
+| 对照 | ① Task_AV1 **单独基线**(`pi05_fold_sop_paradigm_baselines`,200ep);② 本混合 1:1。→ 判"co-train 是否提升竖向折"。 |
 
 **判据**:混合 1:1 的竖向折真机 **> 单独 AV1 基线** → co-train 有效;若 ≤ → 横向先验干扰,考虑调权重(偏向 AV1)或只在 encoder 共享。
 
@@ -115,4 +115,4 @@ TrainConfig(
 - 加权采样:`kai0/src/openpi/training/data_loader.py:437-474`(`_build_domain_weights` / `_DomainWeightedJAXSampler`,**JAX-only**)
 - build 脚本模板:`train_scripts/kai/data/{build_kai_vis_merged.py, build_kai_vis_norm.py, build_task_av1_200_split.py}`
 - 数据:`kai0/data/Task_A/self_built/A_smooth800_dagger_full`(1033ep)+ `kai0/data/Task_AV1/base/`(304ep,watchdog 同步)
-- Task_AV1 单独基线对照:[`pi05_task_av1_vertical_fold_v1_baseline.md`](pi05_task_av1_vertical_fold_v1_baseline.md)
+- Task_AV1 单独基线对照:[`pi05_fold_sop_paradigm_baselines.md`](pi05_fold_sop_paradigm_baselines.md)
