@@ -21,6 +21,7 @@
 | [cross_episode_recurrence_value_plan.md](cross_episode_recurrence_value_plan.md) | **完整探索记录**:迭代 + 图 1-55 + 文献调研 + 所有否决死路的诊断过程;§4.6 = **段间连续化(TCC+DP 连续 value)**子线。 |
 | [awbc_milestone_value_AB_plan.md](awbc_milestone_value_AB_plan.md) | **下游落地 A/B 对照 plan**:A=V2.4 直接当 value 源 / B=蒸馏训 AE,对照已跑的 C=pi0-AE。 |
 | [value_advantage_methods_comparison.md](value_advantage_methods_comparison.md) | **方法论证对比**:kai0-AE(监督进度差)vs π*0.6-RECAP(RL 分布式回报优势)vs CRAVE(零训练离散),含逐维表 + 分场景结论 + 文献定位。 |
+| [CRAVE_roadmap_and_positioning.md](CRAVE_roadmap_and_positioning.md) | **定位与可行方案**:重定位为"零标签结构/技能引擎"(value 是副产品)+ 四组工作流(能做什么/怎么做/对标 SOTA 优势)+ 分阶段安排 + B1 决定性实验。 |
 
 ## 两条 value 形态
 - **离散 CRAVE V2.4**(主交付,METHOD 文档):milestone 阶梯,零训练,跨数据集强泛化。
