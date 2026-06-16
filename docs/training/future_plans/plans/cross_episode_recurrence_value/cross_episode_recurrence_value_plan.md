@@ -10,7 +10,7 @@
 > **上游**:AWBC pipeline([awbc_implementation_plan.md](../../../../deployment/strategy/awbc_implementation_plan.md));ViVa 对比([awbc_viva_value_comparison_plan.md](../awbc_viva_value_comparison_plan.md),其 DSM-r30 变体**手标** milestone——本方案已证明可自动挖出,§2.3)。
 > **动机(现有 pipeline 病根)**:pi0-AE 是单帧视觉回归器,`absolute_advantage = V(t+50)−V(t)` 二阶差分放大噪声(corr 0.896→0.3-0.4);完全不利用跨 episode 结构;且 AE 训练数据在完成瞬间截止 → vis episode 尾段 value 系统性下坠(end-drop,已实证)。
 
-图像目录:`docs/visualization/cross_episode_recurrence_value/`(本文图 1-54 均相对引用,GitHub 直接渲染);视频默认不入 git(路径见附录 A),**阶段示例视频已入 git**:[milestone_ep_s800_660_final_v4gated_sync.mp4](../../../../visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4)(终版配方 + 置信门控,held-out ep660,图33 为抽帧)。
+图像目录:`docs/visualization/cross_episode_recurrence_value/`(本文图 1-55 均相对引用,GitHub 直接渲染);视频默认不入 git(路径见附录 A),**阶段示例视频已入 git**:[milestone_ep_s800_660_final_v4gated_sync.mp4](../../../../visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4)(终版配方 + 置信门控,held-out ep660,图33 为抽帧)。
 
 ---
 
@@ -1187,6 +1187,21 @@ ep7 过程(抓起→摊开→叠好)对照四 value:
 
 **结论:连续 value 方法跨数据集强泛化。** 三个数据集(不同本体/相机/布料/甚至全新咖啡任务)下,连续 TCC+DP value 均**平滑跟随离散 CRAVE 骨架、终值近 1、与归一化时间相关 0.94-1.00**(adv 密度 91-96% = 真连续非阶梯)。咖啡任务最干净(corr 1.00/单调 100%,呼应 GENERALIZATION 文档"强顺序子目标任务 recurrence 更受益")。每数据集仅训了一个 frozen-feature TCC 头(CPU ~2min),配方零调参——印证连续化方法不是 kai0 专用,与 V2.4 离散主线的跨数据泛化(xvla 0.956/coffee 0.988,见 GENERALIZATION 文档)一致。
 
+跨数据集的同步对比视频(离散+连续叠加,8fps):`temp/generalize_sync_{xvla,visbase,coffee}.mp4`(coffee 视频经 hf-mirror 重下 cam_high)。
+
+#### 4.6.4 三方 value × 画面同步对比视频(ep2047,2026-06-16)
+
+> 把三种 value 形态放在同一画面上对比:**TCC 连续(DP)/ milestone 离散阶梯(CRAVE)/ AWBC pi0-AE 监督**,与真机画面逐帧同步。视频 `temp/3way_ep2047_sync.mp4`(2629f@30Hz≈88s),图55 为抽帧(frame 1500)。
+
+**实现**(`render_3way_ep2047.py`):三条 value 均为 ep2047 同一物理 episode 的 30Hz 序列——
+- **离散 CRAVE / AWBC-AE**:取自 `temp/_solve_ep2047_30hz.npz`(crave = V2.4 KMeans96+DP 离散阶梯;ae = advantage_q5 absolute_value 监督连续);
+- **TCC 连续**:从 `temp/_sim_ep2047.npz`(端到端 TCC 嵌入对 30 参考帧库的相似度场)重算 **细 bin DP(NB=201,λ=0.2)+ 子 bin 软期望(±8 bin,softmax 温度 0.03)+ 中值平滑**(= §4.6.2 图53 的 fold 凹口修复连续读出);
+- 渲染:PyAV 解码 ep2047 top_head 全 2629 帧,matplotlib 上画面 + 下三曲线(蓝阶梯/绿连续/红 AE)+ 三游标(方块/圆点/三角),30fps 编码。
+
+**图55(抽帧 frame 1500:TCC=0.42 / 离散=0.70 / AE=0.18)** 直观呈现三者差异:蓝(离散)粗台阶平台;绿(TCC)平滑爬升、逐帧有梯度、无崩塌;红(AE)剧烈抖动且此处下探到 0.18(监督 AE 半数帧倒退、欠读)。整段:离散最单调但稀疏、TCC 连续且稳(终值 0.90)、AE 密集但失真。
+
+![图55](../../../../visualization/cross_episode_recurrence_value/3way_ep2047_compare.png)
+
 ---
 
 ## 5. 基础设施与执行记录
@@ -1254,7 +1269,7 @@ ep7 过程(抓起→摊开→叠好)对照四 value:
 
 ## 附录 A — 工件清单
 
-**图像**(图1-54):`docs/visualization/cross_episode_recurrence_value/`(40+ 张,命名规范 `<阶段>_<数据集>_<内容>`)。
+**图像**(图1-55):`docs/visualization/cross_episode_recurrence_value/`(40+ 张,命名规范 `<阶段>_<数据集>_<内容>`)。
 
 **示例视频(入 git)**:`docs/visualization/cross_episode_recurrence_value/milestone_ep_s800_660_final_v4gated_sync.mp4`(终版配方 + 门控,held-out ep660,~2MB,图33 为抽帧)。
 
@@ -1273,6 +1288,8 @@ ep7 过程(抓起→摊开→叠好)对照四 value:
 | `milestone_ep_s800_660_final_n500k96m20_sync.mp4` | 终版规模配方(未门控) | 图32 为抽帧 |
 | `milestone_ep_smooth800_{660,193,724,169}_v4gated_sync.mp4` | 终版 + 置信门控;后三条 = 随机泛化测试 | 图33/34 为抽帧 |
 | `milestone_ep_s800_660_v5_calibrated_sync.mp4` | V2 校准标签版(P_k 非均匀阶梯 + 循环灰显 + V1/V2 对照) | 图37 为抽帧 |
+| `3way_ep2047_sync.mp4` | ep2047 三方 value 同步(TCC连续/milestone离散/AWBC-AE × 画面) | 图55 为抽帧 |
+| `generalize_sync_{xvla,visbase,coffee}.mp4` | 跨数据集 离散+连续 叠加同步(§4.6.3) | — |
 | `tcc_align_kai0_87_97.mp4` | TCC v3 两 episode 对齐演示(实时对齐帧 + 路径图 raw/TCC 对照) | 图39 为抽帧 |
 | `f2_rollout_value_sync.mp4` | F2 真机 rollout × V2.1 退步回落同步(事件时刻红色警示) | 图44 为抽帧 |
 
