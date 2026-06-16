@@ -34,6 +34,21 @@
 | 8 | **value 读出** | 连续性 Viterbi DP | λ=8,硬边界 V[首帧]=0,末帧奖 bin20,中值 W9 | 别名消歧+空桌平滑+退步,全局单调连续 |
 | 9 | 退步(rollout) | DP 连续性双向自然实现;含失败/重试数据时 value 可升可降 | (demo 域 GT 单调,退步段≡0) | 多轮/失败 rollout 的退步信号 |
 
+### 2.1 连续读出(标准:`smooth_monotone`)
+
+DP 出的是**离散阶梯**(NB=21 bins)。**标准做法 = 在阶梯上叠一层移动平均连续化**(`build_ds_A_from_mv.py::smooth_monotone`,`dagger_all_mvA` 的连续 `absolute_value` 即由此产):
+
+```python
+def smooth_monotone(v, w):           # 边缘填充移动平均 + re-clip[0,1]
+    h = w // 2; vp = concat([full(h, v[0]), v, full(h, v[-1])])
+    return clip(convolve(vp, ones(w)/w, "valid")[:len(v)], 0, 1)
+```
+
+- **窗 `w` 随帧率缩放**:`w = round(41 × fps/30)` → **30fps 用 41**(~1.4s),3Hz 用 ~4(等价时间)。通常先 upsample 到 30fps 再 smooth(w=41)。
+- **双重作用,非仅美观**:① 去硬台阶感、阶梯平台→连续 ramp;② **让 50 帧 advantage 不退化**——原始阶梯 58.6% 的 50 帧差恰为 0,discretize 没法分位匹配(`build_ds_A_from_mv.py:31`)。所以**AWBC 打标必须用连续读出**。
+- **保结构 + 保退步**:平滑只圆滑角,不抹掉真退步(value 仍可降);**与"全局单调抹退步"不同**(后者错删 neg,见 §4.4.19 / 斜坡实验)。
+- **统一**:所有可视化/打标脚本均用此连续读出(`smooth_monotone(w∝fps)`),不直接画硬阶梯。τ-vs-GT 等指标在连续读出上报。
+
 ---
 
 ## 3. 四场景效果验证(全绿)

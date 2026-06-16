@@ -14,6 +14,7 @@ import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 from pathlib import Path
 from scipy.stats import pearsonr, kendalltau
+from crave_readout import smooth_monotone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hdf5_v24_eval import build_model, loadep
 
@@ -38,6 +39,7 @@ aa, rr, st, n = loadep(FC, TEST); v3, lab, marg = value(aa, rr, st, ret_lab=True
 NF = len(pd.read_parquet(BASE / "data" / f"chunk-{TEST//csB:03d}" / f"episode_{TEST:06d}.parquet", columns=["frame_index"]))
 crave = np.repeat(v3, 10)[:NF]
 if len(crave) < NF: crave = np.concatenate([crave, np.full(NF - len(crave), crave[-1])])
+crave = smooth_monotone(crave, fps=30.0)  # 连续读出(标准 smooth_monotone)
 
 dQ = pd.read_parquet(Q5 / "data" / f"chunk-{TEST//csQ:03d}" / f"episode_{TEST:06d}.parquet")
 ae = dQ["absolute_value"].to_numpy().astype(float)

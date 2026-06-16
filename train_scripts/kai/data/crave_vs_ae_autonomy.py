@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from sklearn.cluster import KMeans
 from scipy.stats import pearsonr, kendalltau
+from crave_readout import smooth_monotone
 
 _sh = os.path.join(os.path.dirname(matplotlib.__file__), "mpl-data/fonts/ttf/SimHei.ttf")
 if os.path.exists(_sh): fm.fontManager.addfont(_sh)
@@ -140,6 +141,7 @@ ae = np.load(AE_NPY).astype(float)
 NF = len(ae)
 crave = np.repeat(v3, 10)[:NF]
 if len(crave) < NF: crave = np.concatenate([crave, np.full(NF - len(crave), crave[-1])])
+crave = smooth_monotone(crave, fps=30.0)  # 连续读出(标准 smooth_monotone)
 
 
 def adv(v, w=W):

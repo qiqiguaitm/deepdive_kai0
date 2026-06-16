@@ -136,6 +136,7 @@ aa, rr, st, n = loadep(EP); v3 = value(aa, rr, st)
 NF = len(pd.read_parquet(DS / "data" / f"chunk-{EP//csDS:03d}" / f"episode_{EP:06d}.parquet", columns=["frame_index"]))
 crave = np.repeat(v3, 10)[:NF]
 if len(crave) < NF: crave = np.concatenate([crave, np.full(NF - len(crave), crave[-1])])
+crave = smooth_monotone(crave, fps=30.0)  # 连续读出(标准 smooth_monotone)
 
 # ---- AE value on same ep808 ----
 dAW = pd.read_parquet(AWBC / "data" / f"chunk-{EP//csAW:03d}" / f"episode_{EP:06d}.parquet")
@@ -161,6 +162,7 @@ def norm01(z):
 
 # metrics
 from scipy.stats import pearsonr, kendalltau
+from crave_readout import smooth_monotone
 r_shape = pearsonr(crave, ae)[0]; tau_shape = kendalltau(crave, ae)[0]
 print(f"corr(CRAVE,AE)={r_shape:.3f} tau={tau_shape:.3f}", flush=True)
 print(f"CRAVE: 0→{crave[-1]:.2f} max{crave.max():.2f} 单调{np.mean(np.diff(crave)>=-1e-6):.0%} neg-adv{np.mean(crave_adv<0):.0%}", flush=True)

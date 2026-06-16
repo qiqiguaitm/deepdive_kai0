@@ -8,6 +8,7 @@ render 从单 mp4 按 episode 帧区间解码。
 """
 import argparse, glob, json, os
 from pathlib import Path
+from crave_readout import smooth_monotone
 import numpy as np, cv2, matplotlib, pandas as pd
 matplotlib.use("Agg")
 import matplotlib.font_manager as fm
@@ -37,6 +38,7 @@ def render_video(mp4, f0, t0, fps, e, v_s, lab_s, marg_s, Pord, stride, lang, ou
     NF = len(frames)
     V = np.repeat(v_s, stride)[:NF]
     if len(V) < NF: V = np.concatenate([V, np.full(NF - len(V), V[-1])])
+    V = smooth_monotone(V, fps=fps)  # 连续读出
     lab30 = np.repeat(lab_s, stride)[:NF]; marg30 = np.repeat(marg_s, stride)[:NF]
     if len(lab30) < NF: lab30 = np.concatenate([lab30, np.full(NF - len(lab30), lab30[-1])])
     if len(marg30) < NF: marg30 = np.concatenate([marg30, np.full(NF - len(marg30), marg30[-1])])
