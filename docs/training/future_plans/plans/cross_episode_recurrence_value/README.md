@@ -20,6 +20,7 @@
 | [cross_episode_recurrence_value_GENERALIZATION.md](cross_episode_recurrence_value_GENERALIZATION.md) | **跨数据集泛化实证**:XVLA soft_fold(新本体)corr 0.956/100%≥0.7;真实 ALOHA coffee(新任务)corr 0.988/单调100%。配方逐字不改。 |
 | [cross_episode_recurrence_value_plan.md](cross_episode_recurrence_value_plan.md) | **完整探索记录**:迭代 + 图 1-55 + 文献调研 + 所有否决死路的诊断过程;§4.6 = **段间连续化(TCC+DP 连续 value)**子线。 |
 | [awbc_milestone_value_AB_plan.md](awbc_milestone_value_AB_plan.md) | **下游落地 A/B 对照 plan**:A=V2.4 直接当 value 源 / B=蒸馏训 AE,对照已跑的 C=pi0-AE。 |
+| [value_advantage_methods_comparison.md](value_advantage_methods_comparison.md) | **方法论证对比**:kai0-AE(监督进度差)vs π*0.6-RECAP(RL 分布式回报优势)vs CRAVE(零训练离散),含逐维表 + 分场景结论 + 文献定位。 |
 
 ## 两条 value 形态
 - **离散 CRAVE V2.4**(主交付,METHOD 文档):milestone 阶梯,零训练,跨数据集强泛化。
