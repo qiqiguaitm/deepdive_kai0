@@ -2092,6 +2092,37 @@ _CONFIGS = [
         inline_eval_every=4,
     ),
 
+    # AWBC milestone-value A臂 · 三档 (pos/normal/neg) — CRAVE 天然形态. 论据: 二值对 CRAVE 坏
+    # (38.8% advantage 恰为 0, 无法 quantile-match 25% neg); 三档 = neg5.1%/normal48.9%/pos46.1%,
+    # 对齐 CRAVE 的 exact-zero=normal 结构. 数据集 dagger_all_mvA_3lvl 由 dagger_all_mvA 非破坏性派生
+    # (task_index 重写为 ti3=where(adv<-0.02,0(neg), where(adv>0.02,2(pos),1(normal)))). 其余逐字段同 mv_A.
+    TrainConfig(
+        name="pi05_awbc_mv_A_3lvl",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/dagger_all_mvA_3lvl",
+            default_prompt=None,
+            base_config=DataConfig(prompt_from_task=True),
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS/tim/workspace/deepdive_kai0/kai0/checkpoints/task_a_new_smooth_800_step49999/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6,
+        ),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=16,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
+
     # AWBC ablation (awbc_implementation_plan.md §当前执行计划 / smooth800-only): 控制变量 = 去掉 dagger,
     # 只用 smooth800 的 advantage-labeled 帧 (806 ep, 22%neg/78%pos)。测 demo-only 数据的 advantage 信号
     # (η²≈3% 天花板) 是否足以让 AWBC 学到东西 —— 直接对照 pi05_flatten_fold_awbc (smooth800+全dagger).

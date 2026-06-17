@@ -91,18 +91,23 @@ def staircase_and_ramp(aa, rr, st):
     cost[NB - 1] -= 2; path = np.zeros(nq, int); path[-1] = cost.argmin()
     for j in range(nq - 2, -1, -1): path[j] = bp[j + 1, path[j + 1]]
     stair = med(bins[path], 9)
-    # ramp: 当前 milestone = 最近 Pord<=stair; 下一个 = 之后那个; 用相对置信插值
-    ramp = np.zeros(nq)
+    # 段内斜坡: 当前 milestone k 来自 DP 阶梯(可回退→保留退步); intra = 到下一个 anchor 的相对置信
+    raw = np.zeros(nq)
     for t in range(nq):
         k = int(np.searchsorted(Pord, stair[t] + 1e-6) - 1); k = max(0, min(k, M - 1)); kn = min(k + 1, M - 1)
         dc = d[t, k]; dn = d[t, kn]; frac = dc / (dc + dn + 1e-9)   # 0=在cur, 1=在next
-        ramp[t] = Pord[k] + (Pord[kn] - Pord[k]) * np.clip(frac, 0, 1)
-    ramp = np.maximum.accumulate(ramp)            # 单调: 斜上后变平
-    ramp = med(ramp, 9)
-    return stair, ramp
+        raw[t] = Pord[k] + (Pord[kn] - Pord[k]) * np.clip(frac, 0, 1)
+    # §2.2 正解: 段内单调(每个 stage 段内 cummax 去噪), 段间(staircase 变化处)重置 → 保留退步
+    seg = np.cumsum(np.abs(np.diff(stair, prepend=stair[0])) > 1e-6)
+    raw_seg = raw.copy()
+    for s in np.unique(seg):
+        m = seg == s; raw_seg[m] = np.maximum.accumulate(raw[m])
+    ramp_within = med(raw_seg, 9)                    # 段内单调斜坡(去噪 + 保退步)
+    ramp_mono = med(np.maximum.accumulate(raw), 9)   # 全局单调(抹掉退步, 我上一版)
+    return stair, ramp_within, ramp_mono
 
 
-aa, rr, st, n = loadnpz(EP); stair, ramp = staircase_and_ramp(aa, rr, st)
+aa, rr, st, n = loadnpz(EP); stair, ramp, ramp_mono = staircase_and_ramp(aa, rr, st)
 gt = pd.read_parquet(Q5 / f"data/chunk-{EP//csQ:03d}/episode_{EP:06d}.parquet")["stage_progress_gt"].to_numpy()
 tgt = np.arange(len(gt)) / 30.0
 
@@ -111,18 +116,21 @@ def score(v, fps):
     t = np.arange(len(v)) / fps; gi = np.interp(t, tgt, gt); return pearsonr(v, gi)[0], float(np.abs(v - gi).mean()), kendalltau(v, gi)[0]
 
 
-rs, ms, ts = score(stair, 3); rr_, mr, tr = score(ramp, 3)
+rs, ms, ts = score(stair, 3); rw, mw, tw = score(ramp, 3); rmo, mmo, tmo = score(ramp_mono, 3)
+nreg = lambda v: int((np.diff(v) < -1e-3).sum())   # 退步台阶数
 print(f"vs 真 stage_progress_gt:", flush=True)
-print(f"  硬阶梯 staircase: corr {rs:.3f} / MAE {ms:.3f} / τ {ts:.3f}", flush=True)
-print(f"  斜坡  ramped:    corr {rr_:.3f} / MAE {mr:.3f} / τ {tr:.3f}", flush=True)
-print(f"  → ramped {'更贴 GT(信息更丰富)✓' if rr_>rs and mr<ms else '未更优'}: Δcorr {rr_-rs:+.3f} ΔMAE {mr-ms:+.3f}", flush=True)
+print(f"  硬阶梯 staircase:     corr {rs:.3f} / MAE {ms:.3f} / τ {ts:.3f} / 退步{nreg(stair)}", flush=True)
+print(f"  段内斜坡 within(保退步): corr {rw:.3f} / MAE {mw:.3f} / τ {tw:.3f} / 退步{nreg(ramp)}", flush=True)
+print(f"  全局单调 mono(抹退步):  corr {rmo:.3f} / MAE {mmo:.3f} / τ {tmo:.3f} / 退步{nreg(ramp_mono)}", flush=True)
+print(f"  → 段内斜坡 τ涨{tw-ts:+.3f} 且保留退步({nreg(ramp)}); 全局单调 退步被抹({nreg(ramp_mono)})——这就是你看到台阶变少的原因", flush=True)
 
 x = np.arange(n) / 3.0; xg = tgt
-fig, ax = plt.subplots(figsize=(13, 4.6))
+fig, ax = plt.subplots(figsize=(13, 4.8))
 ax.plot(xg, gt, color="#999", lw=1.6, ls="--", label="真 stage_progress_gt(GT)")
-ax.plot(x, stair, color="#2ca02c", lw=2.2, drawstyle="steps-post", label=f"硬阶梯 (corr{rs:.2f}/MAE{ms:.2f})")
-ax.plot(x, ramp, color="#1f77ff", lw=1.8, label=f"斜坡 ramped (corr{rr_:.2f}/MAE{mr:.2f})")
-ax.set_title(f"ep{EP}: CRAVE 硬阶梯 vs 斜坡读出 vs 真 GT (斜坡=平台→随下一里程碑置信度斜升→变平)", fontsize=11)
+ax.plot(x, stair, color="#2ca02c", lw=2.2, drawstyle="steps-post", label=f"硬阶梯 (τ{ts:.2f}, 退步{nreg(stair)})")
+ax.plot(x, ramp, color="#1f77ff", lw=1.8, label=f"段内斜坡 within (τ{tw:.2f}, 保退步{nreg(ramp)})")
+ax.plot(x, ramp_mono, color="#ff7f0e", lw=1.3, ls=":", label=f"全局单调 mono (τ{tmo:.2f}, 退步{nreg(ramp_mono)}抹掉)")
+ax.set_title(f"ep{EP}: 硬阶梯 vs 段内斜坡(保退步) vs 全局单调(抹退步) vs GT —— 正解=段内斜坡(§2.2)", fontsize=11)
 ax.set_xlabel("秒"); ax.set_ylabel("value"); ax.set_ylim(-.05, 1.05); ax.grid(alpha=.25); ax.legend(fontsize=9, loc="lower right")
 fig.tight_layout(); out = REPO / "docs/visualization/cross_episode_recurrence_value/crave_ramped_vs_staircase_ep2047.png"
 fig.savefig(out, dpi=120); print("SAVED", out, flush=True); print("RAMPED_DONE", flush=True)

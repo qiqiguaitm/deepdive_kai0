@@ -59,8 +59,12 @@ class FeatureSpace:
 # ====================== ② 离散 CRAVE V2.4 ======================
 class DiscreteValue:
     """V2.4 离散 milestone 阶梯。与 hdf5_v24_eval.build_model 逐字一致(KMeans96+coverage修正+进度分桶+端点锚+Viterbi-DP)。"""
-    def __init__(self, fs: FeatureSpace, eps, k=96, log=print):
-        self.fs = fs
+    def __init__(self, fs: FeatureSpace, eps, k=96, log=print,
+                 select="fixed", nbins=10, topN=2, cap_pb=3, tau_q=0.5):
+        """select: 'fixed'=每进度bin取 top-N by coverage(默认, 数量≤nbins*topN, 与历史一致);
+                   'adaptive'=每bin取所有 cov≥τ 但封顶 cap_pb, τ=cov_n 的 tau_q 分位(数据驱动);
+                              某 bin 无过阈 cluster 时保底取 1 个防进度空隙 → 数量随"每档真复现态数"自适应。"""
+        self.fs = fs; self.select = select
         A, R, S, T, E, SP, EP = [], [], [], [], [], [], []
         for e in eps:
             a, r, s, n = loadep(fs.fc, e); g = fs.emb(a, r, s)
@@ -75,10 +79,18 @@ class DiscreteValue:
             m = np.where(E == e)[0][:3]; nn = np.linalg.norm(G[m][:, None] - allC[None], axis=2).argmin(1)
             Pstart[e] = float(np.median(tpos[nn]))
         cov_n = np.array([min(1, (len(set(E[lab == c].tolist())) + sum(1 for e in Pstart if Pstart[e] > tpos[c] + 0.1)) / N) for c in range(k)])
-        bk = np.linspace(0, 1, 11); sel = []
-        for b in range(10):
-            inb = [c for c in range(k) if bk[b] <= tpos[c] < bk[b + 1]]
-            if inb: sel += sorted(inb, key=lambda c: -cov_n[c])[:2]
+        bk = np.linspace(0, 1, nbins + 1); sel = []; self.tau = None
+        if select == "adaptive":
+            self.tau = float(np.quantile(cov_n, tau_q))   # 数据驱动阈值
+            for b in range(nbins):
+                inb = sorted([c for c in range(k) if bk[b] <= tpos[c] < bk[b + 1]], key=lambda c: -cov_n[c])
+                if not inb: continue
+                above = [c for c in inb if cov_n[c] >= self.tau][:cap_pb]
+                sel += above if above else inb[:1]        # 保底 1 个防空隙
+        else:                                              # fixed(默认, 与历史逐字一致)
+            for b in range(nbins):
+                inb = [c for c in range(k) if bk[b] <= tpos[c] < bk[b + 1]]
+                if inb: sel += sorted(inb, key=lambda c: -cov_n[c])[:topN]
         sel = sorted(set(sel), key=lambda c: tpos[c])
 
         def gr(idx):
@@ -100,7 +112,9 @@ class DiscreteValue:
             Pk[c] = float(np.median(fe)) if fe else float(tpos[c])
         self.order = sorted(sel, key=lambda c: Pk[c]); self.C = allC[self.order]
         self.Pord = np.array([Pk[c] for c in self.order]); self.Pk = Pk
-        log(f"[DiscreteValue] milestones: {len(self.order)}  前段(P<0.5): {sum(1 for c in self.order if Pk[c] < 0.5)}")
+        log(f"[DiscreteValue] select={select} milestones: {len(self.order)}"
+            + (f" (tau={self.tau:.2f})" if self.tau is not None else "")
+            + f"  前段(P<0.5): {sum(1 for c in self.order if Pk[c] < 0.5)}")
         self.startK = KMeans(8, n_init=2, random_state=0).fit(np.concatenate(SP)).cluster_centers_
         self.endK = KMeans(8, n_init=2, random_state=0).fit(np.concatenate(EP)).cluster_centers_
         self.NB = 21; self.bins = np.linspace(0, 1, self.NB)

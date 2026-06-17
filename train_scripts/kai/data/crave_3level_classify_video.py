@@ -1,4 +1,4 @@
-"""对齐视频: 相机 + CRAVE vs AWBC-AE 把数据分类为 pos/normal/neg 的能力对比。
+"""对齐视频: 相机 + CRAVE vs KAI0-AE 把数据分类为 pos/normal/neg 的能力对比。
 每条 value 下加一条"分类时间条"(绿=pos 灰=normal 红=neg), 直观看 CRAVE 干净结构化 vs AE 噪声散布。
 ep808(dagger, 末帧叠好=成功): AE 在成功 episode 上仍标 35% neg = 噪声。
 """
@@ -60,9 +60,9 @@ axcs = PFIG.add_subplot(gs[1]); axcs.imshow(cstrip, aspect="auto", extent=[0, n 
 axav = PFIG.add_subplot(gs[2]); axav.plot(x, ae_v, color="#333", lw=0.6, alpha=.35)
 for c in (-1, 0, 1): m = acls == c; axav.scatter(x[m], ae_v[m], s=4, c=[RGB[c]])
 axav.set_ylim(ae_v.min() - .05, ae_v.max() + .05); axav.set_xlim(0, n / 30); axav.set_ylabel("AE\nvalue", fontsize=8); axav.tick_params(labelsize=7)
-axav.set_title(f"AWBC-AE 三档分类: pos{fa[1]:.0%} / normal{fa[0]:.0%} / neg{fa[-1]:.0%}  (成功episode却{fa[-1]:.0%}红=噪声)", fontsize=10); axav.grid(alpha=.2)
+axav.set_title(f"KAI0-AE 三档分类: pos{fa[1]:.0%} / normal{fa[0]:.0%} / neg{fa[-1]:.0%}  (成功episode却{fa[-1]:.0%}红=噪声)", fontsize=10); axav.grid(alpha=.2)
 axas = PFIG.add_subplot(gs[3]); axas.imshow(astrip, aspect="auto", extent=[0, n / 30, 0, 1]); axas.set_yticks([]); axas.set_xlim(0, n / 30); axas.set_xlabel("秒", fontsize=8); axas.tick_params(labelsize=7); axas.set_ylabel("分类条", fontsize=7)
-PFIG.suptitle(f"ep{EP} — CRAVE vs AWBC-AE 数据分类能力 (pos/normal/neg) 对齐对比", fontsize=11)
+PFIG.suptitle(f"ep{EP} — CRAVE vs KAI0-AE 数据分类能力 (pos/normal/neg) 对齐对比", fontsize=11)
 PFIG.canvas.draw(); PANEL = np.asarray(PFIG.canvas.buffer_rgba())[..., :3].copy(); Hp, Wp = PANEL.shape[:2]
 
 
