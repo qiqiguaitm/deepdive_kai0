@@ -12,9 +12,9 @@
 | 范式 | 数据集 | 采集日期 | ep / 帧 | trim | prompt(规范化) | config | 状态 |
 |---|---|---|---|---|---|---|---|
 | **Vertical Fold v1**(竖向折)| `Task_AV1/base` | 06-11-v2 / 06-12-v2 | 取前 **200** / — | v2 raw | `... Vertical Fold v1.` | `pi05_task_av1_vfold_v1_200` | 📋 定稿待实施 |
-| **Horizontal Fold v1**(横向折)| `Task_AH1/base/v3` | 06-15-v3 | **200** / 277,153 | v3 前裁 | `... Horizontal Fold v1.` | `pi05_task_ah1_hfold_v1_200` | 📋 定稿待实施 |
+| **Horizontal Fold v1**(横向折)| `Task_AH1/base/v3` | 06-15-v3 | **200** / 272,086 | v3 前裁+尾裁 | `... Horizontal Fold v1.` | `pi05_task_ah1_hfold_v1_200` | 📋 定稿待实施 |
 
-> ⚠️ **跨范式对比的一处不一致**: AV1 是 **v2 raw**(未前裁),AH1 是 **v3 前裁**(前端投放已裁)。各自作为独立基线没问题;但若要**严格横向对比**"哪种折法更易学",trim 版本是个混杂变量 → 解读时注意,或后续对齐到同一 trim(见 §3 caveat)。
+> ⚠️ **跨范式对比的一处不一致**: AV1 是 **v2 raw**(未前裁),AH1 是 **v3 前裁+尾裁**(前端投放裁 + 尾部 tail-cap)。各自作为独立基线没问题;但若要**严格横向对比**"哪种折法更易学",trim 版本是个混杂变量 → 解读时注意,或后续对齐到同一 trim(见 §3 caveat)。
 > **共性**: 都是 vis 本体(Agilex 双臂 Piper),3 相机 `top_head/hand_left/hand_right`,14D 关节 state/action,30Hz,**action ≡ state**(含夹爪,见 §1)。
 
 ---
@@ -77,8 +77,8 @@
 |---|---|
 | 任务 prompt(数据原值)| `"Flatten and fold the cloth. Horizontally Fold v1."`(meta/tasks.jsonl)|
 | 数据集 / 路径 | `kai0/data/Task_AH1/base/v3/2026-06-15-v3/`(TOS `KAI0/Task_AH1`,**已排除 depth**,4.3G)|
-| 规模 | **200 ep / 277,153 帧**(单日 2026-06-15)|
-| trim | **v3 前裁**(前端投放已裁,与 AV1 的 v2 raw 不同)|
+| 规模 | **200 ep / 272,086 帧**(单日 2026-06-15;**尾裁后**,原前裁版 277,153,Step 3 tail-cap 删 5,067)|
+| trim | **v3 前裁+尾裁**(前端投放裁 + 尾部 tail-cap;与 AV1 的 v2 raw 不同)|
 | 相机 / 校验 | 3 路(无 depth),parquet 200 / 视频 600(=3×200)✅,info.json total_episodes=200 一致 |
 
 **待补充(请用户填写 — SOP 记录核心)**:
@@ -104,7 +104,7 @@
 - **Tier 1 offline**(每范式):自家 held-out val 逐 ckpt **val MAE**(整体 + 夹爪维单列)+ loss → 收敛 + 选 best ckpt。
 - **Tier 3 真机**(每范式,决定性):部署 best ckpt 跑**该折法**,看成功率 / 完成率 / 各 sub-phase 通过率 + 夹持稳定(松手/脱落)。
 - **跨范式对比**:Vertical Fold v1 vs Horizontal Fold v1 真机表现 → 判**哪种 SOP 更易学/更稳**,反哺采集策略选型。
-  - ⚠️ **caveat**:AV1=v2 raw、AH1=v3 前裁,trim 不同是混杂变量;严格对比需对齐 trim(或都各自报告,差异归因时注明)。另两者 ep 时长分布、采集量也不同。
+  - ⚠️ **caveat**:AV1=v2 raw、AH1=v3 前裁+尾裁,trim 不同是混杂变量;严格对比需对齐 trim(或都各自报告,差异归因时注明)。另两者 ep 时长分布、采集量也不同。
 - **可选**:与旧 SOP(Task_A horizontal smooth800)基线对照。
 
 ---

@@ -4,7 +4,8 @@
 > 1. **在线前端裁剪 (front-trim)**: 录制落盘时自动裁掉每条 episode 开头的"投放等待"静止段 (14D state 长时间不变)，保留 onset 前 `MARGIN=15` 帧 lead-in，**不全删**。语义与 `build_no_release.motion_onset` 完全一致。
 > 2. **夹爪 action 取主臂 (gripper-from-master)**: 新 `action==state` 约定 = 12 个手臂关节 action = 从臂 state (不变)；2 个夹爪维 (dim6/dim13) 的 action = **主臂(摇操臂)** 夹爪指令。state 仍全是从臂。
 >
-> 关联: [`docs/training/future_plans/plans/idle_data_trimming_experiments.md`](../../training/future_plans/plans/idle_data_trimming_experiments.md) §3.6 已结论 **front-trim 有效、middle-trim(v3.2) 退化**——本改造只做 front-trim。
+> 关联: [`docs/training/future_plans/plans/idle_data_trimming_experiments.md`](../../training/future_plans/plans/idle_data_trimming_experiments.md) §3.6 已结论 **front-trim 有效、middle-trim(v3.2) 退化**——本采集改造只做 front-trim。
+> ⚠️ **2026-06-16 补充**: 离线另有 **Step 3 尾部裁剪 (tail-cap)** —— 把 episode 末端"完成后静止尾巴"截断到 15 帧,已就地并入存量 v3(`build_no_release.py --per-date-tailcap`)。即**完整 v3 = 前端裁(本采集管线)+ 尾部裁(离线 Step 3)**。本采集管线是否要把 tail-cap 也做成在线(录制时同时裁首尾)待定 —— 当前尾裁走离线后处理。
 
 ---
 

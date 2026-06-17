@@ -25,6 +25,8 @@
 | [frequency_window_params.md](frequency_window_params.md) | **频率相关参数**:不同图像频率需不同窗(lam ∝ fps、时间窗按秒);3Hz/30Hz 落表 + 标定规则 + 离线/在线读出 + 实测(窗标定让抖动降 8×)。 |
 | [CRAVE_frontier_positioning_and_scenarios.md](CRAVE_frontier_positioning_and_scenarios.md) | **前沿定位与场景分析**:调研 VLA/世界模型/价值学习前沿(GVL/RECAP/VIP/世界模型/HIL-SERL);CRAVE vs GVL 互补;6 大场景 × SOTA × 优缺点 + 实施方案。 |
 | [CRAVE_doable_items_verification.md](CRAVE_doable_items_verification.md) | **可做项验证审查**:快速/零大GPU 项数据+文献核验(B1 milestone=动作技能相位✅; B2 弱失败信号❌否决; A2 keyframe✅); 逐项怎么对比/实现/处理。 |
+| [../../../../visualization/cross_episode_recurrence_value/crave_interpretability.md](../../../../visualization/cross_episode_recurrence_value/crave_interpretability.md) | **关键上升/下降点严格可解释分析**:每个 milestone 跨越的相机帧 + **可分离三路归因**(raw/arm/pro 各驱动百分之几)+ grounded 判据(真转移 vs DP瞬变)。总体(150ep/1467转移):上升 89% grounded·pro 主导 85%;下降 64% grounded·raw 主导升到 32%(回撤更靠场景视觉)。脚本 `crave_interpretability.py`。 |
+| [../../../../visualization/cross_episode_recurrence_value/crave_grounded_advantage.md](../../../../visualization/cross_episode_recurrence_value/crave_grounded_advantage.md) | **可解释分析 II**:① autonomy 真机两次退步归因(round1『布料被拿走』=OOD高残差 / round2『被弄乱』=in-dist grounded✓);② **grounded 过滤接进 AWBC advantage**:neg 假标 5.2%→3.9%(三档)、单调 97.8%→98.4%,被去 neg 66% 落在 ungrounded 瞬变区;**grounded+残差并用**保住真退步只摘 DP 噪声。脚本 `crave_grounded_advantage.py`。 |
 
 ## 两条 value 形态
 - **离散 CRAVE V2.4**(主交付,METHOD 文档):milestone 阶梯,零训练,跨数据集强泛化。
