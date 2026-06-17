@@ -216,7 +216,8 @@
 ## 8. ⭐ Exp-C (新, 2026-06-12) — v3 早期干净 base + dagger v3 全量混合重训
 
 > **一句话**: 把 **vis_base/v3 早期段(< 2026-05-18,front-trim 已裁)** 与 **vis_dagger/v3 全量** 混成单一数据集、**一起算一个 norm**、从 `mixed_1_clean` init 重训 pi05,验证"早期干净 base + 全量 dagger 纠错"是否比 smooth800 锚 / 纯 base 真机更好。
-> **状态**: 📝 **规划草稿**,待确认决策(§8.6)。**仅 plan,不实施**。
+> **状态**: ✅ **已实施完成**(2026-06-14 提交 → 06-16 跑完 50k,cnsh robot-task 8 A100)。结果见 **§8.8**。
+> ⚠️ **ckpt 已误删不可恢复**(2026-06-17 清理时一条换行折断的 `rm -rf {brace}` 误删整个 `v3early_dagger_cnsh/` 含 best 49999;vePFS `.snapshots` 为空无快照)→ **Tier-3 真机需重训**(data `A_v3early_dagger` + config 均在,重跑即可复现)。MAE 历史已从训练日志留存(§8.8)。
 > **为什么这么配**(综合两文档最佳结论):
 > - idle 系列 → ① **v3 前端裁有效**(Step 1 ✅);② **5-18~5-27 是真机嫌疑/fail 窗**(Exp-D 假说)→ 取 **≤5-10 早期 work 段**(排嫌疑窗)。见 [`idle_data_trimming_experiments.md`](idle_data_trimming_experiments.md) §2/§3.6/§5.5。
 > - 本文档 → **dagger 是有效纠错数据**(Q1)。这次用 **v3 前裁版 dagger 全量**(8 日期 513ep,比 v2 的 227ep 更多)。
@@ -281,6 +282,31 @@
 4. 提交训练(cnbj/cnsh,50k,inline-eval)。
 5. offline 选 ckpt → **真机对比**(vs smooth800 锚 / Exp-A / 纯 base)。
 6. 回填结论 + results.md + master history。
+
+### 8.8 ⭐ 实施结果(2026-06-16 跑完 50k)
+
+**实测配置**(均已核对):
+- 数据 `A_v3early_dagger`:**1498 ep / 1,964,972 帧**(base 985ep/1,194,427f + dagger 513ep/770,545f)。
+- **采样比 = 帧比 base:dagger = 1.55:1**(单一合并数据集、均匀采样、单 norm,**无加权 sampler**;按 ep 是 1.92:1 但训练按帧采)。
+- config `pi05_flatten_fold_v3early_dagger`,`default_prompt="Flatten and fold the cloth."`,init `mixed_1_clean`,50k / bs128 / fsdp8。
+- job `t-20260615074032-qg8m8`(cnsh robot-task),inline-eval on `vis_v2_merged_val`。
+
+**inline-eval MAE 历史**(val = `vis_v2_merged_val`,单调收敛、无过拟合回升):
+
+| step | MAE@1 | MAE@10 | MAE@25 | MAE@50 |
+|---|---|---|---|---|
+| 8000 | 0.0110 | 0.0271 | 0.0504 | 0.0815 |
+| 16000 | 0.0095 | 0.0230 | 0.0398 | 0.0586 |
+| 24000 | 0.0090 | 0.0211 | 0.0348 | 0.0490 |
+| 32000 | 0.0086 | 0.0197 | 0.0316 | 0.0439 |
+| 40000 | 0.0084 | 0.0187 | 0.0296 | 0.0408 |
+| 48000 | 0.0083 | 0.0181 | 0.0284 | 0.0391 |
+| **49999 (best)** | **0.0083** | **0.0180** | **0.0281** | **0.0388** |
+
+> 对照 smooth800 锚 MAE@1=0.0089(§8.5)→ Exp-C 49999 @1=0.0083 略优;长 horizon @50=0.0388 收敛干净。**但 offline MAE 非终判**(idle/慢轨迹反指,§铁律)→ **dagger 价值仍须真机对比**(走停/松手/完成),而真机所需 best ckpt 已误删 → **需重训后才能 Tier-3**。
+
+- best ckpt 原路径(**已删除**):`kai0/checkpoints/pi05_flatten_fold_v3early_dagger/v3early_dagger_cnsh/49999/params`
+- 重训命令:`source ~/.volc_creds && kai0/.venv/bin/python train_scripts/kai/volc/submit_yaml.py train_scripts/kai/volc/v3early_dagger_cnsh_8gpu.yaml`
 
 ---
 
