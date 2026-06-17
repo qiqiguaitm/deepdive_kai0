@@ -2,7 +2,7 @@
 
 > **核心目的(本系列的真正主线,之前文档未点明)**: 验证**裁掉 episode 里的 idle(静止)帧能否让模型真机表现更好**。idle 帧分两类:① **前端**"投放等待"长静止段(机械臂不动、操作员往台上放衣服);② **中段**操作里的停顿/犹豫/反复。假设:idle 帧被 BC 忠实模仿 → 真机走停 / 犹豫 / cloth loop / 拉取松手。
 > **分步走**: **Step 1 前端投放裁剪**(= 之前的 v2→v3 / no_release,已做)→ **Step 2 中段 idle 裁剪**(未来)→ Step 3 节奏归一(可选)。
-> **状态**: Step 1 ✅ 真机成立(前端投放裁有效);**Step 2 ❌ 结案(2026-06-09)** —— v3.2 中段选择性下采样**真机退化**(抓取欠到位/抓不到衣角),三方收敛(文献+量化+真机)→ **回退 v3(front-trim-only)为默认,不重建 v3.2**,见 §3.6。
+> **状态**: Step 1 ✅ 真机成立(前端投放裁有效);**Step 2 ❌ 结案(2026-06-09)** —— v3.2 中段选择性下采样**真机退化**(抓取欠到位/抓不到衣角),三方收敛(文献+量化+真机)→ **回退 v3(front-trim-only)为默认,不重建 v3.2**,见 §3.6。**Step 3 🟡 尾部裁剪(2026-06-16)** —— 完成后静止尾巴 **CAP 截断到 15 帧**(调研支持 + 机制上比中段安全),输出 `v3t/`(不覆盖 v3),见 **Step 3 节**。
 > **建立**: 2026-06-07(**完整合并自** `v2v3_data_window_scaling_experiments.md`(2026-06-08 该文件已删,明细见 §5)+ [`data_root_cause_probe_experiments.md`](data_root_cause_probe_experiments.md) H1,围绕 idle 主题重组)。
 > ⚠️ **方法学铁律**: **真机为终判,offline MAE 系统性反指** —— idle 多的慢/停顿轨迹逐帧 teacher-forcing MAE 反而低,真机却灾难。MAE 仅用于确认训练健康 + 选 ckpt。
 
@@ -154,6 +154,70 @@
 2. **为什么 front-trim 对、middle-trim 错**(文献给的分界):**前端 idle = 操作员投放/setup 等待、超 chunk 长度、任务无关 → 裁了帮忙**(DROID 同);**中段 idle = 任务内、含功能性 settle/grasp-dwell → 删了伤**。我们 front-trim 有效、middle-trim 退化正踩这条线。
 3. ⚠️ **front-trim 不是"全删前端",而是保留 `margin=15` 帧 lead-in**(`cut = onset − margin`,§1),正好对齐文献"keep short settle ≤15 frames"——这也是它 work 的原因之一。
 4. **想要更快 → 推理期做**(SAIL 式接触感知变速:转移段快、抓取段慢),不靠训练数据过滤。
+
+---
+
+## Step 3 — 尾部裁剪(tail-cap):完成后静止尾巴(2026-06-16)
+
+> **第三类 idle**:episode 末端"任务已完成后"的纯静止 hold 段(机械臂叠完衣保持不动、操作员还没停录)。区别于前段(投放等待)与中段(任务内停顿)。
+> **决策(✅ 2026-06-16)**:**CAP 截断 = 保留末端 15 帧收尾,裁掉更长的尾巴**;不全删、不保留满尾。输出并列 `v3t/` root,**v3 不覆盖**。
+
+### S3.1 三类 idle 对照(本系列最终认知)
+
+| | **前段** 投放等待 | **中段** 任务内停顿 | **后段** 完成后尾巴 |
+|---|---|---|---|
+| 性质 | 任务无关、操作员投放 | 任务内、含功能性 settle/grasp-dwell | 任务**已完成**、纯保持 |
+| 超 chunk(H=50)? | 是(长)→ chunking 盖不住 | 否(chunk 内吸收)| 部分超(dagger 尾可达 300 帧)|
+| **删了会速度膨胀?** | 不会 | **会**(删低速帧→定长 chunk 位移膨胀→抓取变粗)| **不会**(删末端零位移帧,不跨任务活跃段)|
+| 主流做法 | DROID 裁 setup | 不裁 | 训练管线裁(pi0-FAST/OpenVLA)|
+| **本系列决策** | ✅ **裁**(v3,MARGIN=15 lead-in)| ❌ **不裁**(v3.2 退化,§3.6)| 🟡 **CAP 截断**(v3t,TAIL_CAP=15)|
+
+### S3.2 深度调研结论(2026-06-16,100 agents / 18 源 / 25 claim 三票核验,14 confirmed)
+
+> **Bottom line**:**CAP/截断到一小段收尾(~10–20 帧),不 delete-all、不 keep-full**;tail-trim 机制上**比中段裁安全**(不触发速度膨胀)。
+
+1. **保留 idle 帧 → 真机"卡住/冻结"** 是反复记录的主失败模式。DP:"BC-RNN/IBC idle 不删→真机 get stuck";LSTM-GMM 真机 **8/20 卡住**。OpenVLA:"数据里机器人几乎不动的步→推理卡在这些步"。Policy-idling(`2508.15669`):idling = 策略自己出不来的"吸引盆"。[`2303.04137` · openvla · `2508.15669`]
+2. **机制 = copycat/因果混淆**:动作时序强相关 + 历史可恢复过去动作时触发——**纯 hold 尾巴正是相关性最大的极限**,直接喂"复制上一动作=继续保持"先验。[Fighting Copycat, NeurIPS2020]
+3. **chunking 只吸收到 horizon 为止**:超过 H=50 的尾巴必然产生整段全 hold 的 chunk → 漏 hold 先验。我们 dagger 尾巴可达 300 帧 ≫ 50。[DP]
+4. **主流 VLA 都删 idle 不靠长尾教停**:pi0-FAST 在 DROID 显式过滤 all-zero idle(后加 chunk-aware 版)。⚠️ **但其 all-zero 检测是给 delta/velocity 用的,对我们 absolute joint 不成立** → 必须按**低关节位移 + 静止夹爪**判尾。[`2501.09747`]
+5. **教"停下"的正解是显式终止信号**(RT-1 terminate token / done 维),不是长 hold 尾;DROID `is_terminal` 对所有 demo=True 无区分力。[RT-1 · DROID]
+6. ⚠️ **caveat**:无论文直接研究"连续 chunked absolute-action 的尾部 idle";证据多在非 chunked 策略,迁到 pi05 是**合理机制外推非实测**。"全删致完成后抽搐"是 prudent hypothesis(非 cited)→ 这正是**选 CAP 而非全删**的主因。被 refute 掉 11 条(如"删 idle 是 BC 默认""OpenVLA 显式过滤 Bridge 全零")已剔除。
+
+### S3.3 裁剪标准(✅ 三段统一,2026-06-16 用户定档)
+
+| 段 | 判别 | 裁法 | 关键参数 |
+|---|---|---|---|
+| 前段 | 12 臂维 \|Δa\| 均值持续 **>3e-3** 达 WIN=10 帧 = onset | `cut=max(0,onset−15)` | THR=3e-3 / MARGIN=15 |
+| 中段 | — | **完全不裁** | — |
+| **后段** | 末端连续"非活跃"帧:臂 \|Δa\|≤**3e-3**(对齐前段)**AND** 夹爪 \|Δ\|≤**0.02** | 保留末端 **15 帧**,删更早尾巴 | TAIL_CAP=15 / idle_thr=3e-3 / grip_thr=0.02 |
+
+- ✅ **TAIL_CAP=15 帧(0.5s)**:与前段 MARGIN=15 对称;< action_horizon=50;够教终止、不留长 hold 先验。
+- ✅ **idle_thr=3e-3**:对齐前段 THR(用户定)。
+- ✅ **grip_thr=0.02 夹爪保护**(关键安全阀):末端夹爪一动(松手/放下)即停止裁剪,绝不切真实终止动作。实测 AH1 尾段夹爪 0/60 在动 = 纯 hold,安全。
+- ✅ **中段维持完全不裁**(用户定;沿用 §3.6 结论)。
+
+### S3.4 实测(dry-run,idle_thr=3e-3 / tail_cap=15)
+
+| 源 | trimmed ep | tail-drop 中位 | max | 删帧% |
+|---|---|---|---|---|
+| Task_AH1(横向折,200ep)| 195/200 | 21 帧 | 120(4s)| 1.83% |
+| vis_base/v3 5-10(95ep)| 48/95 | 1 | 65 | 0.26% |
+| vis_dagger/v3 5-29(64ep)| 64/64 | **40** | **321(10.7s)** | 2.02% |
+
+→ **dagger 尾巴最长**(纠错轨迹常以长 hold 收尾),收益最大;base 早期段尾巴短。
+
+### S3.5 实现(`build_no_release.py --tail-cap`)
+
+- 函数 `tail_cap_keep_indices(action, tail_cap=15, idle_thr=3e-3, grip_thr=0.02)`:从末尾数连续"非活跃"帧(臂静 AND 爪静),返回 `arange(0, T−(tail−tail_cap))` 的连续前缀。只动尾、不动中段。
+- builder `build_per_date_tailcap(date_v3, src_root, dst_root, ...)`:读 `<root>/v3/<date>-v3` → 写 `<root>/v3t/<date>-v3`;复用 `select_video_pyav` 重编码(assert 帧数==);**自动探测源视频目录命名**(feature-key vs 裸名)、**统一输出 feature-key 目录**(顺带修正 AH1 的目录/模板不一致);兼容 episodes.jsonl 的 `tasks` 与 AH1 的 `prompt`/`episode_id`;裁 frame 后重排 frame_index/index/timestamp;尾部保前缀→PTS 从 0 起,无 v3-PTS-bug。
+- CLI:`--per-date-tailcap <dates|all> --tailcap-src {base,dagger,ah1} --tail-cap 15 --tail-idle-thr 3e-3 --grip-thr 0.02`(`--dry-run` 只算不写)。
+- 输出落点(并列,**v3 不覆盖**):`vis_base/v3t/` · `vis_dagger/v3t/` · `Task_AH1/base/v3t/`。
+
+### S3.6 批量重处理(当前所有 v3 → v3t)
+
+- 范围:vis_base/v3(19 日期)+ vis_dagger/v3(8 日期)+ Task_AH1/base/v3(1 日期)。
+- gf0 低内存 → `BUILD_WORKERS=3` 后台跑(视频重编码 ~6000+,防 OOM);per-date 中间集**不算 norm**(merge/最终 build 时再重算)。
+- 执行记录见本节回填(下方)。
 
 ---
 
