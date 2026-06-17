@@ -86,11 +86,13 @@ def main():
                        OUT / "data" / f"chunk-{CHUNK:03d}" / f"episode_{new_ep:06d}.parquet")
         for cam in CAMERAS:
             sv = sd / "videos" / f"chunk-{CHUNK:03d}" / cam / f"episode_{src_ep:06d}.mp4"
-            if not (sv.exists() or sv.is_symlink()):
+            if not sv.exists():
                 raise FileNotFoundError(f"missing video {sv}")
             dv = OUT / "videos" / f"chunk-{CHUNK:03d}" / cam / f"episode_{new_ep:06d}.mp4"
             dv.parent.mkdir(parents=True, exist_ok=True)
-            os.symlink(str(sv.resolve()), dv)
+            # COPY (not symlink): v3 源在 TOS 重构/裁尾中被原地重处理 → 旧 symlink 视频与 parquet 错位
+            # (实测 4/6 ep mismatch). copy 让数据集自包含, 与 build_task_ah1_split 同教训.
+            shutil.copy2(sv.resolve(), dv)
         eps_meta.append({"episode_index": new_ep, "tasks": [PROMPT], "length": n,
                          "src": sd.name, "src_ep": src_ep, "group": grp})
         stats_out.append({"episode_index": new_ep, "stats": per_episode_stats(df)})
