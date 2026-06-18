@@ -1625,6 +1625,37 @@ _CONFIGS = [
         inline_eval_every=4,
     ),
 
+    # ===== LeWM 视觉前端变体 — SMOKE (pi05_from_paligemma_base_training_plan.md §9) =====
+    # 验证接线 (DINOv3-L/16 frozen + LeWM OctCompactor → 15 token → LLM → expert → flow loss →
+    # backward → loss↓). 30 步 / 小 batch, pi05_base init (验 WIRING; 正式 run 用 from-PaliGemma).
+    # vision_encoder="lewm" 触发旁路; 默认 siglip 的现有 config 全不受影响。cnbj North-E 路径。
+    TrainConfig(
+        name="pi05_lewm_smoke",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            vision_encoder="lewm",
+            lewm_ckpt_path="/vePFS-North-E/shared_data/shock/distill-wm/data/exps/lewm-kai0-3view-V1-aa27438-TS0617.0224/lewm-kai0-3view_epoch_10.pt",
+            lewm_dinov3_dir="/vePFS-North-E/shared_data/shock/.CACHE/hf_cache/hub/dinov3-vitl16-pretrain-lvd1689m",
+            lewm_freeze_compactor=False,
+        ),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_v2_full",
+            default_prompt="Flatten and fold the cloth.",
+            use_delta_joint_actions=False,
+        ),
+        pytorch_weight_path="/vePFS-North-E/vis_robot/openpi_cache/modelscope_cache/lerobot/pi05_base",
+        pytorch_training_precision="bfloat16",
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=5, peak_lr=1.5e-5, decay_steps=100, decay_lr=1.5e-6,
+        ),
+        ema_decay=0.9999,
+        num_train_steps=30,
+        save_interval=1000,   # >steps → 不存盘 (纯 smoke)
+        num_workers=4,
+        batch_size=16,
+        fsdp_devices=8,
+    ),
+
     # R2: PyTorch + delta action — cnsh paths (robot-task 16 A100, in parallel with R1).
     TrainConfig(
         name="pi05_pytorch_vis_v2_full_delta",

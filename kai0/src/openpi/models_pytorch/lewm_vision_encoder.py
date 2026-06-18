@@ -148,11 +148,28 @@ class LeWMVisionEncoder(nn.Module):
         missing, unexpected = self.compactor.load_state_dict(sub, strict=True)
         return missing, unexpected
 
+    def _prep(self, img: torch.Tensor, v: str) -> torch.Tensor:
+        """Any-layout/any-range image → (B,3,Hv,Wv) ImageNet-normed at this view's resolution.
+        Accepts [B,C,H,W] or [B,H,W,C]; range [-1,1] (openpi std) or [0,1] → mapped to [0,1] then ImageNet."""
+        if img.dim() == 4 and img.shape[-1] == 3 and img.shape[1] != 3:
+            img = img.permute(0, 3, 1, 2)                  # [B,H,W,C] → [B,C,H,W]
+        img = img.float()
+        if float(img.min()) < -0.01:                       # [-1,1] → [0,1]
+            img = img * 0.5 + 0.5
+        img = img.clamp(0, 1)
+        Hv, Wv = VIEW_HW[v]
+        if img.shape[-2:] != (Hv, Wv):
+            img = F.interpolate(img, size=(Hv, Wv), mode="bilinear", align_corners=False, antialias=True)
+        mean = torch.tensor(IMAGENET_MEAN, device=img.device, dtype=img.dtype).view(1, 3, 1, 1)
+        std = torch.tensor(IMAGENET_STD, device=img.device, dtype=img.dtype).view(1, 3, 1, 1)
+        return (img - mean) / std
+
     def forward(self, images: Sequence[torch.Tensor]) -> torch.Tensor:
         assert len(images) == len(VIEWS), f"need {len(VIEWS)} views, got {len(images)}"
         toks = []
         for v, img in zip(VIEWS, images):
-            patches = self.dino(img)                       # (B,P,1024) no-grad
+            pix = self._prep(img, v)                       # (B,3,Hv,Wv) ImageNet-normed
+            patches = self.dino(pix)                       # (B,Pv,1024) no-grad
             comp = self.compactor[v](patches)              # (B,5,256)
             toks.append(comp)
         x = torch.cat(toks, dim=1)                         # (B,15,256)
