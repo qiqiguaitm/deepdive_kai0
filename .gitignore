@@ -111,3 +111,5 @@ cosmos/wam_fold_policy_runs/
 cosmos/wam_fold_wm_runs/
 # fastwam local conda ffmpeg install (vendored libs, ~420M)
 fastwam/ffmpeg-libs/
+# official X-VLA folding ckpt (HF download, 3.3G model.safetensors) — keep on vePFS, never in git
+xvla/official_folding_ckpt/
