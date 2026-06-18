@@ -148,7 +148,7 @@
 ## 9. ⭐ 变体实验:用 LeWM image encoder 替换 SigLIP(2026-06-17)
 
 > **目标(用户)**: 把 pi0.5 的视觉编码器从 **SigLIP** 换成 **kai0 数据训出的 LeWM image encoder**,**不改官方架构**(新建一个变体模型,SigLIP 路径保持不动),仍按本文档从 PaliGemma base 起训;分 **freeze** 与 **no-freeze** 两个 run 提交。
-> **状态**: 📝 调研完成 + 集成设计就绪;**3 个岔路待用户拍板(§9.4)后实现 + 提交**。
+> **状态**: ✅ 调研完成 + 3 决策定档(§9.4,B1/忠实分辨率/DINOv3-L16);**下一步:实现 LeWMVisionEncoder → gf0 2卡 smoke → 提交 freeze/no-freeze 两 run**。
 
 ### 9.1 ⚠️ 先厘清:LeWM 的"image encoder"到底是什么(已查 ckpt + 源码)
 
@@ -156,12 +156,12 @@ ckpt `gf3:.../lewm-kai0-3view-V1-aa27438-TS0616.1510/lewm-kai0-3view_epoch_10.pt
 
 | 组件 | 在 ckpt? | 是什么 |
 |---|---|---|
-| **DINOv2-ViT-L/14**(冻结)| ❌ 不在(torch.hub 现成,已缓存 gf3 `.../.CACHE/torch/hub/checkpoints/dinov2_vitl14_pretrain.pth`)| 像素→patch 特征,1024-d。⚠️ 源码 docstring 写 "DINOv3-L" 但缓存是 dinov2_vitl14 → **用哪个待确认(§9.4-Q3)** |
+| **DINOv3-ViT-L/16**(冻结)✅已查实 | ❌ 不在(HF 现成,gf3 缓存 `.CACHE/hf_cache/hub/dinov3-vitl16-pretrain-lvd1689m`)| 像素→patch 特征,1024-d,patch=16,CLS+**4 register token**。提取脚本 `scripts/cache_dinov3L_kai0.py`。⚠️**不是** DINOv2/14 |
 | **OctCompactor**(per-view th/hl/hr,**学习的**)| ✅ 在(`compactor.{th,hl,hr}`)| 每视角:可学习 1 CLS + `n_obj=4` queries 对 DINO patch 做 cross-attn(depth2/heads4,1024→256)→ **每视角 5 token(256-d)** |
 | predictor(AC-WM)/ sigreg / distill | ✅ 在 | 世界模型预测头 / 高斯正则 / 蒸馏 adapter —— **本任务不用**(只取视觉编码) |
 
 → **"LeWM image encoder" = DINOv2-L(冻结,现成)+ 学习的 OctCompactor(kai0-3view 特定)**。`VIEWS=(th,hl,hr)` 正好对齐 pi0.5 三相机(top_head/hand_left/hand_right)。`action_dim=14`(kai0)。
-- ⚠️ **关键怪点**:`P_PATCHES={"th":432,"hl":192,"hr":192}` —— LeWM 在**各视角不同分辨率**的缓存 DINO 特征上训练(非统一 224)。compactor 是 cross-attn(对任意 patch 数都能跑),但 224(256 patch)对 frozen compactor 是 off-distribution(§9.4-Q2)。
+- ✅ **per-view 分辨率(忠实复刻,Q2 用户定)**:kai0 原生 640×480 → **top_head 纯 resize 384×288(W×H)→24×18=432 patch**;**hand_left/right 256×192→16×12=192 patch**(patch16);INTER_AREA;ImageNet mean/std;取 CLS+4reg 之后的 last-P patch token 喂 compactor。⚠️ 与 pi0.5 的 224 resize_with_pad **完全不同**,需为 LeWM 分支单独走这套 per-view 预处理。
 
 ### 9.2 与 pi0.5 现状的对比(token 经济学差异巨大)
 
@@ -181,14 +181,14 @@ ckpt `gf3:.../lewm-kai0-3view-V1-aa27438-TS0616.1510/lewm-kai0-3view_epoch_10.pt
 - **接入点**:`pi0_pytorch.py:embed_image`(:200)加分支 `if config.vision_encoder=="lewm": return lewm_encoder(imgs)` else 原 SigLIP。**官方 SigLIP 分支零改动**。
 - **image mask / ar_mask**:15 个 LeWM token 仍按 image-token 处理(双向 attention),与 SigLIP 逻辑一致,只是数量 768→15。
 - **LLM init**:PaliGemma VLM base(本文档主旨,`PaliGemmaWeightLoader` 思想的 PyTorch 等价);action expert 随机。**SigLIP 不再加载**(被 LeWM 替代)。
-- **DINO 输入分辨率**:见 §9.4-Q2 决策(忠实 432/192 vs 统一 224)。
+- **DINO 输入分辨率**:✅ 忠实复刻(top 384×288 / wrist 256×192,patch16;§9.4-Q2)。
 - **依赖**:DINOv2-L hub 权重(gf3 已缓存,需同步到训练集群 TORCH_HOME 离线);LeWM ckpt(取 `compactor.*` 子树)。
 
-### 9.4 ⚠️ 提交前必须拍板的 3 个岔路
+### 9.4 决策定档(✅ 2026-06-17 用户确认 / 数据锁定)
 
-1. **Q1 训练配方**:本变体 init 沿用本文档 **B1 naive-from-PaliGemma-base**(随机 action expert,~150–240k step,工程最小)?还是为省算力**改 warm-start `mixed_1_clean`**(更快但偏离"从 base 自训"主旨)?
-2. **Q2 DINO 输入分辨率**:**忠实复刻** LeWM 的 per-view 分辨率(th→432 patch / hl,hr→192 patch,frozen compactor 在训练分布内,**推荐**,但要对齐 LeWM 的 resize/crop)?还是**统一 224**(简单,但 frozen compactor off-distribution,no-freeze 时可自适应)?
-3. **Q3 backbone**:确认 **DINOv2-L/14**(缓存已有)还是源码暗示的 **DINOv3-L**?(影响权重 + 预处理 mean/std)。
+1. ✅ **Q1 配方 = B1 naive-from-PaliGemma-base**(随机 action expert,~150–240k step,符合"从 base 自训"主旨)。
+2. ✅ **Q2 = 忠实复刻 per-view 分辨率**(top 384×288 / wrist 256×192,patch16;frozen compactor 在训练分布内)。
+3. ✅ **Q3 = DINOv3-L/16**(数据锁定:`cache_dinov3L_kai0.py` + patch16 + 1024d + 432/192 patch 证实;**非自由选项**,frozen compactor 只认 DINOv3 特征,用 DINOv2 即废)。权重 gf3 HF 缓存 `dinov3-vitl16-pretrain-lvd1689m` → 同步训练集群 `HF_HUB_OFFLINE=1`。
 
 ### 9.5 两个提交 run(freeze / no-freeze,单变量 = compactor 是否训练)
 
@@ -209,7 +209,7 @@ ckpt `gf3:.../lewm-kai0-3view-V1-aa27438-TS0616.1510/lewm-kai0-3view_epoch_10.pt
 5. **gf0 2 卡 smoke**(forward/backward/loss 下降)→ 通过再 8 卡提交两 run。
 6. eval:val MAE + 真机;对照 SigLIP 基线。
 
-> **诚实提示**:这是**研究级架构手术**(PyTorch 前端替换 + DINO 依赖 + token 768→15 + 分辨率对齐),非配置级改动。我**不会在 §9.4 三问未定 + smoke 未过前直接提交 8 卡训练**(会白烧算力)。三问定了我就实现→smoke→提交两 run。
+> **诚实提示**:这是**研究级架构手术**(PyTorch 前端替换 + DINO 依赖 + token 768→15 + 分辨率对齐),非配置级改动。3 问已定(§9.4);我**不会在 gf0 2卡 smoke(forward/backward/loss)通过前直接提交 8 卡训练**。实现→smoke→提交两 run。
 
 ---
 
