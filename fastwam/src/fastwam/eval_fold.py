@@ -49,7 +49,7 @@ def load_eval_assets(stats_path, text_emb_dir):
 
 def eval_fold(model, val_root, view_keys, a_mean, a_std, s_mean, s_std, ctx, cmask,
               shard_id=0, num_shards=1, nfe=20, n_eps=100, action_chunk=48, hor=HOR_DEFAULT,
-              joint=False, opt_runner=None, opt_infer=None, log=print):
+              max_win_per_ep=6, joint=False, opt_runner=None, opt_infer=None, log=print):
     """评本 shard 负责的 episode 子集 → {ep: {mae@h}};另返回 per-window 延迟列表。
     用 model.infer_action(默认)或 model.infer_joint(joint=True)或 opt 引擎(opt_runner/opt_infer)。"""
     import pandas as pd
@@ -64,7 +64,10 @@ def eval_fold(model, val_root, view_keys, a_mean, a_std, s_mean, s_std, ctx, cma
         st_all = np.stack(df["observation.state"].to_numpy())[:, :14]
         decs = {k: VideoDecoder(f"{val_root}/videos/chunk-000/observation.images.{k}/episode_{ep:06d}.mp4") for k in view_keys}
         L = len(df); em = {f"mae@{h}": [] for h in hor}
-        for f in range(0, max(1, L - 1), 16):
+        wins = list(range(0, max(1, L - 1), 16))
+        if max_win_per_ep and len(wins) > max_win_per_ep:  # 同 gwp:均匀取样封顶,避免长 episode eval 爆时
+            wins = [wins[i] for i in np.unique(np.linspace(0, len(wins) - 1, max_win_per_ep).astype(int))]
+        for f in wins:
             frames = {k: decs[k].get_frames_at([min(f, decs[k].metadata.num_frames - 1)]).data[0].permute(1, 2, 0).numpy() for k in view_keys}
             img = prep_image(frames, view_keys)
             prop = torch.from_numpy((st_all[f] - s_mean) / (s_std + 1e-8)).float()

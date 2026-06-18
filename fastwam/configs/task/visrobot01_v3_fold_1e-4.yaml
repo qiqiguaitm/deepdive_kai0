@@ -31,7 +31,8 @@ eval_every: 1000          # 正式:每 1000 步内联 eval(EVAL_EVERY env 可覆
 eval_sample_enabled: false  # 关 1-sample 视频 eval(v3 val 时间戳触发 torchcodec tolerance 崩);只用 eval_fold
 eval_fold_enabled: true
 eval_fold_n_eps: 100      # 全 val 集
-eval_fold_nfe: 20         # 对齐外部 watcher 口径
+eval_fold_nfe: 10         # 同 gwp steps_inf=10(原 20 太慢:eval 21min/次)
+eval_fold_max_win: 6      # 同 gwp max_win_per_ep=6:每集均匀取 6 窗口,eval 21min→~2min
 
 gradient_accumulation_steps: 1
 weight_decay: 1e-2

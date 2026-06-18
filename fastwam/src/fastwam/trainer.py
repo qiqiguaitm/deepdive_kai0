@@ -50,6 +50,7 @@ class Wan22Trainer:
         self.eval_fold_enabled = bool(cfg.get("eval_fold_enabled", True))
         self.eval_fold_n_eps = int(cfg.get("eval_fold_n_eps", 100))
         self.eval_fold_nfe = int(cfg.get("eval_fold_nfe", 20))  # 对齐外部 watcher 口径
+        self.eval_fold_max_win = int(cfg.get("eval_fold_max_win", 6))  # 同 gwp:每集窗口封顶,控 eval 时长
         self.action_chunk = int(cfg.data.train.num_frames) - 1       # 49-1=48
         self.eval_fold_hor = [1, 10, max(1, self.action_chunk // 2), self.action_chunk]
         self.gradient_accumulation_steps = int(cfg.gradient_accumulation_steps)
@@ -404,7 +405,8 @@ class Wan22Trainer:
                 m, val_root, view_keys, a_mean, a_std, s_mean, s_std, ctx, cmask,
                 shard_id=self.accelerator.process_index, num_shards=self.accelerator.num_processes,
                 nfe=self.eval_fold_nfe, n_eps=self.eval_fold_n_eps,
-                action_chunk=self.action_chunk, hor=self.eval_fold_hor, log=lambda s: None)
+                action_chunk=self.action_chunk, hor=self.eval_fold_hor,
+                max_win_per_ep=self.eval_fold_max_win, log=lambda s: None)
         except Exception as e:  # eval 失败不应中断训练
             logger.warning("[eval_fold] step=%d FAILED on rank %d: %s",
                            self.global_step, self.accelerator.process_index, repr(e))
