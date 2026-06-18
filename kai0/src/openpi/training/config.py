@@ -1045,7 +1045,9 @@ _CONFIGS = [
             loss_action_weight=0.0, loss_value_weight=1.0,
         ),
         data=LerobotAgilexDataConfig(
-            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_awbc_merged_stage",
+            # _interp: stage_progress_gt 段内连续插值 0→1 (旧 vis_awbc_merged_stage 是平阶跃 0.25/0.75 →
+            # AE 回归目标 94% 零 → 100k 训出 dead value, 见 memory ae-stage-label-collapse). 段内连续后 Δ50 零=0.1%.
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_awbc_merged_stage_interp",
             default_prompt="Flatten and fold the cloth.",
         ),
         pytorch_weight_path="/vePFS/tim/workspace/openpi_cache/modelscope_cache/lerobot/pi05_base",

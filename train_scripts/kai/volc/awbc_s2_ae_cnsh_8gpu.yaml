@@ -66,8 +66,8 @@ Entrypoint: |
   apt-get update 2>&1 | tail -1 && apt-get install -y ffmpeg 2>&1 | tail -1 || echo "ffmpeg install skipped"
   python -c "import torch; print(f'torch {torch.__version__} cuda={torch.cuda.is_available()} dev={torch.cuda.device_count()}')"
 
-  # PRE-FLIGHT
-  TRAIN=/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_awbc_merged_stage
+  # PRE-FLIGHT  (_interp: 段内连续插值标签, 修复旧平阶跃导致的 AE dead-value 塌缩)
+  TRAIN=/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_awbc_merged_stage_interp
   INIT=/vePFS/tim/workspace/openpi_cache/modelscope_cache/lerobot/pi05_base
   [ -f "$TRAIN/meta/episodes.jsonl" ] || { echo "FATAL: train data missing $TRAIN" >&2; exit 13; }
   python -c "import pyarrow.parquet as pq,glob,sys; f=sorted(glob.glob('$TRAIN/data/chunk-000/*.parquet'))[0]; cols=[c.name for c in pq.read_schema(f)]; sys.exit(0 if 'stage_progress_gt' in cols else 13)" || { echo "FATAL: stage_progress_gt missing in train data" >&2; exit 13; }
@@ -75,8 +75,9 @@ Entrypoint: |
   echo "[$(date)] preflight OK (vis_awbc_merged_stage + stage_progress_gt + pi05_base init)"
 
   # auto-resume: if exp ckpt dir has steps → --resume, else fresh
-  EXP=adv_est_vis_v1
-  CKPT_DIR=$KAI0/experiment/ADVANTAGE_TORCH_VIS_AWBC/$EXP
+  # v2 = fresh exp on _interp 连续标签 (v1 是平阶跃 dead-value 的废 ckpt, 不复用 → 换名避免误 resume)
+  EXP=adv_est_vis_v2
+  CKPT_DIR=$KAI0/checkpoints/ADVANTAGE_TORCH_VIS_AWBC/$EXP   # = config.checkpoint_dir (was wrong: experiment/)
   RES=""
   if ls -d "$CKPT_DIR"/[0-9]*/ >/dev/null 2>&1; then RES="--resume"; echo "[resume] found ckpt → --resume"; fi
 
