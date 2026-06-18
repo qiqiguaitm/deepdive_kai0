@@ -53,7 +53,7 @@ echo "[aihc] accelerate=$(accelerate version 2>/dev/null || echo unknown)"
 echo "[aihc] env WORLD_SIZE=$WORLD_SIZE RANK=$RANK MASTER_ADDR=$MASTER_ADDR"
 
 exec accelerate launch \
-  --config_file scripts/accelerate_configs/accelerate_zero1_ds.yaml \
+  --config_file "${ACCEL_CFG:-scripts/accelerate_configs/accelerate_zero1_ds.yaml}" \
   --num_processes "$((NNODES * NUM_GPUS))" \
   --num_machines "$NNODES" \
   --machine_rank "$NODE_RANK" \

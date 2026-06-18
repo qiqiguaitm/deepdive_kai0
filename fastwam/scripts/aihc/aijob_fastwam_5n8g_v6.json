@@ -56,6 +56,10 @@
       {
         "name": "EVAL_EVERY",
         "value": "1000"
+      },
+      {
+        "name": "EXTRA_OVERRIDES",
+        "value": "batch_size=8"
       }
     ],
     "enableRDMA": true,
