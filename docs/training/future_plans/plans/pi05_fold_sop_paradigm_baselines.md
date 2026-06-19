@@ -98,6 +98,21 @@
 5. ✅ **prompt = 规范化** `"Flatten and fold the cloth. Horizontal Fold v1."`(把数据原值 "Horizontally" → "Horizontal" 以与 "Vertical Fold v1" 平行;**train==deploy 一字不差,覆盖数据原值**)。⚠️ 若你想严格保留数据原串 "Horizontally Fold v1." 请在 Q 里说明。
 - **config** 新建 `pi05_task_ah1_hfold_v1_200`(克隆 `pi05_flatten_fold_A_smooth800_dagger_full`):`repo_id`→`Task_AH1_170`、`default_prompt` 同上、`inline_eval_val_root`→`Task_AH1_val`,其余继承 §1。
 
+### 2.B.4 ⭐ 训练结果(✅ 2026-06-17 跑完 50k,cnsh robot-task 8 A100)
+> job `t-20260617140704-lfw79`;inline-eval on `Task_AH1_val`(30ep,in-distribution)。⚠️ 数据是**裁尾修复后**那版(源 06-15-v3 被 TOS 重构原地裁尾 → 重建 Task_AH1_170/val 时 video 改 copy、逐 ep parquet==video 校验过)。
+
+| step | MAE@1 | @10 | @25 | @50 |
+|---|---|---|---|---|
+| 8000 | 0.0097 | 0.0212 | 0.0388 | 0.0625 |
+| 16000 | 0.0085 | 0.0183 | 0.0334 | 0.0527 |
+| 24000 | 0.0080 | 0.0177 | 0.0329 | 0.0524 |
+| 32000 | 0.0078 | 0.0177 | 0.0328 | 0.0525 |
+| 40000 | 0.0076 | 0.0178 | 0.0329 | 0.0525 |
+| **49999 (best)** | **0.0075** | **0.0179** | 0.0330 | 0.0527 |
+
+- best ckpt:`kai0/checkpoints/pi05_task_ah1_hfold_v1_200/pi05_task_ah1_hfold_v1_200_cnsh/49999/params`(已清非最佳,仅留 49999)。
+- @1 单调降到 0.0075;@25/@50 在 24k 即到底(0.0329/0.0524)后平台。**真机未做**(终判)。
+
 ---
 
 ## 3. 评估(真机为终判)+ 跨范式对比

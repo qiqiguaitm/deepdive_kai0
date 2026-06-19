@@ -308,7 +308,35 @@
 > 对照 smooth800 锚 MAE@1=0.0089(§8.5)→ Exp-C 49999 @1=0.0083 略优;长 horizon @50=0.0388 收敛干净。**但 offline MAE 非终判**(idle/慢轨迹反指,§铁律)→ **dagger 价值仍须真机对比**(走停/松手/完成),而真机所需 best ckpt 已误删 → **需重训后才能 Tier-3**。
 
 - best ckpt 原路径(**已删除**):`kai0/checkpoints/pi05_flatten_fold_v3early_dagger/v3early_dagger_cnsh/49999/params`
-- 重训命令:`source ~/.volc_creds && kai0/.venv/bin/python train_scripts/kai/volc/submit_yaml.py train_scripts/kai/volc/v3early_dagger_cnsh_8gpu.yaml`
+
+### 8.9 ⭐ 重训复现(2026-06-17,重构/裁尾后 v3 数据 → Robot-GPU开发机队列)
+> 误删 ckpt 后,用**重建版 `A_v3early_dagger`**(v3 源被 TOS 重构原地裁尾 → 重建:video 改 copy、parquet==video 校验、1498ep/**1,938,865** 帧 vs 原 1,964,972,裁掉 ~26k=1.3% 帧)重训。job `t-20260617160628-xzj9v`,exp `v3early_dagger_devq`,inline-eval `vis_v2_merged_val`。
+
+| step | MAE@1 | @10 | @25 | @50 |
+|---|---|---|---|---|
+| 8000 | 0.0109 | 0.0269 | 0.0502 | 0.0813 |
+| 24000 | 0.0090 | 0.0210 | 0.0345 | 0.0484 |
+| 40000 | 0.0085 | 0.0187 | 0.0294 | 0.0405 |
+| **49999 (best)** | **0.0083** | **0.0180** | **0.0281** | **0.0387** |
+
+- best ckpt(**已找回**,仅留 49999):`kai0/checkpoints/pi05_flatten_fold_v3early_dagger/v3early_dagger_devq/49999/params`
+- **offline MAE 与误删前几乎一字不差**(@50 0.0387 vs 0.0388)→ 裁尾重建数据统计上一致。
+- ⚠️⚠️ **真机回归(2026-06-18 用户观察)**:`v3early_dagger_devq` 真机**抓衣角成功率略降、容易抓不到**,虽 offline MAE 不变。offline 不敏感于抓取精度(§铁律再次印证)。**根因待查 = 裁尾/前裁是否动了抓取相位帧**(见 §8.10)。
+- 重训命令:`submit_yaml.py train_scripts/kai/volc/v3early_dagger_devq_8gpu.yaml`
+
+### 8.10 🔴 真机抓取回归根因(2026-06-19 查实)= 重裁 v3 视频 **PTS 未归零 → 训练时视觉与动作错位**
+
+**结论(决定性证据)**:重构里被原地重裁的 v3 视频,**前裁切了头帧却没把 PTS 归零**,lerobot 按时间戳解码取错帧。
+- 实测 04-30 ep1 top_head:`time_base=1/15360, fps=30`,首帧 `pts=17403=1.133s`=**34 帧偏移**(≈该集前裁帧数)。
+- 复现 lerobot 解码:请求帧序号 200(`query_ts=200/30=6.667s`)→ 实际取到**第 167 帧**(像素差 18.9)→ **静默偏移 −34 帧、不报错**(6.667s 仍落在视频时间轴内,tolerance 通过)。
+- 普查:Exp-C base v3(pts=6144=12 帧)、AWBC vis_dagger v3(pts=6144)、AH1 源 06-15-v3 —— **凡 TOS 重构重裁的 v3 全部非零 PTS**。
+- ⚠️ **纠正旧认知**(memory 曾记"常规 pi05 按帧序号解码不受影响"——**错**):`data_loader.py:191-195` 常规 pi05 训练用 LeRobotDataset 也是 `delta_timestamps`(按时间戳解码),且 **`tolerance_s=30.0`**(为容忍 kai/vis 抖动时间戳放这么松)→ 30s 超大 tolerance **正好吞掉 1.1s 的 PTS 偏移** → 不报错、静默取错帧。**= 常规训练同样中招**,不止 AE。
+
+**机制(串起全部现象)**:训练时 parquet 第 t 行(state/action[t])被配上**早 ~12–54 帧(0.4–1.8s)的图像** → 策略学成"画面比动作滞后" → 真机视觉实时对齐时按滞后补偿 → 伸向衣角**过去的位置** → **抓不到衣角**。偏移量 = 每集前裁帧数 → **逐集不一致**,更难学。
+- **为何 offline MAE 盲**:train + val **同一套错位解码**,模型自洽拟合"滞后映射"→ val MAE 照样低(0.0387);真机视觉对齐才暴露 → **"offline MAE 非终判"教科书案例**。
+- **为何旧 Exp-C(误删那版)真机更好**:旧 v3 当时已被 `reset_video_pts.py` 修过(PTS=0 对齐);本次重裁**重新引入** bug → 回归。两版 offline MAE 几乎相同(各自自洽)却真机不同,完全自洽。
+
+**修复**:① `train_scripts/kai/data/reset_video_pts.py` 对所有重裁 v3 归零 PTS(确认无损改 PTS、非重编码);② 重建受影响数据集(`A_v3early_dagger`/`Task_AH1`/`vis_dagger v3`);③ 重训 Exp-C(AH1 真机前同样须修)。**根本修法**:重裁工具 `trim_video_pyav` 裁剪时即归零 PTS(memory 记过已修,本轮重构走了旧路径又犯)。
 
 ---
 
