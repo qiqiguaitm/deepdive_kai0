@@ -79,36 +79,26 @@ class _DinoV3Frozen(nn.Module):
     def __init__(self, local_dir: str):
         super().__init__()
         self.local_dir = local_dir
-        from transformers import AutoConfig
-        cfg = AutoConfig.from_pretrained(local_dir)
-        self.patch_size = int(cfg.patch_size)
-        self.hidden = int(cfg.hidden_size)  # 1024
-        nreg = getattr(cfg, "num_register_tokens", None)
-        self.n_prefix = 1 + (int(nreg) if nreg is not None else 4)  # CLS + registers
+        import json
+        from pathlib import Path
+        c = json.loads((Path(local_dir) / "config.json").read_text())
+        self.hidden = int(c["hidden_size"])              # 1024
+        self.n_prefix = 1 + int(c["num_register_tokens"])  # CLS + 4 registers
 
     def _bb(self, device):
-        bb = _DinoV3Frozen._CACHE.get(self.local_dir)
-        if bb is None:
-            from transformers import AutoModel
-            prev = os.environ.get("HF_HUB_OFFLINE")
-            os.environ["HF_HUB_OFFLINE"] = "1"
-            try:
-                bb = AutoModel.from_pretrained(self.local_dir)
-            finally:
-                os.environ["HF_HUB_OFFLINE"] = prev if prev is not None else "1"
-            for p in bb.parameters():
-                p.requires_grad_(False)
-            bb.eval()
-            _DinoV3Frozen._CACHE[self.local_dir] = bb
-        if next(bb.parameters()).device != device:
-            bb.to(device)
-        return bb
+        m = _DinoV3Frozen._CACHE.get(self.local_dir)
+        if m is None:
+            # pure-torch standalone DINOv3 (no transformers); verified cosine≈0.9996 vs teacher
+            from openpi.models_pytorch.dinov3_vit_standalone import DINOv3ViTStandalone
+            m = DINOv3ViTStandalone(self.local_dir)       # already frozen + eval
+            _DinoV3Frozen._CACHE[self.local_dir] = m
+        if next(m.parameters()).device != device:
+            m.to(device)
+        return m
 
     @torch.no_grad()
     def forward(self, pixels):  # (B,3,H,W) imagenet-normed → (B,P,1024)
-        bb = self._bb(pixels.device)
-        lhs = bb(pixel_values=pixels, interpolate_pos_encoding=True).last_hidden_state
-        return lhs[:, self.n_prefix:, :]  # drop CLS+registers → P patch tokens
+        return self._bb(pixels.device)(pixels)[:, self.n_prefix:, :]  # drop CLS+registers → P patch tokens
 
 
 # ---- the encoder --------------------------------------------------------------
