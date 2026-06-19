@@ -226,6 +226,9 @@ def main():
             x = np.arange(len(P)); fig, axes = plt.subplots(7, 2, figsize=(13, 15)); axes = axes.flatten()
             for dd in range(14):
                 axes[dd].plot(x, G[:, dd], "k--", lw=1.5, label="GT"); axes[dd].plot(x, P[:, dd], "r-", lw=1.2, label="pred(raw)")
+                # y 轴范围只由 GT 决定(与 fastwam report_fastwam.py 同公式 → 两份报告坐标轴完全一致)
+                _lo = float(G[:, dd].min()); _hi = float(G[:, dd].max()); _py = 0.05 * (_hi - _lo) + 1e-6
+                axes[dd].set_ylim(_lo - _py, _hi + _py)
                 axes[dd].set_title(DIM[dd], fontsize=8)
                 if dd == 0: axes[dd].legend(fontsize=7)
             fig.suptitle(f"episode {ep} — deploy-style action traj (raw, exec_h={args.exec_horizon})")

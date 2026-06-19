@@ -152,7 +152,7 @@ def main():
         decs = {k: VideoDecoder(f"{VAL}/videos/chunk-000/observation.images.{k}/episode_{ep:06d}.mp4") for k in VK}
         L = len(df)
         em = {f"mae@{h}": [] for h in HOR}; emc = {f"mae@{h}": [] for h in HOR}
-        _wins = list(range(0, max(1, L - 1), 16))
+        _wins = list(range(0, max(1, L - 48), 16))  # 对齐 gwp:上界 L-action_chunk(保证完整 48 步未来 GT)
         if args.max_win_per_ep and len(_wins) > args.max_win_per_ep:  # 同 gwp:均匀取样封顶
             _wins = [_wins[i] for i in np.unique(np.linspace(0, len(_wins) - 1, args.max_win_per_ep).astype(int))]
         for f in _wins:

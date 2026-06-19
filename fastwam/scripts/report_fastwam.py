@@ -13,26 +13,52 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+from PIL import Image
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SCRIPT_DIR))
+sys.path.insert(0, str(_SCRIPT_DIR.parent / "src"))
 from eval_offline_fold import build_model, prep_image, VAL, VK, HOR, _REPO_DIR  # noqa: E402
+from fastwam.utils.video_io import save_mp4  # noqa: E402
 
 
-def svg_series(gt, pred, dim, w=235, h=92, pad=14):
-    """单维 GT(黑实线) vs pred(红虚线)迷你折线图,纯内联 SVG(无 matplotlib 依赖)。"""
-    ymin = float(min(gt.min(), pred.min())); ymax = float(max(gt.max(), pred.max()))
-    if ymax - ymin < 1e-6: ymax = ymin + 1e-6
+def _chw_to_pil(t):  # [3,H,W] in [-1,1] -> PIL RGB
+    a = ((t.clamp(-1, 1) + 1) * 0.5 * 255.0).round().byte().permute(1, 2, 0).cpu().numpy()
+    return Image.fromarray(a)
+
+
+def _vstack2(top, bot):  # GT 行(上) / pred 行(下)
+    W = max(top.width, bot.width)
+    c = Image.new("RGB", (W, top.height + bot.height), (0, 0, 0))
+    c.paste(top, (0, 0)); c.paste(bot, (0, top.height)); return c
+
+
+# 关节名,与 gwp episode_report.py 完全一致
+DIM = [f"L_j{i}" for i in range(6)] + ["L_grip"] + [f"R_j{i}" for i in range(6)] + ["R_grip"]
+
+
+def svg_series(gt, pred, dim, w=545, h=200, pad=26):
+    """单维子图,复刻 gwp matplotlib 风格:GT 黑虚线(k--)+ pred 红实线(r-),标题=关节名。
+    y 轴范围**只由 GT 决定**(两份报告 GT 相同 → 坐标轴完全一致);pred 超界裁到视口边缘。"""
+    r = float(gt.max() - gt.min()); py = 0.05 * r + 1e-6
+    ymin = float(gt.min()) - py; ymax = float(gt.max()) + py
     n = len(gt)
     X = lambda i: pad + i / max(1, n - 1) * (w - 2 * pad)
-    Y = lambda v: h - pad - (v - ymin) / (ymax - ymin) * (h - 2 * pad)
+    def Y(v):
+        yy = h - pad - (v - ymin) / (ymax - ymin) * (h - 2 * pad)
+        return max(float(pad), min(float(h - pad), yy))  # clamp 到视口(超界 pred 不跑飞)
     def poly(arr, color, dash=""):
         pts = " ".join(f"{X(i):.1f},{Y(arr[i]):.1f}" for i in range(n))
         da = f' stroke-dasharray="{dash}"' if dash else ""
-        return f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="1.1"{da}/>'
-    return (f'<svg width="{w}" height="{h}" style="border:1px solid #eee;margin:1px">'
-            f'<text x="3" y="11" font-size="9" fill="#888">dim{dim}</text>'
-            f'{poly(gt, "#222")}{poly(pred, "#d62728", "3,2")}</svg>')
+        return f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="1.3"{da}/>'
+    axis = (f'<line x1="{pad}" y1="{h-pad:.0f}" x2="{w-pad}" y2="{h-pad:.0f}" stroke="#ccc" stroke-width="0.6"/>'
+            f'<line x1="{pad}" y1="{pad}" x2="{pad}" y2="{h-pad:.0f}" stroke="#ccc" stroke-width="0.6"/>'
+            f'<text x="{pad}" y="{pad-6}" font-size="9" fill="#444">[{ymin:.2f},{ymax:.2f}]</text>')
+    leg = ('<text x="60" y="14" font-size="9" fill="#222">- - GT</text>'
+           '<text x="120" y="14" font-size="9" fill="#d62728">— pred(raw)</text>') if dim == 0 else ""
+    return (f'<svg width="{w}" height="{h}" style="margin:2px">'
+            f'<text x="3" y="13" font-size="11" font-weight="600" fill="#333">{DIM[dim]}</text>{leg}'
+            f'{axis}{poly(gt, "#222", "4,3")}{poly(pred, "#d62728")}</svg>')
 
 
 def main():
@@ -42,6 +68,7 @@ def main():
     ap.add_argument("--n_viz_eps", type=int, default=20); ap.add_argument("--n_metric_eps", type=int, default=100)
     ap.add_argument("--max_win_per_ep", type=int, default=6); ap.add_argument("--nfe", type=int, default=10)
     ap.add_argument("--exec_horizon", type=int, default=16)
+    ap.add_argument("--n_vid_per_ep", type=int, default=0, help=">0 则每集生成 N 个 GT-vs-pred 想象视频(model.infer)")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
 
@@ -73,7 +100,8 @@ def main():
         st_all = np.stack(df["observation.state"].to_numpy())[:, :14]
         decs = {k: VideoDecoder(f"{VAL}/videos/chunk-000/observation.images.{k}/episode_{ep:06d}.mp4") for k in VK}
         L = len(df)
-        wins = list(range(0, max(1, L - 1), 16))
+        # 对齐 gwp build_window_indices("exec"):stride=exec_horizon、上界 L-action_chunk(保证未来有完整 48 步 GT)
+        wins = list(range(0, max(1, L - 48), args.exec_horizon))
         if args.max_win_per_ep and len(wins) > args.max_win_per_ep:
             wins = [wins[i] for i in np.unique(np.linspace(0, len(wins) - 1, args.max_win_per_ep).astype(int))]
         pred_cat, gt_cat, aes = [], [], []
@@ -94,10 +122,40 @@ def main():
         cum = {h: float(ae[:h].mean()) for h in HOR if h <= len(ae)}
         P = np.concatenate(pred_cat, 0); G = np.concatenate(gt_cat, 0)  # [W*H, 14]
         svgs = "".join(svg_series(G[:, d], P[:, d], d) for d in range(14))
+
+        # 可选:GT-vs-pred 想象视频(model.infer,5 关键帧 delta[0,12,24,36,48])
+        vids_html = ""
+        if args.n_vid_per_ep > 0:
+            deltas = np.linspace(0, 48, 5).astype(int)
+            vid_wins = [wins[i] for i in np.unique(np.linspace(0, len(wins) - 1, args.n_vid_per_ep).astype(int))]
+            def stitch_pil(ts):
+                fr = {k: decs[k].get_frames_at([min(ts, decs[k].metadata.num_frames - 1)]).data[0].permute(1, 2, 0).numpy() for k in VK}
+                return _chw_to_pil(prep_image(fr))
+            for f in vid_wins:
+                try:
+                    img = stitch_pil(f); img_t = prep_image({k: decs[k].get_frames_at([min(f, decs[k].metadata.num_frames - 1)]).data[0].permute(1, 2, 0).numpy() for k in VK})
+                    prop = torch.from_numpy((st_all[f] - s_mean) / (s_std + 1e-8)).float()
+                    gt_act = torch.from_numpy((gt_all[f:f + 48] - a_mean) / (a_std + 1e-8)).float()
+                    with torch.no_grad():
+                        pred = model.infer(prompt=None, input_image=img_t, num_frames=5, action=gt_act, action_horizon=48,
+                                           proprio=prop, text_cfg_scale=1.0, action_cfg_scale=1.0,
+                                           num_inference_steps=args.nfe, seed=42, tiled=False,
+                                           context=ctx.to(model.device, model.torch_dtype), context_mask=cmask.to(model.device))
+                    pv = pred["video"]  # 5 PIL (W,H)=(320,384)
+                    gt_pils = [stitch_pil(min(f + int(d), len(gt_all) - 1)) for d in deltas]
+                    comb = [_vstack2(g, p) for g, p in zip(gt_pils, pv)]
+                    vp = f"ep{ep}_w{f}.mp4"; save_mp4(comb, os.path.join(args.out_dir, vp), fps=2)
+                    vids_html += f'<video src="{vp}" controls width="300"></video>'
+                except Exception as e:
+                    print(f"[report] ep{ep} w{f} video FAIL: {repr(e)[:120]}", flush=True)
+            if vids_html:
+                vids_html = (f'<p class=note>GT-vs-pred 想象视频(上=GT,下=pred,5 关键帧 delta[0,12,24,36,48]):</p>{vids_html}')
+
         ssl = " ".join(f"@{h}={ss.get(h, float('nan')):.4f}" for h in HOR)
         cml = " ".join(f"@{h}={cum.get(h, float('nan')):.4f}" for h in HOR)
         blocks.append(f'<details open><summary>ep {ep} &nbsp;|&nbsp; ss[{ssl}] &nbsp; cum[{cml}]</summary>'
-                      f'<div style="display:flex;flex-wrap:wrap">{svgs}</div></details>')
+                      f'<p class=note>episode {ep} — deploy-style action traj (raw, exec_h={H}) · GT 黑虚线 / pred 红实线</p>'
+                      f'<div style="display:flex;flex-wrap:wrap;max-width:1130px">{svgs}</div>{vids_html}</details>')
         print(f"[report] ep{ep} ss@48={ss.get(48):.4f} cum@48={cum.get(48):.4f}", flush=True)
 
     # 指标表(读已算好的 summary.json;无则留空)
