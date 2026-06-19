@@ -26,6 +26,9 @@
 
 | 文档 | 作用 |
 |---|---|
+| [STATUS](STATUS.md) | **单页 STATUS/TODO**:已收口 / 已否决 / 未做可做(P0–D 带优先级)+ 本轮自动化执行记录。**找下一步先读这个。** |
+| [centroid_representation_config](centroid_representation_config.md) | **★ 簇中心代表图标准配置(定稿)**:DINOv2-large 编码器 + small 0.92M 空间解码器 + patch-grid + 自适应 milestone + 自适应 value bins;解码器倒 U 选型 + ep2302 30Hz 演示(value+milestone+解码质心,含视频)。 |
+| [milestone_centroid_decoding](milestone_centroid_decoding.md) | **簇中心解码 与 解码器对比试验**:池化→patch 空间解码→对齐/GAN→规模消融 A–I→选型;ep2302 30Hz 端到端演示 + 逐帧验证。含**未来规划**(V-JEPA 2 编解码器 / milestone 预测赋能 VLA)。图集在 `visualization/.../centroid_decoder/`。 |
 | [CRAVE_positioning_and_roadmap](CRAVE_positioning_and_roadmap.md) | **定位 / 场景 / roadmap(合一)**:前沿地图 + vs GVL + 工作项 A/B/C/D(含 B1✅/B2❌ 验证)+ 6 场景×SOTA + 分阶段安排。 |
 | [value_advantage_methods_comparison](value_advantage_methods_comparison.md) | **机理对比**:kai0-AE(监督进度差)vs π\*0.6-RECAP(RL 回报优势)vs CRAVE(零训练离散),逐维表 + 分场景结论。 |
 | [awbc_milestone_value_AB_plan](awbc_milestone_value_AB_plan.md) | **下游 A/B 对照执行 plan**:A=直接当 value 源 / B=蒸馏训 AE,对照已跑的 C=pi0-AE(当前 A 臂三档训练中)。 |
@@ -36,6 +39,7 @@
 | 文档 | 作用 |
 |---|---|
 | [cross_episode_recurrence_value_plan](cross_episode_recurrence_value_plan.md) | **探索记录索引存根**:结论速览表 + 迭代索引(保 §-锚点)+ 文献 + 工件清单。详细叙述已收口进上方干净文档。 |
+| [crave_a1a2_results.md](../../../../visualization/cross_episode_recurrence_value/crave_a1a2_results.md) | **A 组本地零成本验证(2026-06-17)**:A1 切分 / A2 keyframe / OOD 残差 / dedup 指纹,全 CPU 跑实 + 诚实边界。脚本 `crave_a1a2_validate.py` + `crave_a2_dedup_fingerprint.py`。 |
 | [crave_interpretability.md](../../../../visualization/cross_episode_recurrence_value/crave_interpretability.md) | **关键上升/下降点严格可解释分析**:每个 milestone 跨越的相机帧 + 可分离三路归因 + grounded 判据。脚本 `crave_interpretability.py`。 |
 | [crave_grounded_advantage.md](../../../../visualization/cross_episode_recurrence_value/crave_grounded_advantage.md) | **可解释分析 II**:真机退步归因 + grounded 过滤接进 AWBC advantage(neg 假标 5.2%→3.9%)。脚本 `crave_grounded_advantage.py`。 |
 

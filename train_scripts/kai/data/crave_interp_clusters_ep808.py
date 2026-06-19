@@ -160,6 +160,24 @@ else:   # adaptive(旧): 每 0.1 带 top-≤3(cov_n 含 start-bonus), 保底1个
     sel = sorted(set(sel), key=lambda c: tpos[c])
     print(f"[自适应选择] τ={TAU:.2f} cap={CAP_PB} → {len(sel)} milestone", flush=True)
 
+# 严格只取 N 个 milestone(要求高、图更净): 按真覆盖率 covE 降序 + 进度 NMS(均匀铺满任务进度)
+TOPN = int(os.environ.get("INTERP_TOPN", "0"))
+if TOPN > 0:
+    GAP = float(os.environ.get("INTERP_TOPN_GAP", "0.06"))
+    cand = [c for c in sorted(range(96), key=lambda c: -covE[c]) if covE[c] > 0 and (lab == c).any()]
+    picked = []
+    for c in cand:
+        if all(abs(tpos[c] - tpos[s]) >= GAP for s in picked): picked.append(c)
+        if len(picked) >= TOPN: break
+    if len(picked) < TOPN:                                   # NMS 太严没凑够 → 放宽补齐
+        for c in cand:
+            if c not in picked: picked.append(c)
+            if len(picked) >= TOPN: break
+    sel = sorted(set(picked), key=lambda c: tpos[c])
+    TAU = float(min(covE[c] for c in sel))                   # 供 all_clusters 图的阈值线
+    print(f"[TOPN 严格选择] 取 covE 最高的 {len(sel)} 个 milestone(进度NMS间隔≥{GAP}); "
+          f"纯覆盖率 {min(covE[c] for c in sel):.0%}-{max(covE[c] for c in sel):.0%}", flush=True)
+
 
 def gr(idx):
     o = []; s0 = None; pv = None
@@ -199,19 +217,22 @@ cov96 = np.array([len(set(E[lab == c].tolist())) / Nep if (lab == c).any() else 
 sel_set = set(order); oo = np.argsort(tpos)
 figc, axc = plt.subplots(figsize=(16, 4.5))
 bar_c = ["#3b6fb0" if int(oo[i]) in sel_set else "#d9d9d9" for i in range(96)]
-axc.bar(np.arange(96), cov96[oo] * 100, color=bar_c, label="纯 episode 覆盖率 covE(柱)")
-axc.plot(np.arange(96), eff[oo] * 100, "k^", ms=4, label="eff=covE+稀疏补偿(=选择依据)")
-axc.plot(np.arange(96), cov_n[oo] * 100, ".", color="#ccc", ms=2.5, label="cov_n(含start-bonus,仅参考·不再用于选择)")
-axc.axhline(TAU * 100, color="r", ls="--", lw=1.2, label=f"Otsu 自适应阈值 τ={TAU:.0%}")
-axc.set_xticks([]); axc.set_xlabel("96 个 KMeans 簇(按挖掘进度排序 →,左=任务开始 右=完成)")
-axc.set_ylabel("覆盖率 %"); axc.set_ylim(0, 108); axc.grid(alpha=.2, axis="y"); axc.legend(fontsize=8.5, ncol=3, loc="upper center")
-if SELECT == "coverage":
-    _rule = f"覆盖率全留: 选所有 cov_n≥τ 的簇(不均衡/不去重,高覆盖全留→最大化细节) → {len(order)} milestone"
+axc.bar(np.arange(96), cov96[oo] * 100, color=bar_c, label="pure episode coverage covE (bar)")
+axc.plot(np.arange(96), eff[oo] * 100, "k^", ms=4, label="eff = covE + sparsity bonus (selection score)")
+axc.plot(np.arange(96), cov_n[oo] * 100, ".", color="#ccc", ms=2.5, label="cov_n (with start-bonus, ref only)")
+_thr_lab = f"top-{TOPN} cutoff covE={TAU:.0%}" if TOPN > 0 else f"Otsu adaptive threshold tau={TAU:.0%}"
+axc.axhline(TAU * 100, color="r", ls="--", lw=1.2, label=_thr_lab)
+axc.set_xticks([]); axc.set_xlabel("96 KMeans clusters (sorted by mined progress ->, left=task start, right=done)")
+axc.set_ylabel("coverage %"); axc.set_ylim(0, 108); axc.grid(alpha=.2, axis="y"); axc.legend(fontsize=8.5, ncol=3, loc="upper center")
+if TOPN > 0:
+    _rule = f"strict top-{len(order)}: highest covE + progress-NMS spread over the task"
+elif SELECT == "coverage":
+    _rule = f"keep-all coverage: all clusters with cov_n>=tau (unbalanced, no dedup) -> {len(order)} milestones"
 elif SELECT == "balanced":
-    _rule = f"均衡(无保底): cov_n≥τ + 进度NMS(间隔{os.environ.get('INTERP_MIN_GAP','0.03')}) → {len(order)} milestone"
+    _rule = f"balanced: cov_n>=tau + progress-NMS (gap {os.environ.get('INTERP_MIN_GAP','0.03')}) -> {len(order)} milestones"
 else:
-    _rule = f"自适应: 每0.1带 cov_n≥τ top-≤3 + 保底 → {len(order)} milestone"
-axc.set_title(f"全部 96 簇覆盖率 — 蓝=选为 milestone({len(order)})/灰=未选;黑点=cov_n(带start-bonus)。{_rule}", fontsize=10)
+    _rule = f"adaptive: per-0.1-band cov_n>=tau top-<=3 + fallback -> {len(order)} milestones"
+axc.set_title(f"All 96 clusters coverage - blue = selected milestone ({len(order)}) / grey = unselected. {_rule}", fontsize=10)
 figc.tight_layout(); figc.savefig(OUT / "all_clusters_coverage.png", dpi=110); plt.close(figc)
 print("SAVED", OUT / "all_clusters_coverage.png", flush=True)
 COVER_FLOOR = float(os.environ.get("INTERP_COVER_FLOOR", "0"))   # 丢弃覆盖率<此的 milestone(非真复现态)
@@ -238,12 +259,12 @@ print(f"[体量] 挖矿频率 {FREQ}(DT={DT} LAM={LAM:.0f} MEDW={MEDW}); {len(mi
 print(f"[体量] 每 milestone 覆盖率(含此里程碑的 demo 比例): 中位 {np.median(cover):.0%} min {cover.min():.0%} max {cover.max():.0%}", flush=True)
 print(f"[体量] milestone 进度间距 中位 {np.median(np.diff(Pord)):.3f} (越匀越好), 覆盖 {Pord.min():.2f}-{Pord.max():.2f}", flush=True)
 figs, axs = plt.subplots(1, 2, figsize=(12, 3.8))
-axs[0].bar(range(NM), cover * 100, color="#3b6fb0"); axs[0].axhline(cover.mean() * 100, color="r", ls="--", lw=1, label=f"均值 {cover.mean():.0%}")
-axs[0].set_xlabel("milestone(按进度序)"); axs[0].set_ylabel("覆盖率 %(含此里程碑的 demo 比例)"); axs[0].set_ylim(0, 105)
-axs[0].set_title(f"每 milestone 的跨 episode 覆盖率({Nep} demo)", fontsize=10); axs[0].legend(fontsize=8); axs[0].grid(alpha=.2, axis="y")
-axs[1].plot(Pord, range(NM), "o-", color="#1a9641"); axs[1].set_xlabel("挖掘进度 Pord"); axs[1].set_ylabel("milestone 序"); axs[1].set_xlim(-.02, 1.02)
-axs[1].set_title(f"milestone 进度覆盖(间距中位{np.median(np.diff(Pord)):.2f})", fontsize=10); axs[1].grid(alpha=.25)
-figs.suptitle(f"CRAVE 体量({FREQ} 挖矿): {len(mined)}ep / {Ntot}帧 → KMeans-96 → {NM} milestone", fontsize=11)
+axs[0].bar(range(NM), cover * 100, color="#3b6fb0"); axs[0].axhline(cover.mean() * 100, color="r", ls="--", lw=1, label=f"mean {cover.mean():.0%}")
+axs[0].set_xlabel("milestone (by progress)"); axs[0].set_ylabel("coverage % (demos containing this milestone)"); axs[0].set_ylim(0, 105)
+axs[0].set_title(f"per-milestone cross-episode coverage ({Nep} demos)", fontsize=10); axs[0].legend(fontsize=8); axs[0].grid(alpha=.2, axis="y")
+axs[1].plot(Pord, range(NM), "o-", color="#1a9641"); axs[1].set_xlabel("mined progress Pord"); axs[1].set_ylabel("milestone index"); axs[1].set_xlim(-.02, 1.02)
+axs[1].set_title(f"milestone progress coverage (median gap {np.median(np.diff(Pord)):.2f})", fontsize=10); axs[1].grid(alpha=.25)
+figs.suptitle(f"CRAVE scale ({FREQ} mining): {len(mined)}ep / {Ntot} frames -> KMeans-96 -> {NM} milestones", fontsize=11)
 figs.tight_layout(); figs.savefig(OUT / "cluster_stats.png", dpi=110); plt.close(figs)
 print("SAVED", OUT / "cluster_stats.png", flush=True)
 
@@ -290,17 +311,17 @@ print(f"原型帧 {len(proto)} 个已取", flush=True)
 
 # 画廊
 ncol = 5; nrow = int(np.ceil(NM / ncol))
-figg, axg = plt.subplots(nrow, ncol, figsize=(ncol * 2.5, nrow * 2.3))
+figg, axg = plt.subplots(nrow, ncol, figsize=(ncol * 2.6, nrow * 2.95), constrained_layout=True)
 axg = np.atleast_2d(axg)
 for idx in range(nrow * ncol):
     ax = axg[idx // ncol, idx % ncol]; ax.axis("off")
     if idx < NM:
         k, p, e, fj, img = proto[idx]; ax.imshow(img)
         _src = f"{SOURCES[str(e)][0]} ep{SOURCES[str(e)][1]}" if (SOURCES and str(e) in SOURCES) else f"ep{e}"
-        ax.set_title(f"典型簇 #{k}  进度={p:.2f}\n(来自 {_src})", fontsize=8.5)
-figg.suptitle(f"CRAVE 的 milestone 典型簇词表(ep{EP} 挖矿, {NM} 个里程碑, 按进度排序)\n"
-              "—— 每个簇 = 跨 demo 反复出现的状态; value[t]=当前帧最像的簇的进度", fontsize=12, y=0.997)
-figg.tight_layout(rect=[0, 0, 1, 0.96]); figg.savefig(OUT / "clusters_gallery.png", dpi=110); plt.close(figg)
+        ax.set_title(f"milestone #{k}  progress={p:.2f}\n(from {_src})", fontsize=8.5)
+figg.suptitle(f"CRAVE milestone prototype vocabulary ({NM} milestones, sorted by progress)\n"
+              "each cluster = a recurrent state across demos; value[t] = progress of the cluster the frame looks most like", fontsize=12)
+figg.savefig(OUT / "clusters_gallery.png", dpi=110, bbox_inches="tight"); plt.close(figg)
 print("SAVED", OUT / "clusters_gallery.png", flush=True)
 
 # ===== ② ep808: CRAVE 连续 value + 最近簇; KAI0-AE value; 三档 =====
@@ -366,18 +387,18 @@ print(f"段数 {len(segs)}; 代表段 pos={reps.get(1)} normal={reps.get(0)} neg
 # 段-原型蒙太奇: 每个代表段 取起/中/止 3 帧 + 各自匹配的典型簇原型
 def seg_montage(c, sg, fname):
     s0, s1, _ = sg; picks = [s0, (s0 + s1) // 2, s1]
-    fig, ax = plt.subplots(2, 3, figsize=(11, 6.2))
+    fig, ax = plt.subplots(2, 3, figsize=(11.5, 7.8), constrained_layout=True)
     for col, fi in enumerate(picks):
         cam = grab(EP, fi); ax[0, col].imshow(cam); ax[0, col].axis("off")
-        ax[0, col].set_title(f"ep{EP} 帧{fi}  CRAVE={NAME[ccls[fi]]}\nvalue={cv[fi]:.2f}", fontsize=9, color=RGB[ccls[fi]])
+        ax[0, col].set_title(f"ep{EP} frame {fi}  CRAVE={NAME[ccls[fi]]}\nvalue={cv[fi]:.2f}", fontsize=9, color=RGB[ccls[fi]])
         mk = nm30[fi]; pk, pp, pe, pj, pimg = proto[mk]
         ax[1, col].imshow(pimg); ax[1, col].axis("off")
-        ax[1, col].set_title(f"value={cv[fi]:.2f} 对应典型簇 #{pk}\n(挖掘进度={pp:.2f}, demo ep{pe})", fontsize=9, color="#3b6fb0")
-    cls_name = {1: "POSITIVE 上升段", 0: "NORMAL 平台段", -1: "NEGATIVE 退步段"}[c]
-    fig.suptitle(f"{cls_name}: ep{EP} 帧[{s0}-{s1}] —— 上排=该段相机帧, 下排=各帧匹配的典型簇原型\n"
-                 f"value {cv[s0]:.2f}→{cv[s1]:.2f}: 因匹配的簇从 #{nm30[s0]}(进度{Pord[nm30[s0]]:.2f}) 变到 #{nm30[s1]}(进度{Pord[nm30[s1]]:.2f})",
+        ax[1, col].set_title(f"value={cv[fi]:.2f} -> milestone #{pk}\n(progress={pp:.2f}, demo ep{pe})", fontsize=9, color="#3b6fb0")
+    cls_name = {1: "POSITIVE (rising)", 0: "NORMAL (plateau)", -1: "NEGATIVE (regression)"}[c]
+    fig.suptitle(f"{cls_name}: ep{EP} frames [{s0}-{s1}] - top = camera frames, bottom = matched milestone prototypes\n"
+                 f"value {cv[s0]:.2f}->{cv[s1]:.2f}: matched cluster goes from #{nm30[s0]} (prog {Pord[nm30[s0]]:.2f}) to #{nm30[s1]} (prog {Pord[nm30[s1]]:.2f})",
                  fontsize=11, color=RGB[c])
-    fig.tight_layout(rect=[0, 0, 1, 0.93]); fig.savefig(OUT / fname, dpi=110); plt.close(fig)
+    fig.savefig(OUT / fname, dpi=110, bbox_inches="tight"); plt.close(fig)
     print("SAVED", OUT / fname, flush=True)
     return picks
 
@@ -395,18 +416,24 @@ def cluster_runs(a, minlen=15):
             s = i
     return out
 clr = cluster_runs(nm30, minlen=15)
-ncl = len(clr); cols = 7; nrl = int(np.ceil(ncl / cols))
-figt = plt.figure(figsize=(cols * 1.95, nrl * 3.4))
-gst = figt.add_gridspec(nrl * 2, cols, hspace=0.6, wspace=0.1, height_ratios=[1, 1] * nrl)
-for i, (ck, vs, ve) in enumerate(clr):
-    lr, lc = i // cols, i % cols
-    af = figt.add_subplot(gst[lr * 2, lc]); af.imshow(grab(EP, (vs + ve) // 2)); af.axis("off")
-    af.set_title(f"#{i+1} 帧[{vs}-{ve}] {(ve-vs)/30:.1f}s", fontsize=6.8)
-    ap = figt.add_subplot(gst[lr * 2 + 1, lc]); ap.imshow(proto[ck][4]); ap.axis("off")
-    ap.set_title(f"→典型簇#{ck} p={Pord[ck]:.2f}", fontsize=7, color="#3b6fb0")
-figt.suptitle(f"ep{EP}: 经过的 milestone 簇序列({ncl} 段)— 上=ep{EP}该段原视频帧, 下=匹配的典型簇原型; 簇号变=簇跳变",
-              fontsize=11, y=0.999)
-figt.savefig(OUT / "cluster_timeline.png", dpi=110, bbox_inches="tight"); plt.close(figt)
+# ===== 对齐图: 仅展示这 NM 个 milestone 与 ep 的对齐关系(每行一个 milestone: 原型 + 命中帧占用条 + 顶部 value 曲线) =====
+rows = list(range(NM))   # 全部 milestone(已按进度排序)
+figt = plt.figure(figsize=(13, 0.55 * NM + 1.6))
+gst = figt.add_gridspec(NM + 1, 2, width_ratios=[1, 9], height_ratios=[1.5] + [1] * NM, wspace=0.02, hspace=0.12)
+axv = figt.add_subplot(gst[0, 1])
+axv.plot(np.arange(n), cv, color="#2ca02c", lw=1.8); axv.set_xlim(0, n); axv.set_ylim(0, 1.05)
+axv.set_xticks([]); axv.set_ylabel("value", fontsize=8); axv.grid(alpha=.2)
+axv.set_title(f"ep{EP}: alignment to the {NM} milestone clusters - blue = frames matched to that milestone (top: CRAVE value)", fontsize=11)
+for ri, ck in enumerate(rows):
+    axp = figt.add_subplot(gst[ri + 1, 0]); axp.imshow(proto[ck][4]); axp.axis("off")
+    axp.set_title(f"#{ck} p={Pord[ck]:.2f}", fontsize=7.5, color="#3b6fb0")
+    axb = figt.add_subplot(gst[ri + 1, 1])
+    axb.fill_between(np.arange(n), 0, (nm30 == ck).astype(float), step="mid", color="#3b6fb0", alpha=.85)
+    axb.set_xlim(0, n); axb.set_ylim(0, 1); axb.set_yticks([])
+    for sp in ("top", "right", "left"): axb.spines[sp].set_visible(False)
+    if ri < NM - 1: axb.set_xticks([])
+    else: axb.set_xlabel("ep frame (30fps)")
+figt.savefig(OUT / "cluster_timeline.png", dpi=120, bbox_inches="tight"); plt.close(figt)
 print("SAVED", OUT / "cluster_timeline.png", flush=True)
 from collections import defaultdict
 bycl = defaultdict(list)
