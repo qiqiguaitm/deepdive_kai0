@@ -364,9 +364,10 @@ class CasualWATrainer(Trainer):
         else:
             gathered = [local]
         if self.is_main_process:
-            agg, n = efg.aggregate(gathered, hor)
-            self.logger.info("eval_fold step=%d n_eps=%d %s", self.cur_step, n,
-                             " ".join(f"mae@{h}={agg[h]:.4f}" for h in hor if agg.get(h) is not None))
+            agg, n = efg.aggregate(gathered, hor)  # {ss@h, cum@h}
+            self.logger.info("eval_fold step=%d n_eps=%d ss[%s] cum[%s]", self.cur_step, n,  # ss=single-step cum=cumulative
+                             " ".join(f"@{h}={agg[f'ss@{h}']:.4f}" for h in hor if agg.get(f"ss@{h}") is not None),
+                             " ".join(f"@{h}={agg[f'cum@{h}']:.4f}" for h in hor if agg.get(f"cum@{h}") is not None))
 
     def if_visualize(self):
         return self.process_index == 0 and (self.cur_step % self.view_interval == 0 or self.cur_step == 1) and len(self._outputs) == 0

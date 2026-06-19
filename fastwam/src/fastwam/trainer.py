@@ -41,6 +41,9 @@ class Wan22Trainer:
         self.max_steps = int(max_steps) if max_steps is not None else None
         self.log_every = int(cfg.log_every)
         self.save_every = int(cfg.save_every)
+        # Rotate full DeepSpeed `state/` checkpoints: keep only the last N (default 2);
+        # `weights/*.pt` are always kept in full (eval needs them). Saves ~4TB at save_every=1000.
+        self.state_keep_last = int(getattr(cfg, "state_keep_last", 2))
         self.eval_every = int(cfg.eval_every)
         self.eval_num_inference_steps = int(cfg.eval_num_inference_steps)
         # 内联 fold 评测(全 val 集 sharded MAE@{1,10,chunk/2,chunk},复用训练 rank)
@@ -632,6 +635,24 @@ class Wan22Trainer:
         with open(state_file, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=True, indent=2)
 
+    def _rotate_state_checkpoints(self):
+        """Keep only the last `state_keep_last` `state/step_*` dirs; weights are never touched."""
+        import re
+        import shutil
+        keep = max(1, int(getattr(self, "state_keep_last", 2)))
+        try:
+            entries = os.listdir(self.state_dir)
+        except FileNotFoundError:
+            return
+        dirs = [
+            d for d in entries
+            if re.fullmatch(r"step_\d+", d) and os.path.isdir(os.path.join(self.state_dir, d))
+        ]
+        dirs.sort(key=lambda d: int(d.split("_")[1]))
+        for d in dirs[:-keep]:
+            shutil.rmtree(os.path.join(self.state_dir, d), ignore_errors=True)
+            logger.info("[ckpt] rotated old state checkpoint (kept last %d): removed %s", keep, d)
+
     def save_checkpoint(self):
         step_tag = f"step_{self.global_step:06d}"
 
@@ -646,6 +667,11 @@ class Wan22Trainer:
         self.accelerator.save_state(output_dir=state_path)
         if self.accelerator.is_main_process:
             self._save_trainer_state(state_path)
+        self.accelerator.wait_for_everyone()
+
+        # Keep only the last `state_keep_last` state checkpoints (weights are all kept).
+        if self.accelerator.is_main_process:
+            self._rotate_state_checkpoints()
         self.accelerator.wait_for_everyone()
 
         return {"weights_path": ckpt_path, "state_path": state_path}
@@ -826,14 +852,14 @@ class Wan22Trainer:
                         fold = self.evaluate_fold()
                         self.accelerator.wait_for_everyone()
                         if fold is not None and self.accelerator.is_main_process:
-                            mae = fold["mae"]
+                            mae = fold["mae"]  # {ss@h, cum@h}
                             logger.info(
-                                "eval_fold step=%d n_eps=%d %s",  # 不用 [..] 前缀(rich 会当 markup 吞掉)
+                                "eval_fold step=%d n_eps=%d ss[%s] cum[%s]",  # ss=single-step cum=cumulative
                                 self.global_step, fold["n_eps"],
-                                " ".join(f"mae@{h}={mae[h]:.4f}" for h in self.eval_fold_hor if mae.get(h) is not None),
+                                " ".join(f"@{h}={mae[f'ss@{h}']:.4f}" for h in self.eval_fold_hor if mae.get(f"ss@{h}") is not None),
+                                " ".join(f"@{h}={mae[f'cum@{h}']:.4f}" for h in self.eval_fold_hor if mae.get(f"cum@{h}") is not None),
                             )
-                            self._wandb_log({f"eval_fold/mae@{h}": float(mae[h])
-                                             for h in self.eval_fold_hor if mae.get(h) is not None})
+                            self._wandb_log({f"eval_fold/{k}": float(mae[k]) for k in mae if mae.get(k) is not None})
 
                     if self.save_every > 0 and self.global_step % self.save_every == 0:
                         ckpt_info = self.save_checkpoint()

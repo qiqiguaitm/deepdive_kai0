@@ -79,7 +79,7 @@ def eval_fold_gwp(pipe, transformer, val_root, view_keys, stats_path, t5_pkl,
         if len(wins) > max_win_per_ep:
             wins = [wins[i] for i in np.unique(np.linspace(0, len(wins) - 1, max_win_per_ep).astype(int))]
         fr = fc.get(ep)
-        em = {f"mae@{h}": [] for h in hor}
+        em = {f"ss@{h}": [] for h in hor}; em.update({f"cum@{h}": [] for h in hor})
         for gi in wins:
             d = ds[int(gi)]
             _, f = info[int(gi)]
@@ -100,9 +100,10 @@ def eval_fold_gwp(pipe, transformer, val_root, view_keys, stats_path, t5_pkl,
             L = min(len(pa), len(gt)); ae = np.abs(pa[:L] - gt[:L])
             for h in hor:
                 if h <= L:
-                    em[f"mae@{h}"].append(float(ae[:h].mean()))
-        metric[ep] = {f"mae@{h}": (float(np.mean(em[f"mae@{h}"])) if em[f"mae@{h}"] else None) for h in hor}
-        log(f"[gwp_eval shard{shard_id}] ep{ep} mae@{hor[-1]}={metric[ep].get(f'mae@{hor[-1]}')}")
+                    em[f"ss@{h}"].append(float(ae[h - 1].mean()))   # single-step: 第 h 步那一步
+                    em[f"cum@{h}"].append(float(ae[:h].mean()))     # cumulative: 前 h 步均值
+        metric[ep] = {k: (float(np.mean(v)) if v else None) for k, v in em.items()}
+        log(f"[gwp_eval shard{shard_id}] ep{ep} cum@{hor[-1]}={metric[ep].get(f'cum@{hor[-1]}')}")
     return metric, hor
 
 
@@ -111,7 +112,9 @@ def aggregate(metrics_list, hor):
     for m in metrics_list:
         eps.update(m)
     out = {}
-    for h in hor:
-        v = [r[f"mae@{h}"] for r in eps.values() if r.get(f"mae@{h}") is not None]
-        out[h] = float(np.mean(v)) if v else None
+    for kind in ("ss", "cum"):
+        for h in hor:
+            key = f"{kind}@{h}"
+            v = [r[key] for r in eps.values() if r.get(key) is not None]
+            out[key] = float(np.mean(v)) if v else None
     return out, len(eps)

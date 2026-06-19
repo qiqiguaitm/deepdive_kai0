@@ -63,7 +63,8 @@ def eval_fold(model, val_root, view_keys, a_mean, a_std, s_mean, s_std, ctx, cma
         gt_all = np.stack(df["action"].to_numpy())[:, :14]
         st_all = np.stack(df["observation.state"].to_numpy())[:, :14]
         decs = {k: VideoDecoder(f"{val_root}/videos/chunk-000/observation.images.{k}/episode_{ep:06d}.mp4") for k in view_keys}
-        L = len(df); em = {f"mae@{h}": [] for h in hor}
+        L = len(df)
+        em = {f"ss@{h}": [] for h in hor}; em.update({f"cum@{h}": [] for h in hor})
         wins = list(range(0, max(1, L - 1), 16))
         if max_win_per_ep and len(wins) > max_win_per_ep:  # 同 gwp:均匀取样封顶,避免长 episode eval 爆时
             wins = [wins[i] for i in np.unique(np.linspace(0, len(wins) - 1, max_win_per_ep).astype(int))]
@@ -88,19 +89,23 @@ def eval_fold(model, val_root, view_keys, a_mean, a_std, s_mean, s_std, ctx, cma
             gt = gt_all[f:f + action_chunk]
             n = min(len(pa), len(gt)); ae = np.abs(pa[:n] - gt[:n])
             for h in hor:
-                if h <= n: em[f"mae@{h}"].append(float(ae[h - 1].mean()))
-        metric[ep] = {f"mae@{h}": (float(np.mean(em[f"mae@{h}"])) if em[f"mae@{h}"] else None) for h in hor}
-        log(f"[shard {shard_id}] ep{ep} mae@{hor[-1]}={metric[ep][f'mae@{hor[-1]}']}")
+                if h <= n:
+                    em[f"ss@{h}"].append(float(ae[h - 1].mean()))   # single-step: 第 h 步那一步
+                    em[f"cum@{h}"].append(float(ae[:h].mean()))     # cumulative: 前 h 步均值
+        metric[ep] = {k: (float(np.mean(v)) if v else None) for k, v in em.items()}
+        log(f"[shard {shard_id}] ep{ep} cum@{hor[-1]}={metric[ep].get(f'cum@{hor[-1]}')}")
     return metric, lat_ms
 
 
 def aggregate(metrics_list, hor=HOR_DEFAULT):
-    """合并多 shard 的 {ep:{mae@h}} → 全局 {h: 全集均值}(per-ep 已是窗口均值)。"""
+    """合并多 shard 的 {ep:{ss@h,cum@h}} → 全局 {ss@h,cum@h: 全集均值}(per-ep 已是窗口均值)。"""
     eps = {}
     for m in metrics_list:
         eps.update(m)
     out = {}
-    for h in hor:
-        vals = [v[f"mae@{h}"] for v in eps.values() if v.get(f"mae@{h}") is not None]
-        out[h] = float(np.mean(vals)) if vals else None
+    for kind in ("ss", "cum"):
+        for h in hor:
+            key = f"{kind}@{h}"
+            vals = [v[key] for v in eps.values() if v.get(key) is not None]
+            out[key] = float(np.mean(vals)) if vals else None
     return out, len(eps)
