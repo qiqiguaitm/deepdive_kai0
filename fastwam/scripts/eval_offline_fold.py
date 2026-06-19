@@ -71,6 +71,7 @@ def main():
     ap.add_argument("--weights"); ap.add_argument("--out_dir", required=True)
     ap.add_argument("--shard_id", type=int, default=0); ap.add_argument("--num_shards", type=int, default=8)
     ap.add_argument("--n_metric_eps", type=int, default=200)
+    ap.add_argument("--max_win_per_ep", type=int, default=0, help="每集窗口封顶(同 gwp,0=全部)")
     ap.add_argument("--nfe", type=int, default=20)
     ap.add_argument("--joint", action="store_true", help="用 infer_joint(带视频想象)替代 infer_action")
     ap.add_argument("--engine", default="stock", choices=["stock", "opt"],
@@ -151,7 +152,10 @@ def main():
         decs = {k: VideoDecoder(f"{VAL}/videos/chunk-000/observation.images.{k}/episode_{ep:06d}.mp4") for k in VK}
         L = len(df)
         em = {f"mae@{h}": [] for h in HOR}; emc = {f"mae@{h}": [] for h in HOR}
-        for f in range(0, max(1, L - 1), 16):
+        _wins = list(range(0, max(1, L - 1), 16))
+        if args.max_win_per_ep and len(_wins) > args.max_win_per_ep:  # 同 gwp:均匀取样封顶
+            _wins = [_wins[i] for i in np.unique(np.linspace(0, len(_wins) - 1, args.max_win_per_ep).astype(int))]
+        for f in _wins:
             frames = {k: decs[k].get_frames_at([min(f, decs[k].metadata.num_frames - 1)]).data[0].permute(1, 2, 0).numpy() for k in VK}
             img = prep_image(frames)
             prop = torch.from_numpy((st_all[f] - s_mean) / (s_std + 1e-8)).float()
