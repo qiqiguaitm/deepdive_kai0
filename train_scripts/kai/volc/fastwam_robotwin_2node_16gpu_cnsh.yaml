@@ -1,0 +1,114 @@
+# FastWAM RoboTwin training — 2 nodes × 8 A100-80G (16 GPU) on Volcano robot-task (cn-shanghai)
+#
+#   Region:   cn-shanghai
+#   Queue:    robot-task  (q-20251204185107-fvnpx, zone cn-shanghai-a)
+#   Hosts:    2 × ml.hpcpni2.28xlarge  (112 vCPU, 1960 GiB, 8× Tesla-A100-80G)
+#   GPUs:     16 (DeepSpeed ZeRO-1, real per-sample prompts — NOT the override workaround)
+#   Storage:  vepfs-cnsh075262e1f815 → /vePFS  (env + code + data + T5 cache at /vePFS/tim/FastWAM)
+#   Image:    visincept-cn-shanghai.cr.volces.com/grasp/kai:kai0-gf0
+#
+# Submit: export VOLC_AK=.. VOLC_SK=..; python submit_yaml.py fastwam_robotwin_2node_16gpu_cnsh.yaml
+
+TaskName: "fst_pi05_pgt"
+Description: ""
+Tags: []
+
+ImageUrl: "visincept-cn-shanghai.cr.volces.com/grasp/kai:kai0-gf0"
+
+ResourceQueueName: "robot-task"
+
+Framework: "PyTorch"  # injects MLP_WORKER_0_HOST / MLP_WORKER_0_PORT / MLP_WORKER_NUM / MLP_ROLE_INDEX / MLP_WORKER_GPU
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 2
+    Flavor: "ml.hpcpni2.28xlarge"  # 8× A100-80G per host
+
+ActiveDeadlineSeconds: 259200  # 72h cap
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnsh075262e1f815"
+    SubPath: ""
+    MountPath: "/vePFS"
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+  - Name: HF_DATASETS_OFFLINE
+    Value: "1"
+  - Name: TOKENIZERS_PARALLELISM
+    Value: "false"
+  - Name: NCCL_DEBUG
+    Value: "INFO"
+  - Name: OMP_NUM_THREADS
+    Value: "8"
+  - Name: PYTORCH_CUDA_ALLOC_CONF
+    Value: "expandable_segments:True"
+
+Entrypoint: |
+  set -e
+  REPO=/vePFS/tim/FastWAM
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  LOG_DIR=$REPO/volc_logs; mkdir -p "$LOG_DIR"
+  RUN_NAME=${RUN_NAME:-cnsh_robotwin_2n16g_v1}
+  LOG="$LOG_DIR/${RUN_NAME}_${STAMP}_node${MLP_ROLE_INDEX:-0}.log"
+  exec > >(tee -a "$LOG") 2>&1
+  echo "=== entrypoint $(date -u) node=${MLP_ROLE_INDEX:-0}/${MLP_WORKER_NUM:-1} ==="
+  set -x
+
+  # ---- multi-node rendezvous (MLP_WORKER_0_PORT=2222 is SSH; use our own) ----
+  export NNODES=${MLP_WORKER_NUM:-1}
+  export NODE_RANK=${MLP_ROLE_INDEX:-0}
+  export MASTER_ADDR=${MLP_WORKER_0_HOST:-127.0.0.1}
+  export MASTER_PORT=29501
+  export NUM_GPUS=${MLP_WORKER_GPU:-8}
+  echo "[mn] MASTER=$MASTER_ADDR:$MASTER_PORT NNODES=$NNODES NODE_RANK=$NODE_RANK GPUS=$NUM_GPUS TOTAL=$((NNODES*NUM_GPUS))"
+  nvidia-smi -L | head
+
+  # ---- env on shared vePFS (container disk too small) ----
+  source /vePFS/tim/miniconda3/etc/profile.d/conda.sh
+  conda activate fastwam
+  cd "$REPO"
+  export PYTHONPATH="$REPO/src:${PYTHONPATH:-}"
+  export DIFFSYNTH_MODEL_BASE_PATH="$REPO/checkpoints" DIFFSYNTH_SKIP_DOWNLOAD=true
+  export HF_HOME="$REPO/.hf_home" HF_DATASETS_CACHE="$REPO/.hf_datasets_cache" TMPDIR="$REPO/.tmp"
+  mkdir -p "$HF_HOME" "$HF_DATASETS_CACHE" "$TMPDIR"
+  export TOKENIZERS_PARALLELISM=false PYTHONUNBUFFERED=1 CUDA_HOME=/usr/local/cuda
+  python -c "import torch,fastwam,deepspeed; print('torch',torch.__version__,'gpus',torch.cuda.device_count())"
+
+  # ---- WAIT for the full T5 text-embed cache (gf0 generates it on the same vePFS) ----
+  NEED=921032
+  for i in $(seq 1 240); do
+    if grep -qa PRECOMPUTE_FULL_DONE "$REPO/_dl/precompute_full.log" 2>/dev/null; then echo "[cache] DONE marker found"; break; fi
+    n=$(ls -U "$REPO/data/text_embeds_cache/robotwin" 2>/dev/null | wc -l)
+    echo "[cache] waiting: $n / $NEED (try $i)"; sleep 60
+  done
+
+  # ---- accelerate DeepSpeed via env (torchrun owns rendezvous -> world_size=NNODES*GPUS) ----
+  export ACCELERATE_USE_DEEPSPEED=true
+  export ACCELERATE_DEEPSPEED_CONFIG_FILE="$REPO/scripts/ds_configs/ds_zero1_config.json"
+  export ACCELERATE_DEEPSPEED_ZERO_STAGE=1 ACCELERATE_GRADIENT_ACCUMULATION_STEPS=1 ACCELERATE_MIXED_PRECISION=bf16
+
+  TASK=${TASK:-robotwin_uncond_3cam_384_1e-4}
+  OUT="$REPO/runs/${TASK}/${RUN_NAME}"; mkdir -p "$OUT"
+  echo "[train] real prompts (NO override), world=$((NNODES*NUM_GPUS)) out=$OUT"
+
+  exec torchrun \
+    --nnodes="$NNODES" --node_rank="$NODE_RANK" --nproc_per_node="$NUM_GPUS" \
+    --master_addr="$MASTER_ADDR" --master_port="$MASTER_PORT" \
+    scripts/train.py "task=${TASK}" "output_dir=${OUT}" \
+    batch_size=${BATCH_SIZE:-2} num_workers=${NUM_WORKERS:-10} \
+    num_epochs=${NUM_EPOCHS:-5} save_every=${SAVE_EVERY:-2500} eval_every=${EVAL_EVERY:-100000} \
+    model.mot_checkpoint_mixed_attn=true wandb.enabled=false
+
+RetryOptions:
+    EnableRetry: false
+    MaxRetryTimes: 0
+
+AccessType: "Public"

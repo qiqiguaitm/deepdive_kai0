@@ -1,0 +1,123 @@
+# FastWAM RoboTwin training — 2 nodes × 8 H20 (16 GPU) on Volcano Robot-North-H20
+#
+#   Region:   cn-beijing
+#   Queue:    Robot-North-H20  (q-20260516104642-khch9, zone cn-beijing-e)
+#   Hosts:    2 × ml.hpcpni3ln.45xlarge  (each = 8× H20-SXM5-96GB + RDMA)
+#   GPUs:     16 (DeepSpeed ZeRO-1 world_size=16)
+#   Storage:  vepfs-cnbj875793a96d6b → /vePFS-North-E/vis_robot  (code/data/weights/T5-cache already there, SHA-verified)
+#   Image:    dvs-cr-cn-beijing.cr.volces.com/vis_robot/fastwam-rt:v1.0
+#
+# Submit:
+#   export VOLC_AK=... VOLC_SK=...
+#   python submit_yaml.py fastwam_robotwin_2node_16gpu.yaml
+
+TaskName: "fastwam-robotwin-2node-16gpu"
+Description: "FastWAM RoboTwin uncond_3cam_384 — 2×8 H20 RDMA, DeepSpeed ZeRO-1 world=16"
+Tags: []
+
+ImageUrl: "dvs-cr-cn-beijing.cr.volces.com/vis_robot/fastwam-rt:v1.0"
+
+ResourceQueueName: "Robot-North-H20"
+
+Framework: "PyTorch"  # injects MLP_WORKER_0_HOST / MLP_WORKER_0_PORT / MLP_WORKER_NUM / MLP_ROLE_INDEX / MLP_WORKER_GPU
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 2
+    Flavor: "ml.hpcpni3ln.45xlarge"  # 8× H20-SXM5-96GB per host, RDMA-capable
+
+ActiveDeadlineSeconds: 259200  # 72h cap
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnbj875793a96d6b"
+    SubPath: "vis_robot"
+    MountPath: "/vePFS-North-E/vis_robot"
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+  - Name: HF_DATASETS_OFFLINE
+    Value: "1"
+  - Name: TOKENIZERS_PARALLELISM
+    Value: "false"
+  - Name: NCCL_DEBUG
+    Value: "INFO"
+  - Name: OMP_NUM_THREADS
+    Value: "8"
+  - Name: PYTORCH_CUDA_ALLOC_CONF
+    Value: "expandable_segments:True"
+
+Entrypoint: |
+  set -e
+  REPO=/vePFS-North-E/vis_robot/workspace/tim/fastwam
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  LOG_DIR=/vePFS-North-E/vis_robot/workspace/tim/volc_logs
+  mkdir -p "$LOG_DIR"
+  RUN_NAME=${RUN_NAME:-volc_robotwin_2n16g_v1}
+  LOG="$LOG_DIR/${RUN_NAME}_${STAMP}_node${MLP_ROLE_INDEX:-0}.log"
+  exec > >(tee -a "$LOG") 2>&1
+  echo "=== entrypoint start $(date -u) node=${MLP_ROLE_INDEX:-0}/${MLP_WORKER_NUM:-1} ==="
+  set -x
+
+  # ---- multi-node rendezvous (Volcano MLP_* ; MLP_WORKER_0_PORT=2222 is SSH, use our own) ----
+  export NNODES=${MLP_WORKER_NUM:-1}
+  export NODE_RANK=${MLP_ROLE_INDEX:-0}
+  export MASTER_ADDR=${MLP_WORKER_0_HOST:-127.0.0.1}
+  export MASTER_PORT=29501
+  export NUM_GPUS=${MLP_WORKER_GPU:-8}
+  TOTAL=$((NNODES*NUM_GPUS))
+  echo "[mn] MASTER=$MASTER_ADDR:$MASTER_PORT NNODES=$NNODES NODE_RANK=$NODE_RANK NUM_GPUS=$NUM_GPUS TOTAL=$TOTAL"
+  nvidia-smi -L | head; ip -br addr | head
+
+  cd "$REPO"
+  export PYTHONPATH="$REPO/src:${PYTHONPATH:-}"
+  export DIFFSYNTH_MODEL_BASE_PATH="$REPO/checkpoints" DIFFSYNTH_SKIP_DOWNLOAD=true
+  export HF_HOME="$REPO/.hf_home" HF_DATASETS_CACHE="$REPO/.hf_datasets_cache" TMPDIR="$REPO/.tmp"
+  mkdir -p "$HF_HOME" "$HF_DATASETS_CACHE" "$TMPDIR"
+  export TOKENIZERS_PARALLELISM=false PYTHONUNBUFFERED=1
+  unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY || true
+
+  # ---- pick python from the image; ensure fastwam + deps import (vePFS src takes precedence) ----
+  PY=$(command -v python || command -v python3)
+  echo "[env] PY=$PY"; "$PY" -c "import torch,accelerate,deepspeed; print('torch',torch.__version__,'gpus',torch.cuda.device_count(),'accel',accelerate.__version__)"
+  "$PY" -c "import fastwam; print('fastwam import OK')" || "$PY" -m pip install -e . --no-deps -q
+
+  # ---- NCCL / RDMA ----
+  export NCCL_IB_DISABLE=0 NCCL_IB_HCA=${NCCL_IB_HCA:-mlx5}
+  export NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-eth0}
+  ls /sys/class/infiniband 2>/dev/null || export NCCL_IB_DISABLE=1
+
+  # ---- accelerate DeepSpeed via env (torchrun owns cross-node rendezvous -> world_size=TOTAL) ----
+  export ACCELERATE_USE_DEEPSPEED=true
+  export ACCELERATE_DEEPSPEED_CONFIG_FILE="$REPO/scripts/ds_configs/ds_zero1_config.json"
+  export ACCELERATE_DEEPSPEED_ZERO_STAGE=1
+  export ACCELERATE_GRADIENT_ACCUMULATION_STEPS=1
+  export ACCELERATE_MIXED_PRECISION=no
+
+  TASK=${TASK:-robotwin_uncond_3cam_384_1e-4}
+  OUT="$REPO/runs/${TASK}/${RUN_NAME}"
+  mkdir -p "$OUT"
+  echo "[train] node $NODE_RANK/$NNODES world=$TOTAL task=$TASK out=$OUT"
+
+  exec "$PY" -m torch.distributed.run \
+    --nnodes="$NNODES" --node_rank="$NODE_RANK" --nproc_per_node="$NUM_GPUS" \
+    --master_addr="$MASTER_ADDR" --master_port="$MASTER_PORT" \
+    scripts/train.py \
+    "task=${TASK}" "output_dir=${OUT}" "wandb.name=${TASK}" \
+    num_workers=${NUM_WORKERS:-10} \
+    num_epochs=${NUM_EPOCHS:-5} \
+    save_every=${SAVE_EVERY:-2500} \
+    eval_every=${EVAL_EVERY:-100000} \
+    wandb.enabled=false
+
+RetryOptions:
+    EnableRetry: false
+    MaxRetryTimes: 0
+
+AccessType: "Public"

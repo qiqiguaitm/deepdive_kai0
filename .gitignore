@@ -110,3 +110,10 @@ cosmos/wam_fold_policy_runs/
 cosmos/wam_fold_wm_runs/
 # fastwam local conda ffmpeg install (vendored libs, ~420M)
 fastwam/ffmpeg-libs/
+
+# secrets / external repos / run outputs (auto-added)
+.volc_creds
+**/.volc_creds
+/Ctrl-World/
+/cosmos/cosmos_policy_pipper_fold_colth/
+/cosmos/cosmos_policy_pipper_fold_colth_runs/

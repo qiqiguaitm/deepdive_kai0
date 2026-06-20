@@ -723,8 +723,10 @@ class CasualWorldActionTransformer(
         state_states = self.action_encoder(state)
         num_action_tokens = action_states.shape[1] 
         num_state_tokens = state_states.shape[1]
-        num_ref_tokens = post_patch_width * post_patch_height
-        num_noisy_tokens = (post_patch_num_frames - 1) * post_patch_width * post_patch_height
+        # [ACWM multi-frame history] ref 可为 K 帧(带噪历史条件);K=1 时与原行为完全一致。
+        num_ref_frames = ref_latents.shape[2] // p_t
+        num_ref_tokens = num_ref_frames * post_patch_width * post_patch_height
+        num_noisy_tokens = (post_patch_num_frames - num_ref_frames) * post_patch_width * post_patch_height
         extra_states = torch.cat([state_states, action_states], dim=1) 
 
         # 4. Get rotary positional embeddings (RoPE)
@@ -862,8 +864,10 @@ class CasualWorldActionTransformer(
         state_states = self.action_encoder(state)
         num_action_tokens = action_states.shape[1] 
         num_state_tokens = state_states.shape[1]
-        num_ref_tokens = post_patch_width * post_patch_height
-        num_noisy_tokens = (post_patch_num_frames - 1) * post_patch_width * post_patch_height
+        # [ACWM multi-frame history] ref 可为 K 帧(带噪历史条件);K=1 时与原行为完全一致。
+        num_ref_frames = ref_latents.shape[2] // p_t
+        num_ref_tokens = num_ref_frames * post_patch_width * post_patch_height
+        num_noisy_tokens = (post_patch_num_frames - num_ref_frames) * post_patch_width * post_patch_height
         extra_states = torch.cat([state_states, action_states], dim=1) 
 
         # 4. Get rotary positional embeddings (RoPE)
@@ -987,8 +991,10 @@ class CasualWorldActionTransformer(
         state_states = self.action_encoder(state)
         num_action_tokens = action_states.shape[1] # [B, 48, D]
         num_state_tokens = state_states.shape[1] # [B, 1, D]
-        num_ref_tokens = post_patch_width * post_patch_height
-        num_noisy_tokens = (post_patch_num_frames - 1) * post_patch_width * post_patch_height
+        # [ACWM multi-frame history] ref 可为 K 帧(带噪历史条件);K=1 时与原行为完全一致。
+        num_ref_frames = ref_latents.shape[2] // p_t
+        num_ref_tokens = num_ref_frames * post_patch_width * post_patch_height
+        num_noisy_tokens = (post_patch_num_frames - num_ref_frames) * post_patch_width * post_patch_height
         extra_states = torch.cat([state_states, action_states], dim=1)  # [B, 49, D]
 
         rotary_emb = self.rope(hidden_states) # (B, 288, 1, D)

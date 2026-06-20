@@ -18,9 +18,19 @@ from giga_datasets import load_dataset
 DATA = os.environ.get("GWP_DATA", "../kai0/data/wam_fold_v1")
 CKPT = os.environ.get("WAN_DIFFUSERS", "../checkpoints/Wan2.2-TI2V-5B-Diffusers")
 NORM = "./assets_visrobot01/norm_stats_vis.json"
-VIEW_KEYS = ["observation.images.cam_high", "observation.images.cam_left_wrist", "observation.images.cam_right_wrist"]
+# [ACWM unify] 可用环境变量覆盖相机序/时序窗/输出目录(默认与原行为一致,向后兼容):
+#   GWP_VIEW_KEYS=cam1,cam2,cam3  统一相机序(俯视,左腕,右腕);visrobot 用 top_head,hand_left,hand_right
+#   GWP_OFFS=0,4,8,...,48         时序采样偏移;更密(如 range(0,49,4)=13帧)→ 更长 latent 窗(T_lat=4)→ 支持 K>1 history
+#   GWP_OUT_SUBDIR=vae_latent_uni 输出子目录(避免覆盖已有 vae_latent)
+VIEW_KEYS = os.environ.get(
+    "GWP_VIEW_KEYS",
+    "observation.images.cam_high,observation.images.cam_left_wrist,observation.images.cam_right_wrist",
+).split(",")
 NUM_FRAMES = 48
-OFFS = [0, NUM_FRAMES // 4, NUM_FRAMES // 2, 3 * NUM_FRAMES // 4, NUM_FRAMES]
+if os.environ.get("GWP_OFFS"):
+    OFFS = [int(x) for x in os.environ["GWP_OFFS"].split(",")]
+else:
+    OFFS = [0, NUM_FRAMES // 4, NUM_FRAMES // 2, 3 * NUM_FRAMES // 4, NUM_FRAMES]
 
 
 class WindowDS(Dataset):
@@ -55,7 +65,7 @@ def main():
     args = ap.parse_args()
     emb_id = "visrobot01" if "vis" in args.emb else "kairobot01"
     root = f"{DATA}/{args.emb}"
-    out_dir = f"{root}/vae_latent"; os.makedirs(out_dir, exist_ok=True)
+    out_dir = f"{root}/{os.environ.get('GWP_OUT_SUBDIR', 'vae_latent')}"; os.makedirs(out_dir, exist_ok=True)
     dev, dt = "cuda", torch.bfloat16
 
     eps = [json.loads(l) for l in open(f"{root}/meta/episodes.jsonl") if l.strip()]
