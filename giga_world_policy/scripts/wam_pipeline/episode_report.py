@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
 from collections import OrderedDict
+from PIL import Image
 from wam_pipeline.eval_watch import build_window_indices, EpisodeFrameCache, _hwc_to_chw01, _to_thwc_gpu
 VK = ["observation.images.cam_high", "observation.images.cam_left_wrist", "observation.images.cam_right_wrist"]
 DIM = [f"L_j{i}" for i in range(6)] + ["L_grip"] + [f"R_j{i}" for i in range(6)] + ["R_grip"]
@@ -60,6 +61,7 @@ def get_args():
     ap.add_argument("--aggregate", action="store_true")
     ap.add_argument("--exec_horizon", type=int, default=16); ap.add_argument("--action_chunk", type=int, default=48)
     ap.add_argument("--steps_inf", type=int, default=10); ap.add_argument("--fps", type=int, default=5)
+    ap.add_argument("--openloop", type=int, default=1)  # C 开环 rollout(exec-jump 自驱动)
     ap.add_argument("--steps_act", type=int, default=0)
     ap.add_argument("--frame_cache", type=int, default=4)
     ap.add_argument("--engine", default="stock", choices=["stock", "opt"])  # opt=prefix-KV/compile 优化引擎
@@ -233,8 +235,49 @@ def main():
                 if dd == 0: axes[dd].legend(fontsize=7)
             fig.suptitle(f"episode {ep} — deploy-style action traj (raw, exec_h={args.exec_horizon})")
             tpng = f"episodes/ep{ep}_traj.png"; fig.savefig(os.path.join(args.out_dir, tpng), dpi=70, bbox_inches="tight"); plt.close(fig)
+            # ---- C 开环 rollout(exec-jump;仅喂第0帧,之后喂模型想象帧+预测state 自驱动)----
+            roll_mp4 = roll_png = None; roll_mae = None
+            if args.openloop:
+                try:
+                    EX = args.exec_horizon; offs = [0, args.action_chunk // 4, args.action_chunk // 2, 3 * args.action_chunk // 4, args.action_chunk]
+                    near = int(np.argmin([abs(o - EX) for o in offs])); Lf = fr[vk[0]].shape[0]
+                    sw = sorted(wins, key=lambda g: info[g][1]); g0 = sw[0]; f0 = info[g0][1]
+                    ref = build_ref_image(images={k: _hwc_to_chw01(fr[k][f0]) for k in vk}, dst_size=(args.width, args.height), crop_mode="center")
+                    st0 = ds[int(g0)]["observation.state"].float().unsqueeze(0).to(dev)
+                    cur_ns = normalize_state(st0, norm, mode="zscore").to(dev, dt)
+                    ol_p, ol_g, ol_pf, ol_gf = [], [], [], []
+                    for gi in sw:
+                        f = info[gi][1]; d = ds[int(gi)]
+                        with torch.no_grad():
+                            o2 = raw_pipe(height=args.height, width=args.width, action_chunk=args.action_chunk, state=cur_ns, num_frames=5,
+                                          guidance_scale=0.0, num_inference_steps=args.steps_inf, image=ref, action_only=False,
+                                          action_num_inference_steps=STEPS_ACT, finish_video=True, return_dict=False,
+                                          prompt_embeds=t5.unsqueeze(0).to(dev, torch.float32))
+                        imgs2, act2 = o2[0], o2[1]
+                        pa2 = add_state_to_action(denormalize_action(act2[0].float(), norm, mode="zscore"), st0[0].float().to(act2.device),
+                                                  action_chunk=args.action_chunk, mask=dm).cpu().numpy()
+                        gt2 = d["action"].float().numpy()[:, :14]; h = min(EX, len(gt2))
+                        ol_p.append(pa2[:h]); ol_g.append(gt2[:h])
+                        imag = _to_thwc_gpu(imgs2[0], dev).round().clamp(0, 255).byte().cpu().numpy()  # [5,H,W,3]
+                        ol_pf.append(imag[near])
+                        ol_gf.append(np.array(build_ref_image(images={k: _hwc_to_chw01(fr[k][min(f + EX, Lf - 1)]) for k in vk}, dst_size=(args.width, args.height), crop_mode="center")))
+                        ref = Image.fromarray(imag[near])  # 开环:下一步输入=模型想象帧
+                        cur_ns = normalize_state(torch.from_numpy(pa2[h - 1]).float().unsqueeze(0).to(dev), norm, mode="zscore").to(dev, dt)
+                    roll_mp4 = f"episodes/ep{ep}_rollout.mp4"; _save_2row(np.stack(ol_gf), np.stack(ol_pf), os.path.join(args.out_dir, roll_mp4), args.fps)
+                    OP = np.concatenate(ol_p, 0); OG = np.concatenate(ol_g, 0); roll_mae = float(np.abs(OP - OG).mean())
+                    x2 = np.arange(len(OP)); fig2, ax2 = plt.subplots(7, 2, figsize=(13, 15)); ax2 = ax2.flatten()
+                    for dd in range(14):
+                        ax2[dd].plot(x2, OG[:, dd], "k--", lw=1.5, label="GT"); ax2[dd].plot(x2, OP[:, dd], "r-", lw=1.2, label="pred(open-loop)")
+                        lo = float(OG[:, dd].min()); hi = float(OG[:, dd].max()); py = 0.05 * (hi - lo) + 1e-6
+                        ax2[dd].set_ylim(lo - py, hi + py); ax2[dd].set_title(DIM[dd], fontsize=8)
+                        if dd == 0: ax2[dd].legend(fontsize=7)
+                    fig2.suptitle(f"episode {ep} — OPEN-LOOP rollout action traj (exec-jump={EX}, rollout_mae={roll_mae:.4f})")
+                    roll_png = f"episodes/ep{ep}_rolltraj.png"; fig2.savefig(os.path.join(args.out_dir, roll_png), dpi=70, bbox_inches="tight"); plt.close(fig2)
+                except Exception as e:
+                    print(f"[shard {sid}] ep{ep} openloop FAIL: {repr(e)[:160]}", flush=True)
             rows[int(ep)] = {"ep": int(ep), "n_win": len(wins), **{kk: float(np.mean(em[kk])) for kk in em if em[kk]},
-                             "traj_png": tpng, "vids": bvids, "full_video": full}
+                             "traj_png": tpng, "vids": bvids, "full_video": full,
+                             "rollout": roll_mp4, "rolltraj": roll_png, "rollout_mae": roll_mae}
         if k % 3 == 0: print(f"[shard {sid}] {k+1}/{len(my_metric)} ep{ep}{' viz' if is_v else ''}", flush=True)
     del raw_pipe, tf; torch.cuda.empty_cache()
     json.dump({"metric": rows, "latency": latency}, open(os.path.join(args.out_dir, "shards", f"shard_{sid}.json"), "w"))
@@ -257,11 +300,18 @@ def aggregate(args, viz_eps, HOR):
     for ep in viz_eps:
         r = metric.get(ep)
         if not r or not r.get("traj_png"): continue
-        full = f'<p class=note><b>A 全 episode 长视频</b>(沿所有 window 拼):</p><video src="{r["full_video"]}" controls width="820"></video>' if r.get("full_video") else ""
+        full = f'<p class=note><b>A 全 episode 长视频</b>(沿所有 window 拼,teacher-forced:每窗重锚 GT):</p><video src="{r["full_video"]}" controls width="820"></video>' if r.get("full_video") else ""
         bvs = "".join(f'<video src="{v}" controls width="400"></video>' for v in r.get("vids", []))
         bsec = f'<p class=note><b>B 代表窗短视频</b>(各 1s):</p><div class=vids>{bvs}</div>' if bvs else ""
-        blocks.append(f'<details><summary>ep {ep} &nbsp;|&nbsp; n_win={r["n_win"]} &nbsp; mae@1={r["mae@1"]:.4f} &nbsp; mae@48={r["mae@48"]:.4f}</summary>'
-                      f'<p class=note>action 曲线(raw vs GT,沿 exec_horizon 拼接):</p><img src="{b64(r["traj_png"])}" width="920">{full}{bsec}</details>')
+        rmae = r.get("rollout_mae")
+        csec = ""
+        if r.get("rollout"):
+            csec = (f'<p class=note><b>C 开环 rollout 长视频</b>(仅喂第0帧,之后喂模型想象帧+预测state 自驱动,exec-jump={args.exec_horizon};暴露误差累积,rollout_mae={rmae:.4f}):</p>'
+                    f'<video src="{r["rollout"]}" controls width="820"></video>'
+                    f'<p class=note>开环 rollout action 曲线(raw vs GT,全程自驱动累积):</p><img src="{b64(r["rolltraj"])}" width="920">')
+        rmstr = f' &nbsp; rollout_mae={rmae:.4f}' if rmae is not None else ""
+        blocks.append(f'<details><summary>ep {ep} &nbsp;|&nbsp; n_win={r["n_win"]} &nbsp; mae@1={r["mae@1"]:.4f} &nbsp; mae@48={r["mae@48"]:.4f}{rmstr}</summary>'
+                      f'<p class=note>action 曲线(raw vs GT,沿 exec_horizon 拼接,teacher-forced):</p><img src="{b64(r["traj_png"])}" width="920">{full}{bsec}{csec}</details>')
     rows_html = "".join(f"<tr><td>{h}</td><td><b>{agg[f'mae@{h}']:.4f}</b></td><td>{PI05[h]:.4f}</td></tr>" for h in HOR)
     la = f"action-only <b>{lat.get('action_ms',0):.0f} ms</b> · with-video {lat.get('video_ms',0):.0f} ms · 去噪 {args.steps_inf} 步"
     ckname = os.path.basename(os.path.dirname(args.transformer_dir)) if args.transformer_dir else "ckpt"
@@ -272,7 +322,8 @@ def aggregate(args, viz_eps, HOR):
 <li>每视频 <b>2 行</b>(原分辨率,帧上有行名):<b>行1 GT(真值) / 行2 pred(模型 raw 权重预测)</b></li>
 <li>每行内 3 视角横排:<b>cam_high(头) | cam_left(左腕) | cam_right(右腕)</b></li>
 <li><b>A 全 episode 长视频</b>(<code>ep*_full.mp4</code>):沿 exec_horizon 取该集所有 window 拼接,时间轴=window 序列;每 window 5 帧=action chunk 的 delta[0,12,24,36,48]</li>
-<li><b>B 代表窗短视频</b>(<code>ep*_w*.mp4</code>):该集 {args.n_vid_per_ep} 个代表 window,各 5 帧 1s(模型 num_frames=5 固定的稀疏长跨度关键帧)</li></ul>
+<li><b>B 代表窗短视频</b>(<code>ep*_w*.mp4</code>):该集 {args.n_vid_per_ep} 个代表 window,各 5 帧 1s(模型 num_frames=5 固定的稀疏长跨度关键帧)</li>
+<li><b>C 开环 rollout 长视频</b>(<code>ep*_rollout.mp4</code>):<b>仅喂第 0 帧真值</b>,之后喂模型自己想象的帧 + 预测 state 自驱动(exec-jump=exec_horizon)→ 暴露世界模型<b>误差累积</b>;另附开环 action 曲线 + rollout MAE</li></ul>
 <h3>推理性能</h3><p>{la}</p>
 <h3>聚合指标(raw,全 {len(metric)} ep)</h3>
 <table><tr><th>horizon</th><th>action MAE</th><th>π0.5 参考</th></tr>{rows_html}</table>
