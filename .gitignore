@@ -114,6 +114,26 @@ fastwam/ffmpeg-libs/
 # secrets / external repos / run outputs (auto-added)
 .volc_creds
 **/.volc_creds
-/Ctrl-World/
 /cosmos/cosmos_policy_pipper_fold_colth/
 /cosmos/cosmos_policy_pipper_fold_colth_runs/
+
+# Ctrl-World: vendor code only, exclude weights/env/cache/data (GitHub 100MB/file limit)
+/Ctrl-World/.git/
+/Ctrl-World/.venv/
+/Ctrl-World/.uvcache/
+/Ctrl-World/pretrained/
+/Ctrl-World/wandb/
+/Ctrl-World/logs/
+/Ctrl-World/dataset_example/
+Ctrl-World/**/*.safetensors
+Ctrl-World/**/*.pt
+Ctrl-World/**/*.pth
+Ctrl-World/**/*.bin
+Ctrl-World/**/*.so
+Ctrl-World/**/*.h5
+Ctrl-World/**/*.msgpack
+Ctrl-World/**/*.ckpt
+/Ctrl-World/dataset_meta_info_clothfold/
+Ctrl-World/**/train_sample.json
+Ctrl-World/**/*.mp4
+Ctrl-World/**/*.npy
