@@ -26,6 +26,9 @@ MIRROR=0
 [ "${1:-}" = "--mirror" ] && MIRROR=1
 
 SRC=tos://transfer-shanghai/KAI0/Task_A/dagger
+# 2026-06-19 TOS 重整: 日期目录移到 dagger/v2/<date>。只同步 v2 (原始, TOS 权威);
+# v3 是本地 front-trim+tail-cap 加工产物 → 不从 TOS 拉 (会覆盖本地裁剪成果)。
+SRC_V2="$SRC/v2"
 LOCK=/tmp/vis_dagger_sync.lock
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
@@ -60,13 +63,13 @@ flock -n 9 || { echo "[$(ts)] previous run still active, skip" >>"$LOG"; exit 0;
 [ -d "$DST" ]     || { echo "[$(ts)] ERROR: local DST missing $DST" >>"$LOG"; exit 1; }
 
 echo "[$(ts)] sync start (tosutil cp -r -u, full incremental)" >>"$LOG"
-dates=$("$TOSUTIL" ls -d "$SRC/" 2>/dev/null | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}-v[0-9]+/?$' | sed 's#/$##' | sort -u)
+dates=$("$TOSUTIL" ls -d "$SRC_V2/" 2>/dev/null | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}-v[0-9]+/?$' | sed 's#/$##' | sort -u)
 [ -n "$dates" ] || { echo "[$(ts)] ERROR: no dates from TOS (cred/network?)" >>"$LOG"; exit 1; }
 
 EXCLUDE='*top_head_depth*'
 total=$(echo "$dates" | wc -w); ok=0; pulled=0
 for d in $dates; do
-  out=$("$TOSUTIL" cp -r -u "$SRC/$d/" "$DST/" -exclude="$EXCLUDE" -j 3 -p 8 2>&1); rc=$?
+  out=$("$TOSUTIL" cp -r -u "$SRC_V2/$d/" "$DST/" -exclude="$EXCLUDE" -j 3 -p 8 2>&1); rc=$?
   succ=$(echo "$out" | grep -oE 'Succeed count is:[ ]*[0-9]+' | grep -oE '[0-9]+$' | tail -1)
   skip=$(echo "$out" | grep -oE 'Skip count is:[ ]*[0-9]+'    | grep -oE '[0-9]+$' | tail -1)
   fail=$(echo "$out" | grep -oE 'Failed count is:[ ]*[0-9]+'  | grep -oE '[0-9]+$' | tail -1)
@@ -94,7 +97,7 @@ if [ "$MIRROR" -eq 1 ]; then
   done
   for d in $dates; do
     [ -d "$DST/$d/data/chunk-000" ] || continue
-    tos_eps=$("$TOSUTIL" ls "$SRC/$d/data/chunk-000/" 2>/dev/null | grep -oE 'episode_[0-9]+\.parquet' | sort -u)
+    tos_eps=$("$TOSUTIL" ls "$SRC_V2/$d/data/chunk-000/" 2>/dev/null | grep -oE 'episode_[0-9]+\.parquet' | sort -u)
     [ -n "$tos_eps" ] || { echo "[$(ts)] MIRROR skip $d (TOS list empty, guard)" >>"$LOG"; continue; }
     for lp in "$DST/$d/data/chunk-000/"episode_*.parquet; do
       [ -e "$lp" ] || continue
