@@ -314,6 +314,38 @@ CONFIGS = {
         param_groups="4group_official",
         lr_schedule="constant",       # 官方 use_cosine_decay 默认 OFF
     ),
+    # ===== E1_v1_official (2026-06-22): 两链叠加 — E0_v1_official 配方 + use_proprio=False。
+    # 由来: E1 (断架构链 use_proprio=False, 旧 action≡state 数据) 与 E0 (断数据链 真实 action≠state
+    # v1 数据, proprio ON) 各自单独都实测仍 vision-blind (d_img=0.00mm)。两次失败互补证明 action≡state
+    # 捷径 *和* proprio 早融合捷径都各自足以让模型完全开环 → 唯一未证伪路径 = 同时切断两条链。
+    # 仅相对 E0_v1_official 改一个变量: use_proprio=False (proprio_dim→0, 切 action_encoder.fc 列)。
+    # 判据: eval_xvla_vision_ablation_dataset.py 的 d_img 绝对值 ≫ 0 (~10mm 对齐官方 SoftFold 12.87mm);
+    #       不看 d_img/d_state 比值 (proprio 关掉后 d_state→0 会假阳, 见 E1 教训)。
+    # Plan: docs/training/future_plans/plans/xvla_proprio_shortcut_openloop_fix.md §4.5
+    "E1_v1_official": dict(
+        datasets=[
+            dict(root=f"{SB}/A_v1_noRelabel_ee6d/2026-04-23", domain_id=20, prompt=PROMPT, weight=1.0),
+            dict(root=f"{SB}/A_v1_noRelabel_ee6d/2026-04-24", domain_id=20, prompt=PROMPT, weight=1.0),
+            dict(root=f"{SB}/A_v1_noRelabel_ee6d/2026-04-25", domain_id=20, prompt=PROMPT, weight=1.0),
+            dict(root=f"{SB}/A_v1_noRelabel_ee6d/2026-04-28", domain_id=20, prompt=PROMPT, weight=1.0),
+            dict(root=f"{SB}/A_v1_noRelabel_ee6d/2026-04-29", domain_id=20, prompt=PROMPT, weight=1.0),
+            dict(root=f"{SB}/A_v1_noRelabel_ee6d/2026-04-30", domain_id=20, prompt=PROMPT, weight=1.0),
+        ],
+        steps=50_000,                 # 同 E0
+        lr=1e-4,
+        warmup_steps=2000,
+        freeze_steps=1000,
+        weight_decay=0.0,
+        batch_size_per_gpu=16,
+        vlm_lr_scale=0.1,
+        image_aug=True,
+        action_qdur=2.0,
+        static_skip=True,
+        bf16=True,
+        param_groups="4group_official",
+        lr_schedule="constant",
+        use_proprio=False,            # ⭐ 两链叠加: 关 proprio 输入 (proprio_dim=0) — 唯一相对 E0 的变量
+    ),
 }
 
 # ==================== TRAIN ====================

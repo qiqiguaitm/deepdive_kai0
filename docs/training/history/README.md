@@ -69,6 +69,7 @@
 | 实验 | 状态 | 文件 |
 |---|---|---|
 | **X3.A vs X3.B vs X3.C Stage A** (XVLA 数据贡献 + Stage A 必要性) | ⚠️ 结论待复核 (2026-05-29: 数据管线 3 bug 已修, 旧 MAE/结论作废待重训) | [xvla_track_x_x3_ablation_results.md](experiments/xvla_track_x_x3_ablation_results.md) |
+| **E0_v1_official** (vision-blind 修复: 真实 action≠state 数据 + 官方配方, proprio ON) | ❌ 失败 (2026-06-22: 仍 vision-blind, 视觉/本体比 0.000; 断数据链不够) | [xvla_e0_v1_official_results.md](experiments/xvla_e0_v1_official_results.md) |
 
 ### 数据集诊断
 
