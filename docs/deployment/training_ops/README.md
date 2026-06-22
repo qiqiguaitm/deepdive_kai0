@@ -52,3 +52,5 @@ training_ops/
 - 数据采集前置 (teleop / data_manager) → `../data_collection/`
 - 历史训练 incident → `../incidents/`
 - 训练实验历史与计划 → `../../training/`
+
+- [数据集裁剪 & PTS 归零](dataset_trimming_and_pts.md) — 裁视频头必归零 PTS,否则 lerobot 时间戳解码静默取错帧→真机失败/offline MAE 盲
