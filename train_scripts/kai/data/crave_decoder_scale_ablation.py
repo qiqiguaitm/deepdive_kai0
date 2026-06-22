@@ -124,20 +124,28 @@ def decode_images(pool_idx, E, FR, t0, workers=32):
     return imgs224, valid
 
 
-def encode_grids(imgs224, valid, model_name, dim):
-    """GPU 批量抽 DINOv2 patch grid (dim,16,16)。仅 valid 帧。"""
+def encode_grids(imgs224, valid, model_name, dim, nprefix=1, res=224, dtype="fp32"):
+    """GPU 批量抽 patch grid (dim,16,16)。仅 valid 帧。nprefix=1(dinov2)/5(dinov3 1CLS+4reg); res=224(dinov2)/256(dinov3)→均 16x16。"""
     from transformers import AutoImageProcessor, AutoModel
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     proc = AutoImageProcessor.from_pretrained(model_name)
-    enc = AutoModel.from_pretrained(model_name).to(dev).eval()
+    if dtype == "int8":
+        from transformers import BitsAndBytesConfig
+        enc = AutoModel.from_pretrained(model_name, quantization_config=BitsAndBytesConfig(load_in_8bit=True)).eval(); tdt = torch.bfloat16
+    elif dtype == "bf16":
+        enc = AutoModel.from_pretrained(model_name, torch_dtype=torch.bfloat16).to(dev).eval(); tdt = torch.bfloat16
+    else:
+        enc = AutoModel.from_pretrained(model_name).to(dev).eval(); tdt = None
     grids = np.zeros((len(imgs224), dim, P, P), np.float16)
-    idxs = np.where(valid)[0]
+    idxs = np.where(valid)[0]; sz = {"height": res, "width": res}
     for b in range(0, len(idxs), 64):
         bi = idxs[b:b + 64]; batch = [imgs224[i] for i in bi]
         with torch.no_grad():
-            px = proc(images=batch, return_tensors="pt").to(dev)
-            toks = enc(**px).last_hidden_state[:, 1:]
-            g = toks.reshape(len(batch), P, P, dim).permute(0, 3, 1, 2).contiguous().cpu().numpy().astype(np.float16)
+            px = proc(images=batch, return_tensors="pt", size=sz).to(dev)
+            if tdt is not None: px = {k: (v.to(tdt) if torch.is_floating_point(v) else v) for k, v in px.items()}
+            toks = enc(**px).last_hidden_state[:, nprefix:]
+            side = int(round(toks.shape[1] ** 0.5)); assert side == P, f"grid {side}!=P({P}); res={res} patch mismatch"
+            g = toks.reshape(len(batch), P, P, dim).permute(0, 3, 1, 2).float().contiguous().cpu().numpy().astype(np.float16)
         for k_, i in enumerate(bi): grids[i] = g[k_]
     del enc; torch.cuda.empty_cache()
     return grids
