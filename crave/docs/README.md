@@ -22,7 +22,7 @@
 | [CONTINUOUS](cross_episode_recurrence_value_CONTINUOUS.md) | **连续 value 形态**:端到端 TCC + 细 bin DP 时序证据读出。advantage 密集(81-96%)、平滑无崩塌;含完整推导。 |
 | [GENERALIZATION](cross_episode_recurrence_value_GENERALIZATION.md) | **跨数据集泛化实证**:XVLA soft_fold corr 0.956、真实 ALOHA coffee corr 0.988,配方逐字不改。 |
 | [encoders](encoders.md) | **编码器作用 / 选型 / 对比**:语义(DINOv2/DINOv3)vs 外观(Wan-VAE)两路;注册表逐档(small→7b)角色;DINOv3 register-token/bf16 要点 + 选型建议。图集在 `visualization/encoders/`。 |
-| [viterbi_computation](viterbi_computation.md) | **Viterbi-DP 计算流程详解**:emit 代价场/转移惩罚/前向递推+回溯逐行;三变体对比;未完成(裁半)ep 的 end 锚消融(end_bonus 无作用,封顶靠 emission,未完成靠 de_end OOD flag);**§6 两项观测能力**——回退可观测(注入 undo→redo,value 如实跌 0.65→0.15,硬单调会抹平)+ 循环 milestone 兼顾(同态复现 9.8% 不乱抖)。脚本 `viterbi_compare.py` / `viterbi_observability.py`。 |
+| [viterbi_computation](viterbi_computation.md) | **Viterbi-DP 计算流程详解**:emit 代价场/转移惩罚/前向递推+回溯逐行;三变体对比;未完成(裁半)ep 的 end 锚消融(end_bonus 无作用,封顶靠 emission,未完成靠 de_end OOD flag);**§6 两项观测能力 + 鲁棒性多次测试**——回退可观测(注入 undo→redo,value 如实跌 0.65→0.15,硬单调会抹平)+ 循环 milestone 兼顾(同态复现不乱抖);§6.3 跨 80ep×4深度×3种子:回退跟踪保真度 corr≈0.7–0.8、深回退检出 94–100%、恢复 100%、复现抑制 18–19× 极稳;**§8** 数据驱动 milestone 转移概率折进 DP(诚实中性结果:几何先验已近最优,四折法实测)+ 转移矩阵副产物;**§9** 转移矩阵正用法=失败/异常检测(与 de_end 互补,regress AUC 0.86 / reorder 0.79,抓不到跳步)。脚本 `viterbi_compare.py` / `viterbi_observability.py` / `viterbi_robustness.py` / `milestone_transition_viterbi.py` / `transition_anomaly_detect.py`。 |
 
 **定位与落地:**
 
