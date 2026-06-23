@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import openpi.models.model as _model
 import openpi.policies.policy as _policy
 import openpi.shared.download as download
-import openpi.shared.normalize as _normalize
+import openpi.shared.gripper_remap as _gripper_remap
 from openpi.training import checkpoints as _checkpoints
 from openpi.training import config as _config
 import openpi.transforms as transforms
@@ -67,7 +67,7 @@ def create_trained_policy(
     # Deploy-time gripper frame remap (old 100mm-range ckpt -> real 0-70mm robot).
     # No-op unless KAI0_GRIPPER_DEPLOY_REMAP=1. Applied whether norm_stats was
     # passed in (e.g. flash server) or loaded above, so it covers all callers.
-    norm_stats = _normalize.remap_gripper_norm_stats(norm_stats)
+    norm_stats = _gripper_remap.remap_gripper_norm_stats(norm_stats)
 
     # Determine the device to use for PyTorch models
     if is_pytorch and pytorch_device is None:
