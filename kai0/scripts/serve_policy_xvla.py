@@ -371,6 +371,20 @@ def _load_policy(ckpt_dir: Path, base_cfg_dir: Path, device, dtype) -> XVLAPolic
     # bf16 DomainAwareLinear weight raises "expected Float but found BFloat16". Keep them in sync.
     # XVLAConfig only supports {"bfloat16","float32"}.
     config.dtype = "bfloat16" if dtype == torch.bfloat16 else "float32"
+    # Architecture must follow the CKPT, not base_cfg_dir. use_proprio toggles the
+    # action_encoder input width (proprio 0 vs N dims) → a model built with the wrong
+    # value fails load_state_dict on shape mismatch. Honor the ckpt's own config.json.
+    ckpt_cfg_path = next((p / "config.json" for p in (ckpt_dir, ckpt_dir.parent)
+                          if (p / "config.json").is_file()), None)
+    if ckpt_cfg_path is not None:
+        try:
+            ckpt_cfg = json.load(open(ckpt_cfg_path))
+            if "use_proprio" in ckpt_cfg and ckpt_cfg["use_proprio"] != getattr(config, "use_proprio", None):
+                logger.info("override use_proprio %s → %s (from ckpt config)",
+                            getattr(config, "use_proprio", None), ckpt_cfg["use_proprio"])
+                config.use_proprio = bool(ckpt_cfg["use_proprio"])
+        except Exception as e:  # noqa: BLE001
+            logger.warning("could not read ckpt config.json for arch override: %s", e)
     policy = XVLAPolicy(config)
     sd_path = ckpt_dir / "state_dict.pt"
     if not sd_path.is_file():
