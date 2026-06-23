@@ -691,7 +691,7 @@ def main() -> None:
     norm = load_norm_stats(args.norm_stats)
     # Deploy-time gripper frame remap (old 100mm-range ckpt -> real 0-70mm robot).
     # No-op unless KAI0_GRIPPER_DEPLOY_REMAP=1.
-    from openpi.shared.normalize import remap_gripper_raw
+    from openpi.shared.gripper_remap import remap_gripper_raw
 
     norm = remap_gripper_raw(norm)
     a_stats = norm["actions"]
