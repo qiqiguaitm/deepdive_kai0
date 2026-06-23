@@ -72,6 +72,7 @@
 | **E0_v1_official** (vision-blind 修复: 真实 action≠state 数据 + 官方配方, proprio ON) | 🚫 作废 (2026-06-23: "失败"是数据 loader 喂黑图 artifact, 非 proprio; 须修 loader 重训) | [xvla_e0_v1_official_results.md](experiments/xvla_e0_v1_official_results.md) |
 | **E1_v1_official** (= E0 + proprio OFF) | 🚫 作废 (同上, 黑图 artifact; 修好 loader 后真实图 d_img=0.01mm 仍瞎=训练就没见过图) | (并入 [plan §0](../future_plans/plans/xvla_proprio_shortcut_openloop_fix.md)) |
 | **🚨 X-VLA v1 vision-blind 真根因** (`LeRobotEE6DDataset._video_path` 全名/短名视频目录不匹配 → 静默黑图) | ✅ 查明+修复 (2026-06-23) | [plan §0 banner](../future_plans/plans/xvla_proprio_shortcut_openloop_fix.md) |
+| **⭐ 教训复盘**: 静默喂黑图 dataloader 把所有 X-VLA 训成 vision-blind (误诊 proprio 两周) | 📌 必读教训 | [xvla_blackimage_dataloader_lesson.md](xvla_blackimage_dataloader_lesson.md) |
 
 ### 数据集诊断
 

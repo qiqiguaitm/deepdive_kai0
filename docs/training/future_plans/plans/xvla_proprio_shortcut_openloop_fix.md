@@ -15,6 +15,8 @@
 >
 > **决定性证据 (2026-06-23, 修好 loader 后用真实图重测)**: E1 (`use_proprio=False`, 真实图) `d_img`=**0.01mm** —— proprio 已关, 视觉是唯一可降 loss 的信号, 模型却对真实图零响应 → 只可能是"训练时根本没见过图 (黑)"。架构能学视觉是铁的: 官方 soft_fold 锚点 `d_img`=12.87mm (§1.1, 走 `XVLAHdf5Dataset` 正确读 hdf5 图)。
 >
+> ✅ **正面确认 (2026-06-23, 修好 loader 重训)**: E0 配方 (proprio ON) 用修好的 loader 重训, **仅 2000 步** smoke ckpt 的视觉消融 `d_img`=263.7mm / `d_blank`=324.6mm / `d_state`=149.5mm → **视觉/本体比 = 1.763** (黑图版 50k E0 = 0.000; 官方锚点 = 0.220; 健康线 ≳0.5)。**loader 一修, 2k 步内视觉影响就超过本体 → 根因 = 黑图, 已坐实修复。** 50k 全量重训进行中 (dev 队列 `t-20260623145309-8clks`, OUT `xvla_e0_v1_official_fixedcam`), 训完出可部署 ckpt + 干净终值。
+>
 > **作用域**: bug 只命中**短名视频目录**的 LeRobot 数据集 (v1 = E0/E1)。x3c `A_new_smooth_800_xvla` 用**全名**目录 → 旧代码路径正确 → x3c 见的是**真实图**, 其失明 (§1, trace, `d_img`=0.03) 是**真实的、另一个原因** (action≡state 捷径)。官方 (hdf5) 也是真实图。
 >
 > **修复**: `_video_path` 改为先试全名、不存在再退短名 (兼容两种布局) + 解码失败**大声 warn** (不再静默黑图)。commit 见 `train_scripts/xvla/data/multi_domain_dataset.py`。**E0/E1 结论作废, 必须用修好的 loader 重训才算真正测试 vision-blind 修复。**
