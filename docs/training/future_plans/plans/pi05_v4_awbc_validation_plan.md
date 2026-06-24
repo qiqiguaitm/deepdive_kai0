@@ -2,7 +2,7 @@
 
 > **建立**: 2026-06-23
 > **目的**: 验证 **TOS v4 新框架数据可用** —— 用**全部 v4 base + dagger** 跑完整 **KAI0 AE AWBC 流程**(Advantage Estimator → 打标 → discretize → AWBC 训练),offline + 真机验证 v4 能训出可部署策略。**重点验证 v4 的新夹爪约定(action≠state,取主臂指令)能否解决"夹持松手"问题。**
-> **状态**: 📝 规划草稿,待确认决策(§7)。**仅 plan,不实施。**
+> **状态**: 📋 **核心决策定档(§7)** — 全 v4 / AE=adv_est_v1(最早 kai0 AE)/ init=pi05 warm-start / 50k;**仅待 ① discretize 阈值 ② 集群 确认 + 发话"开始实施"**。本次仍只更新文档,不实施。
 > **上游**: 总纲 [`../../deployment/strategy/awbc_implementation_plan.md`](../../deployment/strategy/awbc_implementation_plan.md)(§3 4-step)· vis-native AWBC plan [`awbc_vis_task_a_full_pipeline_plan.md`](awbc_vis_task_a_full_pipeline_plan.md)· 同步脚本/v4 框架变更见记忆 [[project_tos_sync_paused_restructure]]。
 > ⚠️ **铁律**: 真机为终判;VLA 报告先看 val MAE(不是 train loss);idle 轨迹 MAE 反指。
 
@@ -38,7 +38,7 @@
 
 | Stage | 做什么 | v4 注意 |
 |---|---|---|
-| **0–1 AE** | **复用** `ADVANTAGE_TORCH_KAI0_FLATTEN_FOLD/adv_est_v1`(已训好)| AE 从 **图像+state** 预测 stage_progress;v4 的 state 与旧一致(action 才变)→ **复用应可**;⚠️ Stage 2 后**核验 advantage 与 GT 进度正相关**,不行再考虑在 v4 上重训 AE(§7-Q2)|
+| **0–1 AE** | ✅ **复用最早 kai0-trained AE** `ADVANTAGE_TORCH_KAI0_FLATTEN_FOLD/adv_est_v1`(用户定;2026-04 训,eval.py 默认 step **100000**)| AE 从 **图像+state** 预测 stage_progress;v4 的 state 与旧一致(action 才变)→ **复用应可**;⚠️ Stage 2 后**核验 advantage 与 GT 进度正相关**,不行再考虑在 v4 上重训 AE |
 | **2 打标** | `stage_advantage/annotation/eval.py Flatten-Fold KAI0 <A_v4_base_dagger>` → 每帧加 `absolute_advantage` 列 | 多卡 `--num-workers/--worker-id` 切片 |
 | **3 discretize** | `discretize_advantage.py --discretion-type binary --advantage-source absolute_advantage [--stage-nums 2]` → `task_index∈{0,1}` + tasks.jsonl(`Advantage: positive/negative`)| top-30% + stage-aware |
 | **4 AWBC 训练** | 克隆 `pi05_flatten_fold_awbc`(config.py:2095)→ `repo_id`=v4 labeled 集,`prompt_from_task=True` | init/步数/集群见 §3 |
@@ -51,7 +51,7 @@
   - `repo_id` → `A_v4_base_dagger`(Stage 3 labeled);`base_config=DataConfig(prompt_from_task=True)`;`use_delta_joint_actions=False`(absolute)。
   - ⚠️⚠️ **norm_stats 必须对 v4 重算**(`compute_norm_states_fast.py`)—— v4 动作分布变了(夹爪 action≠state),**绝不能复用旧 v2/v3 的 norm**。
   - **夹爪 = v4 原始 action(不裁)**:v4 已是"意图指令",正是要验证的对象;裁剪(≤5mm→0)对 v4 无意义/有害。
-  - init / 步数 / batch / fsdp:见 §7-Q3(warm-start `mixed_1_clean` ~15–20k 续训 vs 从 base 50k);EMA 0.9999;save 每 2k。
+  - ✅ **init = pi05 warm-start `CheckpointWeightLoader("mixed_1_clean/params")`**(用户定;沿用 flatten-fold pi05 配方,非 PaliGemma-base);✅ **50,000 step**;batch 128;fsdp 8;EMA 0.9999;save 每 2k / keep 10k;`inline_eval_val_root` → v4 留出 val。
   - **推理永远喂 positive prompt** `"Flatten and fold the cloth. Advantage: positive"`(train==deploy)。
 - **集群**:单节点 8 卡(cnbj Robot-North-H20 / cnsh A100,见空闲;`submit-training-job` skill)。
 
@@ -93,12 +93,15 @@
 
 ---
 
-## 7. 待确认(动手前)
-1. **数据范围**:全部 v4 base(13)+ dagger(12)确认?还是先子集 smoke?
-2. **AE**:复用 `adv_est_v1`(默认,Stage 2 核验)还是直接在 v4 上重训 AE?
-3. **init / 步数**:warm-start `mixed_1_clean` 续训 ~15–20k(快,默认)?还是从 PaliGemma base 50k(更彻底)?
-4. **discretize**:binary top-30% + stage-aware(--stage-nums 2)?
-5. **集群**:cnbj / cnsh?
+## 7. 决策定档(✅ 2026-06-23 用户确认)
+1. ✅ **数据 = 全部 v4** base(13)+ dagger(12)= ~1996ep/2.37M 帧。
+2. ✅ **AE = 最早 kai0-trained AE** `ADVANTAGE_TORCH_KAI0_FLATTEN_FOLD/adv_est_v1`(复用,step 100000;非 vis AE、不在 v4 重训)。Stage 2 后核验对齐。
+3. ✅ **init = pi05 warm-start** `mixed_1_clean/params`(非 PaliGemma base)。
+4. ✅ **步数 = 50,000**。
+5. 🔲 **discretize**(待定,默认建议 binary top-30% + stage-aware `--stage-nums 2`)。
+6. 🔲 **集群**(待定,cnbj Robot-North-H20 / cnsh A100,见空闲)。
+
+> 主配置已定;仅 ⑤⑥ 待定 + "开始实施" → ① build A_v4_base_dagger + 重算 norm → ② Stage 2 打标(adv_est_v1)+ 核验 → ③ Stage 3 discretize → ④ 注册 config pi05_v4_awbc → ⑤ 8 卡 50k 训练 → ⑥ eval(真机对照旧 AWBC)。
 
 ---
 

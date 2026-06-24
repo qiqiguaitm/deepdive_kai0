@@ -19,7 +19,7 @@
 
 | 优先级 | 计划 | 状态 | 资源 | ETA | 目的 |
 |---|---|---|---|---|---|
-| ⭐⭐⭐ P0 | [**v4 数据可用性验证 (AE AWBC)**](plans/pi05_v4_awbc_validation_plan.md) | 📝 待确认 | 8× GPU | — | 全 v4 base(1207ep)+dagger(789ep) 跑 KAI0 AE AWBC, 验证 v4 新框架(前裁+尾裁+夹爪取主臂 action≠state)可用性, 重点真机夹持稳定性 vs 旧 AWBC |
+| ⭐⭐⭐ P0 | [**v4 数据可用性验证 (AE AWBC)**](plans/pi05_v4_awbc_validation_plan.md) | 📋 配置定档(待集群) | 8× GPU | — | 全 v4 base(1207ep)+dagger(789ep) 跑 KAI0 AE AWBC, 验证 v4 新框架(前裁+尾裁+夹爪取主臂 action≠state)可用性, 重点真机夹持稳定性 vs 旧 AWBC |
 | ⭐⭐⭐ P0 | [**叠衣 SOP 范式基线小实验**](plans/pi05_fold_sop_paradigm_baselines.md) | 📋 配方定档, 逐范式推进 | 8× GPU | — | 同一训练配方在不同折法 SOP 各做 pi05 基线: Vertical Fold v1(Task_AV1 200ep)+ Horizontal Fold v1(Task_AH1 200ep已落地), 跨范式对比哪种更易学 |
 | ⭐⭐⭐ P0 | [**Task_A + Task_AV1 混合 1:1 co-train**](plans/pi05_task_a_av1_mixed_1to1_plan.md) | 📋 定稿待实施 | BJ 8× H20 | — | 横向折(1033ep)+竖向折新SOP(304ep冻结)pre-merge + domain_weights=(1,3.256) frame-1:1 过采样, JAX, 50k, warm-start mixed_1_clean |
 | ⭐⭐⭐ P0 | [**AWBC 完整流程 on vis Task_A**](plans/awbc_vis_task_a_full_pipeline_plan.md) | 📝 待确认 | 8× GPU | ~1 周 | vis-native 重建打标走完整 Stage 0→4(标注→estimator→打标→discretize→AWBC),对照复用版/SFT |
