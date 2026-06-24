@@ -2118,6 +2118,36 @@ _CONFIGS = [
         inline_eval_every=4,
     ),
 
+    # AWBC v4 验证 (pi05_v4_awbc_validation_plan §3): 全 v4 base+dagger, KAI0 AE adv_est_v1 打标+discretize top-30%.
+    # 唯一变化 vs pi05_flatten_fold_awbc: repo_id=A_v4_base_dagger (v4 action≠state gripper-from-master, 1824ep,
+    # 损坏视频尾部170已排除), init=pi05_base (plan §3 用户定, 非smooth800/mixed), v4 norm 已重算. 验 v4 夹爪约定真机更稳.
+    TrainConfig(
+        name="pi05_v4_awbc",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_v4_base_dagger",
+            default_prompt=None,
+            base_config=DataConfig(prompt_from_task=True),
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS/tim/workspace/openpi_cache/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=1.5e-5, decay_steps=50_000, decay_lr=1.5e-6,
+        ),
+        ema_decay=0.9999,
+        num_train_steps=50_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=16,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
+
     # AWBC milestone-value A臂 (awbc_milestone_value_AB_plan.md §3): V2.4 零训练 value 直接当 advantage 源.
     # clone of pi05_flatten_fold_awbc (C臂), 唯一变量 = 数据 (ds_A=dagger_all_mvA, V2.4-mv discretized
     # quantile-matched 25.2%neg). 同 warm-start / config / eval → 单变量隔离 "value 来源".
