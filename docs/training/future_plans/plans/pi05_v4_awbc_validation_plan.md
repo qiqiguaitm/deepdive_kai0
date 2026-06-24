@@ -2,7 +2,11 @@
 
 > **建立**: 2026-06-23
 > **目的**: 验证 **TOS v4 新框架数据可用** —— 用**全部 v4 base + dagger** 跑完整 **KAI0 AE AWBC 流程**(Advantage Estimator → 打标 → discretize → AWBC 训练),offline + 真机验证 v4 能训出可部署策略。**重点验证 v4 的新夹爪约定(action≠state,取主臂指令)能否解决"夹持松手"问题。**
-> **状态**: 📋 **核心决策定档(§7)** — 全 v4 / AE=adv_est_v1(最早 kai0 AE)/ init=pi05 warm-start / 50k;**仅待 ① discretize 阈值 ② 集群 确认 + 发话"开始实施"**。本次仍只更新文档,不实施。
+> **状态**: 📋 **核心决策定档(§7)** — 全 v4 / AE=adv_est_v1(最早 kai0 AE)/ init=**pi05_base** / 50k;**仅待 ① discretize 阈值 ② 集群 确认 + 发话"开始实施"**。本次仍只更新文档,不实施。
+>
+> ### ⚠️⚠️ v4 两个关键要点(实施时务必)
+> 1. **norm_stats 必须对 v4 重算** —— v4 动作分布变了(夹爪 action≠state,取主臂指令)→ **绝不能复用旧 v2/v3 的 norm**,否则夹爪维归一化错位 → 静默训坏(offline MAE 也看不出)。用 `compute_norm_states_fast.py` 对 merged v4 集重算。
+> 2. **夹爪不裁(原始 v4 action)** —— v4 已是"主臂意图指令",之前的夹爪裁剪(≤5mm→0)对 v4 **无意义/有害**;v4 从数据源头改了夹爪语义,正是要验证它能否解决松手问题。
 > **上游**: 总纲 [`../../deployment/strategy/awbc_implementation_plan.md`](../../deployment/strategy/awbc_implementation_plan.md)(§3 4-step)· vis-native AWBC plan [`awbc_vis_task_a_full_pipeline_plan.md`](awbc_vis_task_a_full_pipeline_plan.md)· 同步脚本/v4 框架变更见记忆 [[project_tos_sync_paused_restructure]]。
 > ⚠️ **铁律**: 真机为终判;VLA 报告先看 val MAE(不是 train loss);idle 轨迹 MAE 反指。
 
@@ -51,7 +55,7 @@
   - `repo_id` → `A_v4_base_dagger`(Stage 3 labeled);`base_config=DataConfig(prompt_from_task=True)`;`use_delta_joint_actions=False`(absolute)。
   - ⚠️⚠️ **norm_stats 必须对 v4 重算**(`compute_norm_states_fast.py`)—— v4 动作分布变了(夹爪 action≠state),**绝不能复用旧 v2/v3 的 norm**。
   - **夹爪 = v4 原始 action(不裁)**:v4 已是"意图指令",正是要验证的对象;裁剪(≤5mm→0)对 v4 无意义/有害。
-  - ✅ **init = pi05 warm-start `CheckpointWeightLoader("mixed_1_clean/params")`**(用户定;沿用 flatten-fold pi05 配方,非 PaliGemma-base);✅ **50,000 step**;batch 128;fsdp 8;EMA 0.9999;save 每 2k / keep 10k;`inline_eval_val_root` → v4 留出 val。
+  - ✅ **init = pi05_base**(用户定)= `CheckpointWeightLoader("/vePFS/tim/workspace/openpi_cache/openpi-assets/checkpoints/pi05_base/params")`(PI 官方 pi05 机器人预训练 base)。⚠️ **不是 `mixed_1_clean`**(那是 KAI0 的 warm-start,非 pi05 base)。✅ **50,000 step**;batch 128;fsdp 8;EMA 0.9999;save 每 2k / keep 10k;`inline_eval_val_root` → v4 留出 val。
   - **推理永远喂 positive prompt** `"Flatten and fold the cloth. Advantage: positive"`(train==deploy)。
 - **集群**:单节点 8 卡(cnbj Robot-North-H20 / cnsh A100,见空闲;`submit-training-job` skill)。
 
@@ -96,7 +100,7 @@
 ## 7. 决策定档(✅ 2026-06-23 用户确认)
 1. ✅ **数据 = 全部 v4** base(13)+ dagger(12)= ~1996ep/2.37M 帧。
 2. ✅ **AE = 最早 kai0-trained AE** `ADVANTAGE_TORCH_KAI0_FLATTEN_FOLD/adv_est_v1`(复用,step 100000;非 vis AE、不在 v4 重训)。Stage 2 后核验对齐。
-3. ✅ **init = pi05 warm-start** `mixed_1_clean/params`(非 PaliGemma base)。
+3. ✅ **init = pi05_base**(PI 官方 pi05 机器人预训练 base,`openpi_cache/openpi-assets/checkpoints/pi05_base/params`)。⚠️ **不是 `mixed_1_clean`**(=KAI0 warm-start,非 pi05 base)。
 4. ✅ **步数 = 50,000**。
 5. 🔲 **discretize**(待定,默认建议 binary top-30% + stage-aware `--stage-nums 2`)。
 6. 🔲 **集群**(待定,cnbj Robot-North-H20 / cnsh A100,见空闲)。
