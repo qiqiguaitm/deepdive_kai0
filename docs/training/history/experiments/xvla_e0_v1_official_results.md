@@ -15,9 +15,11 @@
 
 ## 0. 一句话结论
 
-**E0 失败。换成真实 `action≠state` 数据 (v1) + 完全按官方配方训练, 但保留 `use_proprio=True` → 模型仍 100% vision-blind: 三路相机全置黑, 完整 20D 动作输出只变 `1.2e-5` (浮点噪声), 视觉/本体影响比 = `0.000`。** 与之前 p0/d5anchor (`action≡state` 数据) 的失明签名逐位一致。
+> 🚨 **作废 (2026-06-23): E0 这个"失败"是数据 loader bug 的产物, 不是 proprio 捷径。** `LeRobotEE6DDataset._video_path` 用全名 feature key 拼视频目录, 但 v1 数据集是短名目录 → 解码失败 → `except` 静默喂**黑图**。E0 全程训在黑图上, 当然瞎。修好 loader 后用真实图重测: E0 (proprio ON) `d_img`/`d_state`仍≈0 (proprio 主导, 测不出); **E1 (proprio OFF) 真实图 `d_img`=0.01mm** → 坐实"训练就没见过图"。架构能学视觉 (官方 hdf5 锚点 `d_img`=12.87)。**E0 必须用修好的 loader (`train_scripts/xvla/data/multi_domain_dataset.py`) 重训。** 详见 plan §0 (2026-06-23 banner)。下面旧结论保留作记录。
 
-→ 这推翻了 plan §4.4 的判断"E0 (真实 action≠state) 是必需主路径、足以唤起视觉"。**真实动作数据是必要条件, 但不充分**: 折叠任务准静态 → 未来 2s 的 EE 位姿仍可由当前 EE6D proprio 高度预测, 模型在 `use_proprio=True` 下照样从 proprio 低 loss 回归出 action anchors, 绕开视觉。**数据链 + 架构链需同时切断。**
+**(旧, 已作废) E0 失败。** 换成真实 `action≠state` 数据 (v1) + 完全按官方配方训练, 但保留 `use_proprio=True` → 模型仍 100% vision-blind: 三路相机全置黑, 完整 20D 动作输出只变 `1.2e-5`, 视觉/本体影响比 = `0.000`。
+
+→ ~~这推翻了 plan §4.4 的判断, 真实动作数据必要不充分, 数据链+架构链需同时切断。~~ **← 已被 2026-06-23 根因 (黑图) 推翻: 此 0.000 是黑图 artifact。**
 
 ---
 

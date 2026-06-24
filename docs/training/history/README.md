@@ -69,7 +69,11 @@
 | 实验 | 状态 | 文件 |
 |---|---|---|
 | **X3.A vs X3.B vs X3.C Stage A** (XVLA 数据贡献 + Stage A 必要性) | ⚠️ 结论待复核 (2026-05-29: 数据管线 3 bug 已修, 旧 MAE/结论作废待重训) | [xvla_track_x_x3_ablation_results.md](experiments/xvla_track_x_x3_ablation_results.md) |
-| **E0_v1_official** (vision-blind 修复: 真实 action≠state 数据 + 官方配方, proprio ON) | ❌ 失败 (2026-06-22: 仍 vision-blind, 视觉/本体比 0.000; 断数据链不够) | [xvla_e0_v1_official_results.md](experiments/xvla_e0_v1_official_results.md) |
+| **E0_v1_official** (vision-blind 修复: 真实 action≠state 数据 + 官方配方, proprio ON) | 🚫 作废 (2026-06-23: "失败"是数据 loader 喂黑图 artifact, 非 proprio; 已用修好 loader 重训, 见 fixedcam ↓) | [xvla_e0_v1_official_results.md](experiments/xvla_e0_v1_official_results.md) |
+| **⭐ E0_v1_official_FIXEDCAM** (同配方 + 修好 loader 喂真实图, 50k) | ✅ **成功** (2026-06-24: 视觉/本体比 5.17, MAE@30=0.0522 vs 官方 1.1×; 第一个非失明自建数据 X-VLA, 可上真机) | [xvla_e0_v1_official_fixedcam_results.md](experiments/xvla_e0_v1_official_fixedcam_results.md) |
+| **E1_v1_official** (= E0 + proprio OFF) | 🚫 作废 (同上, 黑图 artifact; 修好 loader 后真实图 d_img=0.01mm 仍瞎=训练就没见过图) | (并入 [plan §0](../future_plans/plans/xvla_proprio_shortcut_openloop_fix.md)) |
+| **🚨 X-VLA v1 vision-blind 真根因** (`LeRobotEE6DDataset._video_path` 全名/短名视频目录不匹配 → 静默黑图) | ✅ 查明+修复 (2026-06-23) | [plan §0 banner](../future_plans/plans/xvla_proprio_shortcut_openloop_fix.md) |
+| **⭐ 教训复盘**: 静默喂黑图 dataloader 把所有 X-VLA 训成 vision-blind (误诊 proprio 两周) | 📌 必读教训 | [xvla_blackimage_dataloader_lesson.md](xvla_blackimage_dataloader_lesson.md) |
 
 ### 数据集诊断
 

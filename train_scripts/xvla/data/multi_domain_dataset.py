@@ -81,6 +81,8 @@ def resize_pad(img: np.ndarray, size: int) -> np.ndarray:
 class LeRobotEE6DDataset(Dataset):
     """Single-domain LeRobot v2.1 EE6D parquet dataset."""
 
+    _decode_fail_count = 0  # class-wide; >0 means some frames fell back to black (see __getitem__)
+
     def __init__(
         self,
         root: str | Path,
@@ -192,7 +194,16 @@ class LeRobotEE6DDataset(Dataset):
 
     def _video_path(self, ep_idx: int, cam_key: str) -> Path:
         chunk = ep_idx // self.chunks_size
-        return self.root / self.video_tpl.format(episode_chunk=chunk, video_key=cam_key, episode_index=ep_idx)
+        # video dirs may use the full feature key (observation.images.top_head) OR the
+        # short camera name (top_head). cam_keys holds the full key; our self_built
+        # datasets store dirs by short name. Try full first (standard LeRobot), then the
+        # short fallback. WITHOUT this, av.open misses → __getitem__ except → BLACK image
+        # silently, which trained every X-VLA ckpt vision-blind. Fail loud, not black.
+        full = self.root / self.video_tpl.format(episode_chunk=chunk, video_key=cam_key, episode_index=ep_idx)
+        if full.exists():
+            return full
+        short = cam_key.split(".")[-1]
+        return self.root / self.video_tpl.format(episode_chunk=chunk, video_key=short, episode_index=ep_idx)
 
     def __getitem__(self, idx: int) -> dict:
         ep_idx, f_idx = self.samples[idx]
@@ -233,7 +244,15 @@ class LeRobotEE6DDataset(Dataset):
                 t = imagenet_normalize_chw(t)
                 img_dict["observation.images.image" + (str(i+1) if i > 0 else "")] = t
             except Exception as e:
-                # Skip this sample on decode failure
+                # Fall back to BLACK on decode failure — but WARN LOUDLY. A silent black
+                # fallback here is how every X-VLA ckpt got trained vision-blind (the video
+                # path was wrong → every frame black, no error). Surface it.
+                LeRobotEE6DDataset._decode_fail_count += 1
+                if LeRobotEE6DDataset._decode_fail_count <= 20:
+                    import sys as _sys
+                    print(f"[multi_domain_dataset] WARN black-image fallback "
+                          f"(ep={ep_idx} cam={cam_key} path={self._video_path(ep_idx, cam_key)}): {e!r}",
+                          file=_sys.stderr, flush=True)
                 size = self.image_size_main if i < 2 else self.image_size_wrist
                 img_dict["observation.images.image" + (str(i+1) if i > 0 else "")] = torch.zeros((3, size, size), dtype=torch.float32)
 

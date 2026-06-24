@@ -9,9 +9,25 @@
 
 ## 0. 结论 (一句话)
 
-**整条 X-VLA smooth800 管线 (p0 + d5anchor) 训练就是纯开环 (vision-blind): 动作是 proprioception 的纯函数, 三路相机像素对输出的影响 = 0.000。不是数据问题、不是部署问题、不是 qdur/归一化问题。在修好 `use_proprio` 捷径前, 换任何数据/qdur/norm 训出的 X-VLA ckpt 都会瞎。**
+> 🚨 **根因更新 (2026-06-23) — proprio 捷径假说对 E0/E1 (v1) 线被证伪; 真根因 = 数据 loader 视频路径 bug → 训练全程喂黑图。**
+>
+> `LeRobotEE6DDataset._video_path` 用**全名** feature key (`observation.images.top_head`) 拼视频目录, 但 v1 数据集 (`A_v1_noRelabel_ee6d`) 的视频目录是**短名** (`top_head/`) → `av.open` 找不到 → `__getitem__` 的 `except` 静默返回 `torch.zeros` = **黑图** (每帧每相机, 不报错)。**E0/E1 的 v1 训练 100% 训在黑图上**, 所以瞎 —— 与 proprio 无关。
+>
+> **决定性证据 (2026-06-23, 修好 loader 后用真实图重测)**: E1 (`use_proprio=False`, 真实图) `d_img`=**0.01mm** —— proprio 已关, 视觉是唯一可降 loss 的信号, 模型却对真实图零响应 → 只可能是"训练时根本没见过图 (黑)"。架构能学视觉是铁的: 官方 soft_fold 锚点 `d_img`=12.87mm (§1.1, 走 `XVLAHdf5Dataset` 正确读 hdf5 图)。
+>
+> ✅ **正面确认 (2026-06-23, 修好 loader 重训)**: E0 配方 (proprio ON) 用修好的 loader 重训, **仅 2000 步** smoke ckpt 的视觉消融 `d_img`=263.7mm / `d_blank`=324.6mm / `d_state`=149.5mm → **视觉/本体比 = 1.763** (黑图版 50k E0 = 0.000; 官方锚点 = 0.220; 健康线 ≳0.5)。**loader 一修, 2k 步内视觉影响就超过本体 → 根因 = 黑图, 已坐实修复。**
+>
+> ✅✅ **50k 全量完成 (2026-06-24, `xvla_e0_v1_official_fixedcam`)**: dev 队列 `t-20260623145309-8clks` 训完 50k。final 视觉消融 (n=24, 真实图) `d_img`=327.8mm / `d_state`=63.4mm → **视觉/本体比 = 5.17 (xyz) / 10.56 (grip)**; 趋势 4k=1.85→24k=2.26→50k=5.17 (视觉从极早期就健康且 d_state 反降=越训越闭环)。离线 MAE `@1=0.0305 / @30=0.0522` vs 官方 soft_fold @30=0.0473 仅 **1.1×** (黑图 E0 @30=0.1353, 好 2.6×)。**第一个非失明的自建数据 X-VLA, 可上真机。** 详见 [`history/experiments/xvla_e0_v1_official_fixedcam_results.md`](../../history/experiments/xvla_e0_v1_official_fixedcam_results.md)。
+>
+> **作用域**: bug 只命中**短名视频目录**的 LeRobot 数据集 (v1 = E0/E1)。x3c `A_new_smooth_800_xvla` 用**全名**目录 → 旧代码路径正确 → x3c 见的是**真实图**, 其失明 (§1, trace, `d_img`=0.03) 是**真实的、另一个原因** (action≡state 捷径)。官方 (hdf5) 也是真实图。
+>
+> **修复**: `_video_path` 改为先试全名、不存在再退短名 (兼容两种布局) + 解码失败**大声 warn** (不再静默黑图)。commit 见 `train_scripts/xvla/data/multi_domain_dataset.py`。**E0/E1 结论作废, 必须用修好的 loader 重训才算真正测试 vision-blind 修复。**
+>
+> 下面 §0 旧结论 (proprio 捷径) 对 **x3c/≡state 线仍可能成立**, 但对 **E0/E1/v1 线已失效** —— E0/E1 从未真正测过任何假说 (它们训在黑图上)。
 
-> **更新 (2026-06-22)**: 两条独立修复链**各自单独都已实测失败** — E1 (断架构链 `use_proprio=False`, 旧 action≡state 数据, 2026-06-10) `d_img`=0.00mm ❌; E0 (断数据链, 真实 action≠state v1 数据 + 官方配方, 但 `use_proprio=True`, 2026-06-22) `d_img`=0.00mm ❌。→ **action≡state 数据捷径 与 proprio 早融合捷径都各自足以让模型完全开环**。当前唯一未被证伪的路径 = **两链叠加 = v1 真实数据 + `use_proprio=False`** (§4.5 `E1_v1_official`, 下一步)。
+**(旧, 2026-06-22, E0/E1 部分已作废)** 整条 X-VLA smooth800 管线 (p0 + d5anchor) 训练就是纯开环 (vision-blind): 动作是 proprioception 的纯函数, 三路相机像素对输出的影响 = 0.000。
+
+> **更新 (2026-06-22, 已被 2026-06-23 根因推翻)**: 两条独立修复链各自单独都已实测失败 — E1 (`use_proprio=False`, 旧 action≡state) `d_img`=0.00mm; E0 (真实 action≠state v1, `use_proprio=True`) `d_img`=0.00mm。**← 这两个 0.00 现已查明是黑图 artifact, 非 proprio。**
 
 这也推翻了 Track X 之前的诊断链 ("X3.C 真机失败 = R1 缺 ImageNet 归一化 → 重训 p0 修复"): p0 已修 R1 + ImageNet 归一化, 真机**依旧失败**, 因为真根因是 proprio 捷径, R1 只是表层。
 
