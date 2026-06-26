@@ -17,15 +17,15 @@ from .datasets import (
     load_dataset,
     register_dataset,
 )
-from .evaluators import (
-    AestheticScoreEvaluator,
-    CLIPScoreEvaluator,
-    FIDEvaluator,
-    LPIPSEvaluator,
-    MAPEvaluator,
-    PSNREvaluator,
-    SSIMEvaluator,
-)
+# from .evaluators import (
+#     AestheticScoreEvaluator,
+#     CLIPScoreEvaluator,
+#     FIDEvaluator,
+#     LPIPSEvaluator,
+#     MAPEvaluator,
+#     PSNREvaluator,
+#     SSIMEvaluator,
+# )
 from .samplers import AspectRatioSampler, BucketBatchSampler, BucketSampler, DefaultSampler, LatentEpisodeSampler, SpecialDatasetSampler
 from .structures import (
     BaseStructure,

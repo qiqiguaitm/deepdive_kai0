@@ -153,7 +153,7 @@ fi
 unset AMENT_PREFIX_PATH COLCON_PREFIX_PATH CMAKE_PREFIX_PATH PYTHONPATH 2>/dev/null || true
 export PATH="/usr/bin:$PATH"
 eval "$(conda shell.bash hook 2>/dev/null)" 2>/dev/null; conda deactivate 2>/dev/null || true
-source /opt/ros/humble/setup.bash
+source /opt/ros/jazzy/setup.bash
 ros2 daemon stop 2>/dev/null || true
 ros2 daemon start 2>/dev/null || true
 
@@ -279,7 +279,7 @@ fi
 
 if [ "$NEEDS_BUILD" = true ]; then
     info "source changed, rebuilding..."
-    (cd "$ROS2_WS" && unset AMENT_PREFIX_PATH COLCON_PREFIX_PATH CMAKE_PREFIX_PATH PYTHONPATH 2>/dev/null; export PATH="/usr/bin:$PATH"; source /opt/ros/humble/setup.bash && colcon build --packages-select piper --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3.10 2>&1 | tail -3)
+    (cd "$ROS2_WS" && unset AMENT_PREFIX_PATH COLCON_PREFIX_PATH CMAKE_PREFIX_PATH PYTHONPATH 2>/dev/null; export PATH="/usr/bin:$PATH"; source /opt/ros/jazzy/setup.bash && colcon build --packages-select piper --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3.12 2>&1 | tail -3)
     ok "rebuild done"
 else
     ok "install up to date"
@@ -292,16 +292,16 @@ echo "--- Step 6: launching ---"
 # Clean stale AMENT/COLCON/PYTHONPATH from other workspaces that shadow packages.
 unset AMENT_PREFIX_PATH COLCON_PREFIX_PATH CMAKE_PREFIX_PATH PYTHONPATH 2>/dev/null || true
 
-# Ensure system python3.10 is found BEFORE miniforge python3.12 for ROS2 Humble.
-# The ros2 CLI uses #!/usr/bin/python3 shebang; if miniforge's python3.12 shadows
+# Ensure system python3.12 (/usr/bin) is found BEFORE miniforge for ROS2 Jazzy.
+# The ros2 CLI uses #!/usr/bin/python3 shebang; if miniforge's python shadows
 # it, rclpy imports fail with "No module named 'rclpy._rclpy_pybind11'".
 export PATH="/usr/bin:$PATH"
 
-source /opt/ros/humble/setup.bash
+source /opt/ros/jazzy/setup.bash
 source "$ROS2_WS/install/setup.bash"
 
-# Do NOT add venv to global PATH — ROS2 Humble nodes run Python 3.10 and
-# venv's Python 3.12 site-packages cause numpy/rclpy import failures.
+# Do NOT add venv to global PATH — ROS2 Jazzy nodes run system Python 3.12 and
+# a venv's site-packages can cause numpy/rclpy import failures.
 # JAX-dependent nodes (rerun_viz) are launched with explicit venv in their
 # launch config.
 

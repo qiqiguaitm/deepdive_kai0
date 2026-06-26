@@ -239,6 +239,7 @@ def main():
             roll_mp4 = roll_png = None; roll_mae = None
             if args.openloop:
                 try:
+                    fr = fc.get(ep)  # frames for this episode (was only bound inside the metric loop)
                     EX = args.exec_horizon; offs = [0, args.action_chunk // 4, args.action_chunk // 2, 3 * args.action_chunk // 4, args.action_chunk]
                     near = int(np.argmin([abs(o - EX) for o in offs])); Lf = fr[vk[0]].shape[0]
                     sw = sorted(wins, key=lambda g: info[g][1]); g0 = sw[0]; f0 = info[g0][1]

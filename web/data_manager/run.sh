@@ -57,7 +57,7 @@ mkdir -p "$LOG_DIR" "$PID_DIR"
 
 ROS_SETUP="/opt/ros/jazzy/setup.bash"
 ROS2_WS_SETUP="$REPO_ROOT/ros2_ws/install/setup.bash"
-ACTIVATE_CAN="$REPO_ROOT/piper_tools/activate_can.sh"
+ACTIVATE_CAN="$REPO_ROOT/piper_tools/activate_can.sh"   # 机器感知入口; 序列号已校准时它会自动委托 activate_can_v2.sh (USB 口免疫)
 START_TELEOP="$REPO_ROOT/start_scripts/kai/start_teleop.sh"
 LAUNCH_3CAM="$REPO_ROOT/start_scripts/kai/launch_3cam.py"
 

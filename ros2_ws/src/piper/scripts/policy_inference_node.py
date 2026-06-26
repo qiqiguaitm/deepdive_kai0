@@ -330,6 +330,52 @@ class StreamActionBuffer:
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# XVLASequentialExecutor — 官方 X-VLA 执行方案 (与 π0 栈解耦), 2026-06-25
+# ────────────────────────────────────────────────────────────────────────────
+# 镜像官方 xvla/X-VLA/evaluation/SoftFold-Agilex/deploy/client_eef6d_xvla.py:
+# 整 chunk 开环执行 —— 一次装入全部 chunk, 每步弹 1 个, 队列空了才重推 (事件驱动)。
+# 刻意不做: 重叠混合 / RTC guidance / temporal smoothing / 夹爪锁存 —— 这些是 π0
+# (dense 1s, 高频重规划) 的机制, 用在 X-VLA 的 qdur intention chunk 上反而把二值夹爪
+# 在 chunk 边界搅乱 (闭合刚执行就被下个 chunk 的张开头部冲掉)。X-VLA 的连续性来自:
+#   ① 绝对 EE 位姿动作 (chunk 间无 delta 漂移);
+#   ② server 端预测式 proprio (下个 chunk 以本 chunk 预测终点为条件, 无缝衔接);
+#   ③ qdur=2.0 intention abstraction (每个 chunk 是完整 2s 计划, 本就整段执行)。
+# 与 StreamActionBuffer 接口对齐 (pop_next_action / flush), 节点只在"装入/门控"处分支。
+class XVLASequentialExecutor:
+    """Full-chunk open-loop executor; re-infer only when the queue is empty."""
+
+    def __init__(self):
+        self.cur_chunk = deque()          # 同名 cur_chunk 便于 len() 复用现有统计
+        self.lock = threading.Lock()
+        self.last_action = None
+
+    def load_chunk(self, actions):
+        """Replace the plan with a fresh full chunk (called only when empty)."""
+        with self.lock:
+            self.cur_chunk.clear()
+            for a in actions:
+                self.cur_chunk.append(np.asarray(a, dtype=float).copy())
+
+    def pop_next_action(self) -> np.ndarray | None:
+        with self.lock:
+            if not self.cur_chunk:
+                return None
+            act = np.asarray(self.cur_chunk.popleft(), dtype=float)
+            self.last_action = act.copy()
+            return act
+
+    def flush(self, seed_action: np.ndarray | None = None):
+        with self.lock:
+            self.cur_chunk.clear()
+            self.last_action = seed_action
+
+    @property
+    def is_empty(self) -> bool:
+        with self.lock:
+            return len(self.cur_chunk) == 0
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # ObsPrefetchWorker — A.2 流水线 (§7.9), 2026-05-23
 # ────────────────────────────────────────────────────────────────────────────
 # 在背景线程持续 pop _get_observation(), 把准备好的 obs 放进 maxsize=1 queue.
@@ -562,6 +608,10 @@ class PolicyInferenceNode(Node):
         # 消除中段。阈值 = open_m/2。连续夹爪模型请置 False (默认 True: 当前 EE 仅 X-VLA, 二值)。
         self.declare_parameter('ee_gripper_binarize', True)
         self.declare_parameter('ee_gripper_open_m', 0.08)   # 张开物理行程 (m), 与 server gripper_open_value 对齐
+        # X-VLA 顺序执行模式 (与 π0 栈解耦, 对齐官方 client_eef6d_xvla.py): 整 chunk 开环执行,
+        # 队列空才重推; 不走 StreamActionBuffer 的重叠混合/RTC/平滑。从根上消除二值夹爪在 chunk
+        # 边界被冲掉的抖动 (取代之前的夹爪锁存 band-aid)。默认 False = π0 路径不变。
+        self.declare_parameter('xvla_sequential', False)
 
         # ── Replay mode params (P1) ──
         # 'inference' = call policy.infer() (default, existing path)
@@ -600,6 +650,9 @@ class PolicyInferenceNode(Node):
         self._grip_close_snap_thr = float(self.get_parameter('gripper_close_snap_thresh').value)
         self._ee_grip_binarize = bool(self.get_parameter('ee_gripper_binarize').value)
         self._ee_grip_open_m = float(self.get_parameter('ee_gripper_open_m').value)
+        self._xvla_seq = bool(self.get_parameter('xvla_sequential').value)
+        # X-VLA executor decoupled from the π0 StreamActionBuffer; only built when enabled.
+        self._xvla_exec = XVLASequentialExecutor() if self._xvla_seq else None
         # P2 Step 1+2: fast obs pipeline (skip JPEG + CvBridge + cvtColor)
         self._fast_obs_pipeline = _to_bool(self.get_parameter('fast_obs_pipeline').value)
         if self._fast_obs_pipeline:
@@ -1632,6 +1685,8 @@ class PolicyInferenceNode(Node):
 
         Lock ordering: _exec_lock → _sensor_lock. Never acquire _exec_lock while
         holding _sensor_lock to avoid deadlock."""
+        if self._xvla_seq and self._xvla_exec is not None:
+            self._xvla_exec.flush()           # clear X-VLA chunk queue on observe→execute
         with self._sensor_lock:
             jl = self._joint_left_deque[-1] if self._joint_left_deque else None
             jr = self._joint_right_deque[-1] if self._joint_right_deque else None
@@ -2436,7 +2491,12 @@ class PolicyInferenceNode(Node):
             # chunk → 重推时用新图像 (任务推进) + ① pred_proprio≈当前。observe 不 gate。
             # 阈值【自适应】: 预留 = 实测整周期(infer+IK+integrate)会排空的步数 + 余量,
             # 保证新 chunk 在 buffer 见底前到达 → 边界无停顿 (不必手调 min_remaining)。
-            if self._open_loop_chunk and self._execution_enabled:
+            if self._xvla_seq and self._execution_enabled:
+                # 官方 X-VLA: 整 chunk 跑完(队列空)才重推 (事件驱动, 无预取重叠)。
+                if not self._xvla_exec.is_empty:
+                    time.sleep(0.005)
+                    continue
+            elif self._open_loop_chunk and self._execution_enabled:
                 reserve = int(np.ceil(self._last_cycle_s * float(self.publish_rate))) + 3
                 thr = max(self._open_loop_min_remaining, reserve)
                 with self.stream_buffer.lock:
@@ -2476,7 +2536,7 @@ class PolicyInferenceNode(Node):
                 rtc_d_steps = 0
                 rtc_exec_h = 0
                 pc_for_log = None
-                if self._enable_rtc:
+                if self._enable_rtc and not self._xvla_seq:   # X-VLA seq: no RTC guidance
                     with self._rtc_lock:
                         pc = self._rtc_prev_chunk.copy() if self._rtc_prev_chunk is not None else None
                     if pc is not None:
@@ -2555,6 +2615,10 @@ class PolicyInferenceNode(Node):
                         self.get_logger().info(
                             '[REPLAY] discarding mid-flight policy chunk '
                             '(replay_mode flipped to replay during inference)')
+                        t_buffer_done = time.monotonic()
+                    elif self._xvla_seq:
+                        # 官方 X-VLA: 整 chunk 顺序装入 (无重叠混合/latency 头裁/平滑)。
+                        self._xvla_exec.load_chunk(actions)
                         t_buffer_done = time.monotonic()
                     else:
                         self.stream_buffer.integrate_new_chunk(
@@ -2687,8 +2751,8 @@ class PolicyInferenceNode(Node):
 
                 # Re-read inference_rate each iteration so rtc_apply.sh / ros2
                 # param set takes effect without restart.
-                # ② 开环执行时不按 inference_rate 节流 —— 由顶部 buffer gate 决定何时重推。
-                if not (self._open_loop_chunk and self._execution_enabled):
+                # ② 开环/X-VLA 顺序执行时不按 inference_rate 节流 —— 由顶部 buffer gate 决定何时重推。
+                if not ((self._open_loop_chunk or self._xvla_seq) and self._execution_enabled):
                     elapsed = time.monotonic() - t_start
                     period_live = 1.0 / max(0.1, float(self.inference_rate))
                     sleep_time = max(0, period_live - elapsed)
@@ -2708,7 +2772,7 @@ class PolicyInferenceNode(Node):
         if not enabled:
             self._last_published_action = None  # reset on observe so first execute re-seeds
             return
-        act = self.stream_buffer.pop_next_action()
+        act = (self._xvla_exec if self._xvla_seq else self.stream_buffer).pop_next_action()
         if act is None:
             return
 

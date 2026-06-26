@@ -197,6 +197,23 @@ def generate_launch_description():
     publish_rate_arg = DeclareLaunchArgument('publish_rate',
         default_value='30',
         description='Hz of PosCmd publish (dense-1s ckpt=30; qdur=2.0 anchor ckpt override to 15)')
+    # open_loop_chunk: re-infer only when the buffer is nearly drained (instead of the
+    # fixed inference_rate throttle). The next chunk is PREFETCHED ~reserve steps before
+    # the current finishes → executes ~the full chunk with NO boundary stall (no 卡顿).
+    # Default OFF preserves pi05/legacy behavior; XVLA anchor ckpts pass :=true.
+    open_loop_chunk_arg = DeclareLaunchArgument('open_loop_chunk',
+        default_value='false',
+        description='Re-infer on buffer-drain (prefetch next chunk, no stall) instead of fixed inference_rate')
+    open_loop_min_remaining_arg = DeclareLaunchArgument('open_loop_min_remaining',
+        default_value='8',
+        description='open_loop_chunk: re-infer when remaining<=max(this,latency_reserve); 0=drain fully')
+    # X-VLA sequential execution (decoupled from the π0 StreamActionBuffer/RTC stack):
+    # full-chunk open-loop, re-infer only when the queue empties. Mirrors official
+    # client_eef6d_xvla.py. Eliminates the binary-gripper chunk-boundary chatter at the
+    # root (no overlap-blend). Default false = π0 path unchanged.
+    xvla_sequential_arg = DeclareLaunchArgument('xvla_sequential',
+        default_value='false',
+        description='X-VLA official-style full-chunk sequential execution (no overlap/RTC); π0 default false')
     # ── Camera knobs (P1.b 2026-05-23, V1 20Hz 攻关) ───────────────────
     # JAX legacy 默认 30 fps + 用 camera_depth_flags.py 的 macro 决定 depth.
     # V1 路径通过 start_autonomy_v1.sh 把 cam_fps:=60 / enable_head_depth:=false
@@ -358,6 +375,9 @@ def generate_launch_description():
             'latency_k': LaunchConfiguration('latency_k'),
             'min_smooth_steps': LaunchConfiguration('min_smooth_steps'),
             'publish_rate': ParameterValue(LaunchConfiguration('publish_rate'), value_type=int),
+            'open_loop_chunk': ParameterValue(LaunchConfiguration('open_loop_chunk'), value_type=bool),
+            'open_loop_min_remaining': ParameterValue(LaunchConfiguration('open_loop_min_remaining'), value_type=int),
+            'xvla_sequential': ParameterValue(LaunchConfiguration('xvla_sequential'), value_type=bool),
             # P2 Step 1+2 fast obs pipeline (bool-typed to preserve 'true'/'false')
             'fast_obs_pipeline': ParameterValue(LaunchConfiguration('fast_obs_pipeline'), value_type=bool),
             # A.2 异步 obs prefetch worker (bool-typed)
@@ -477,6 +497,7 @@ def generate_launch_description():
         rtc_max_guidance_weight_arg, rtc_smooth_method_arg,
         publish_smooth_alpha_arg,
         inference_rate_arg, latency_k_arg, min_smooth_steps_arg, publish_rate_arg,
+        open_loop_chunk_arg, open_loop_min_remaining_arg, xvla_sequential_arg,
         cam_fps_arg, enable_head_depth_arg, enable_left_depth_arg, enable_right_depth_arg,
         fast_obs_pipeline_arg, pipelined_obs_arg, transport_arg,
         policy_cpu_prefix_arg, camera_cpu_prefix_arg,

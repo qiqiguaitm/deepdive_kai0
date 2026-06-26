@@ -7,7 +7,7 @@ exec coverage(stride=exec_horizon=16)、action_chunk=48、首 200 episode、raw 
 """
 import sys, os, json, glob, argparse, time
 
-_WS = "/mnt/pfs/p46h4f/cosmos/deepdive_kai0"
+_WS = "/home/tim/workspace/deepdive_kai0"
 sys.path.insert(0, f"{_WS}/kai0/scripts")
 sys.path.insert(0, f"{_WS}/optimize/v1_triton")
 import numpy as np, torch, av

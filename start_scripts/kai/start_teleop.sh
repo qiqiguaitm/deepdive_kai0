@@ -19,7 +19,7 @@ pkill -f ros2 2>/dev/null || true
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 ROS2_WS="$PROJECT_ROOT/ros2_ws"
-CAN_ACTIVATE="$PROJECT_ROOT/piper_tools/activate_can.sh"
+CAN_ACTIVATE="$PROJECT_ROOT/piper_tools/activate_can.sh"   # 机器感知入口; 序列号已校准时自动委托 activate_can_v2.sh
 ROS_DISTRO="jazzy"
 
 echo "============================================"
