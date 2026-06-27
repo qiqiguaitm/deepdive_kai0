@@ -2,7 +2,7 @@
 
 > **建立**: 2026-06-27
 > **目的**: 用**全部 v4 base + dagger** 跑完整 **KAI0 AE AWBC 流程**(Advantage Estimator → 打标 → discretize → AWBC 训练),但 init **从 PaliGemma VLM base 冷启动**(不 warm-start PI 的 pi05_base / 不用 KAI0 mixed_1_clean),步数 **100k**,在 **cnbj Robot-North-H20 8 卡闲时**提交。验证"**自有 v4 数据 + AWBC + 从 base 自训**"三者叠加能否训出可部署叠衣策略。
-> **状态**: 📋 **核心决策定档(§7)** — 全 v4 / AE=adv_est_v1 / init=**from_paligemma** / **100k** / **cnbj H20 8 卡闲时**;**仅待 ① discretize 阈值 确认 + 发话"开始实施"**。本次仅建文档,不实施。
+> **状态**: 🚀 **已提交训练**(2026-06-27)— `t-20260627104413-qcb92`(cnbj Robot-North-H20 8×H20 闲时,Queueing)。config `pi05_v4_awbc_from_paligemma` 已注册+push(HEAD e150b06);labeled `A_v4_base_dagger`(1824ep)已 staged 至 cnbj `/vePFS-North-E`(video symlink retarget,0 broken);discretize 复用姊妹 plan 的 binary top-30%(reuse 同一 labeled 集 = 与 cnsh mmdhx 完全同源)。详见 §8。
 > **依据**: from-PaliGemma 冷启动路线已被 [`pi05_from_paligemma_base_training_plan.md`](pi05_from_paligemma_base_training_plan.md) §7.5 **实证收敛**(148k @1=0.0066/@50=0.0181,offline 全 horizon 反超 warm-start)。本 plan = 把那条已验证的冷启动路线套到 **v4 AWBC** 数据上。
 >
 > ### ⚠️⚠️ v4 两个关键要点(实施时务必,与基线 plan 一致)
@@ -120,6 +120,25 @@
 6. ✅ **集群 = cnbj Robot-North-H20 单节点 8 卡,闲时任务**。
 
 > 主配置已定;仅 ⑤ discretize 阈值待定 + "开始实施" → ① build A_v4_base_dagger + 重算 norm → ② Stage 2 打标(adv_est_v1)+ 核验 → ③ Stage 3 discretize → ④ 注册 config `pi05_v4_awbc_from_paligemma` → ⑤ cnbj H20 8 卡 100k **闲时**训练 → ⑥ eval(真机对照旧 AWBC + 姊妹 plan)。
+
+---
+
+## 8. 实施记录(2026-06-27 提交)
+
+| 项 | 落地 |
+|---|---|
+| **数据** | 复用姊妹 plan 已 labeled 的 `A_v4_base_dagger`(AE adv_est_v1 打标 + discretize binary top-30%,1824ep,与 cnsh `mmdhx` 完全同源)。无需重跑 Stage 2/3。 |
+| **跨集群 staging** | cnsh `/vePFS` → cnbj `/vePFS-North-E`:rsync labeled parquets(269M)+ meta + `norm_stats.json`(v4 重算版)+ video symlink 树(排除 `data_unlabeled_bak`);v4 源视频 25 日期 cnbj 已有(TOS 同步),symlink 前缀 `/vePFS/tim/workspace`→`/vePFS-North-E/vis_robot/workspace` 全量 retarget,**5982 symlink 0 broken**。 |
+| **config** | `pi05_v4_awbc_from_paligemma`(config.py)= clone `pi05_v4_awbc` + `PaliGemmaLocalWeightLoader(pt_224.npz)` + cold LR(warmup3k/peak3e-5/decay100k/end3e-6)+ 100k + 单 domain;cnbj venv 解析通过。 |
+| **yaml** | `train_scripts/kai/volc/v4_awbc_from_paligemma_cnbj_8gpu.yaml`(Robot-North-H20 8×H20,`Preemptible:true` 闲时,入口 preflight 验数据/norm/tasks/npz/val/symlink + 自动 `--resume`,save 2k,MaxRetry 3)。 |
+| **提交** | `t-20260627104413-qcb92`(cn-beijing,Queueing,闲时等碎片整理);commit `e150b06` 已 push,cnbj repo 已 pull。 |
+
+**对照锚点**:姊妹 warm-start `pi05_v4_awbc`(cnsh `t-20260624233509-mmdhx`,50k,~step38k/Running)→ 同 labeled 数据/AE/eval,隔离 **from-base vs warm-start**。
+
+### 后续(待训练产出)
+- 监控:闲时被抢占 → 入口 `--resume` 自续;若长期拿不到碎片可考虑提 Priority 或转独占。
+- eval:val MAE(整体+夹爪维)逐 ckpt → 选 best → 真机叠衣(对照旧 AWBC + 姊妹 warm-start)。
+- 回填 `results.md` + master `00_training_history.md`。
 
 ---
 
