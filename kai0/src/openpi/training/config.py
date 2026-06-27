@@ -2178,6 +2178,38 @@ _CONFIGS = [
         inline_eval_every=4,
     ),
 
+    # AWBC v4 × from-PaliGemma-base (pi05_v4_awbc_from_paligemma_plan.md §3/§7): 同 pi05_v4_awbc 的全 v4
+    # labeled 数据 (A_v4_base_dagger, AE adv_est_v1 打标 + discretize top-30%), 但 init 从 PaliGemma VLM base
+    # 冷启动 (action expert 随机) + 冷启动 LR (warmup3k/peak3e-5/decay100k/end3e-6) + 100k step.
+    # vs 姊妹 pi05_v4_awbc (warm-start pi05_base/50k) = "from-base vs warm-start" 在 v4 AWBC 上受控对照.
+    # 集群 = cnbj Robot-North-H20 8卡闲时 → 路径走 /vePFS-North-E (pt_224.npz + v4 labeled 数据已就位). 单 domain.
+    TrainConfig(
+        name="pi05_v4_awbc_from_paligemma",
+        model=pi0_config.Pi0Config(pi05=True),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_v4_base_dagger",
+            default_prompt=None,
+            base_config=DataConfig(prompt_from_task=True),
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.PaliGemmaLocalWeightLoader(
+            npz_path="/vePFS-North-E/vis_robot/openpi_cache/paligemma_weights/pt_224.npz"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=3_000, peak_lr=3e-5, decay_steps=100_000, decay_lr=3e-6,
+        ),
+        ema_decay=0.9999,
+        num_train_steps=100_000,
+        keep_period=10_000,
+        save_interval=2_000,
+        num_workers=16,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root="/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
+
     # AWBC milestone-value A臂 (awbc_milestone_value_AB_plan.md §3): V2.4 零训练 value 直接当 advantage 源.
     # clone of pi05_flatten_fold_awbc (C臂), 唯一变量 = 数据 (ds_A=dagger_all_mvA, V2.4-mv discretized
     # quantile-matched 25.2%neg). 同 warm-start / config / eval → 单变量隔离 "value 来源".
