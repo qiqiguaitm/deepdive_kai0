@@ -16,7 +16,7 @@ TaskRoleSpecs:
     RoleReplicas: 1
     Flavor: "ml.hpcpni2.28xlarge"   # 8× A100-80G single node
 
-ActiveDeadlineSeconds: 172800
+ActiveDeadlineSeconds: 345600  # 4d (50k 慢; 被抢占/崩溃 resume 留余量)
 EnableTensorBoard: false
 
 Storages:
@@ -76,10 +76,21 @@ Entrypoint: |
   [ -f "$WARM/_METADATA" ]            || { echo "FATAL: warm-start ckpt missing $WARM" >&2; exit 13; }
   echo "[$(date)] preflight OK (AWBC data + norm + warm-start verified)"
 
+  # 自动 resume: 有 step 目录 → --resume (续训不清空); 否则新建.
+  # 2026-06-27: 首轮在 step~22k 因 cron 拉到不一致 main (config.py use_rs_cl 不兼容 Pi0Config) import 崩;
+  #   config 已修复, resume 从 18000 续 (避免 --overwrite 丢 18k 步).
+  EXP=pi05_v4_awbc_dct
+  CKPT_DIR=$KAI0/checkpoints/pi05_v4_awbc_dct/$EXP
+  if ls -d "$CKPT_DIR"/[0-9]*/ >/dev/null 2>&1; then
+    RESUME_FLAG="--resume"; echo "[resume] found ckpt in $CKPT_DIR -> --resume"
+  else
+    RESUME_FLAG="--overwrite"; echo "[resume] no ckpt -> fresh --overwrite"
+  fi
+
   exec python -u scripts/train.py pi05_v4_awbc_dct \
     --exp-name pi05_v4_awbc_dct \
     --no-wandb-enabled \
-    --overwrite
+    $RESUME_FLAG
 
 RetryOptions:
     EnableRetry: true
