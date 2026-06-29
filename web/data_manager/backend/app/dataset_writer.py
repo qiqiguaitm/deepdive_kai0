@@ -198,12 +198,16 @@ class EpisodeWriter:
 
         self.root = task_subset_root(task, subset)
         self.pq_path = self.root / "data" / "chunk-000" / f"episode_{ep:06d}.parquet"
+        # Video/depth dirs are named by the LeRobot feature key (full name) so they match
+        # info.json's {video_key} path templates. Using the short cam name here produced
+        # top_head/ dirs that the loader (expecting observation.images.top_head/) silently
+        # failed to find — the full-vs-short-name loader bug.
         self.video_paths = {
-            cam: self.root / "videos" / "chunk-000" / cam / f"episode_{ep:06d}.mp4"
+            cam: self.root / "videos" / "chunk-000" / f"observation.images.{cam}" / f"episode_{ep:06d}.mp4"
             for cam in CAMERAS
         }
         self.depth_paths = {
-            cam: self.root / "videos" / "chunk-000" / f"{cam}_depth" / f"episode_{ep:06d}.zarr"
+            cam: self.root / "videos" / "chunk-000" / f"observation.depth.{cam}" / f"episode_{ep:06d}.zarr"
             for cam in DEPTH_CAMERAS
         }
         for p in [self.pq_path.parent, *(v.parent for v in self.video_paths.values()),
@@ -729,7 +733,7 @@ def update_info_json(task: str | None, subset: str | None) -> None:
         "splits": {"train": f"0:{total_ep}"},
         "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
         "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
-        "depth_path": "videos/chunk-{episode_chunk:03d}/{video_key}_depth/episode_{episode_index:06d}.zarr.zip",
+        "depth_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.zarr.zip",
         "features": features_block(),
     }
     info_path.write_text(json.dumps(info, indent=2, ensure_ascii=False), encoding="utf-8")

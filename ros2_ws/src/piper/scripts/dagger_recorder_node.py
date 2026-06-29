@@ -6,9 +6,9 @@ datasets, binary-compatible with upstream kai0_dagger (HDF5 ≠ parquet but
 schema-aligned). This is the open-source RECAP / AWBC advantage pipeline
 prerequisite (see docs/deployment/strategy/awbc_implementation_plan.md).
 
-Datasets:
-  <task>/inference/<date-v2>/    ← policy rollouts (intervention=0)
-  <task>/dagger/<date-v2>/       ← human corrections (intervention=1)
+Datasets (version dir from KAI0_DATASET_VERSION, current = v4):
+  <task>/inference/<vN>/<date-vN>/    ← policy rollouts (intervention=0)
+  <task>/dagger/<vN>/<date-vN>/       ← human corrections (intervention=1)
 
 Lifecycle (4 states; pedal does NOT change state):
 
@@ -209,7 +209,7 @@ class DaggerRecorder(Node):
         self.declare_parameter("min_episode_sec", MIN_EPISODE_SEC)
         # Form C dual-dataset toggle. When false, the policy-rollout (inference/)
         # side is fully disabled: no inference episode is opened/written and no
-        # <task>/inference/<date-v2>/ dir is created — only dagger/ is recorded.
+        # <task>/inference/<vN>/<date-vN>/ dir is created — only dagger/ is recorded.
         # dynamic_typing: shell→launch passes `record_inference:=false`, which
         # launch_ros serializes into the params YAML as an *unquoted* scalar →
         # rclpy loads it as BOOL, not STRING. A static STRING default would then
@@ -872,7 +872,7 @@ class DaggerRecorder(Node):
     def _open_inference_episode(self) -> None:
         """Open an inference (policy-rollout) episode writer.
 
-        Writes to <task>/inference/<date-v2>/ — used by the RECAP advantage
+        Writes to <task>/inference/<vN>/<date-vN>/ — used by the RECAP advantage
         estimator (see docs/deployment/strategy/awbc_implementation_plan.md
         Stage 1) as negative / low-advantage samples.
         """

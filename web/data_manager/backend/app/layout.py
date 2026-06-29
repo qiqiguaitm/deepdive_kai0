@@ -29,16 +29,18 @@ from .config import DATA_ROOT
 #
 # NOTE: two independent "version" axes share this suffix slot:
 #   * disk LAYOUT version — -v2 = subset-above-date tree (switched 2026-05-09).
-#   * dataset CONTENT version — -v3 = the 2026-06-15 capture changes (online
-#     front-trim + gripper-action-from-master). All new captures use the v2
-#     disk layout; the suffix now tracks the CONTENT version so V3 datasets are
-#     distinguishable on disk from older -v2 captures.
+#   * dataset CONTENT version — tracks capture changes: -v3 = 2026-06-15 online
+#     front-trim + gripper-action-from-master; -v4 (current) adds the canonical
+#     0–70mm gripper frame (arms officially recalibrated, so freshly recorded
+#     grippers are already canonical — no offline remap). Captures nest under a
+#     <vN> dir so each content version trains separately.
 #
 # The suffix is chosen by the collect scripts (start_data_collect.sh /
-# start_dagger_collect.sh) via KAI0_DATE_SUFFIX and read at call time, so the
-# leaf dir always matches the bytes being written. Default "-v2" keeps any other
-# caller (and legacy V2 capture) unchanged. Read paths accept any -vN (regex
-# below), so older -v2 datasets still resolve.
+# start_dagger_collect.sh) via KAI0_DATE_SUFFIX (current = -v4) and read at call
+# time, so the leaf dir always matches the bytes being written. Default "-v2" is
+# a conservative floor for any caller that does NOT go through the collect
+# scripts (always launch capture via them to get -v4). Read paths accept any -vN
+# (regex below), so v2/v3/v4 datasets all resolve.
 DEFAULT_DATE_SUFFIX = "-v2"
 
 

@@ -126,13 +126,20 @@ export KAI0_ASYNC_WRITER="${KAI0_ASYNC_WRITER:-1}"
 # decodes / not black). Cheap (~0.2s); default ON. KAI0_VALIDATE_TRIM=0 disables.
 export KAI0_VALIDATE_TRIM="${KAI0_VALIDATE_TRIM:-1}"
 # Dataset CONTENT version → auto-creates a version folder and tags the date leaf.
-# Layout: KAI0/<Task>/<subset>/<vN>/<date>-<vN>/ (e.g. Task_A/dagger/v3/2026-06-15-v3).
+# Layout: KAI0/<Task>/<subset>/<vN>/<date>-<vN>/ (e.g. Task_A/dagger/v4/2026-06-29-v4).
 # dagger_recorder_node inherits this env; the recorder mkdir's the full path, so
-# the v2/v3 folder is created on the fly and data lands in its version's subtree.
-#   V3 = online front-trim + gripper-action-from-master; else legacy v2.
+# the version folder is created on the fly and data lands in its version's subtree.
+#   v4 = online front/tail-trim + gripper-action-from-master + gripper dims (6,13)
+#        in the canonical 0–70mm frame. The arms are now officially calibrated to
+#        0–70mm (command 0 = 机械全闭, set_zero 掉电不丢; see gripper_calibration.md),
+#        so freshly recorded state AND master/action grippers are ALREADY canonical
+#        → new captures are v4 natively, no offline remap. (The offline
+#        make_v4_gripper_remap.py only retrofits OLD pre-recalibration v3 data.)
+#   v3 = pre-recalibration era (trimmed but old 100mm / encoder-offset gripper frame).
+#   v2 = legacy (no online trim).
 #   Override the version explicitly with KAI0_DATASET_VERSION=vN.
 if [[ "$KAI0_FRONT_TRIM" == "1" && "$KAI0_GRIPPER_FROM_MASTER" != "0" ]]; then
-    export KAI0_DATASET_VERSION="${KAI0_DATASET_VERSION:-v3}"
+    export KAI0_DATASET_VERSION="${KAI0_DATASET_VERSION:-v4}"
 else
     export KAI0_DATASET_VERSION="${KAI0_DATASET_VERSION:-v2}"
 fi

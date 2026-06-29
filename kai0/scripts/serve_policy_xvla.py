@@ -190,7 +190,8 @@ class XVLAServerPolicy(_base_policy.BasePolicy):
     def __init__(self, policy: XVLAPolicy, device, dtype, tokenizer,
                  default_prompt, default_domain_id, T_world_baseL, T_world_baseR,
                  g_open, g_close, binarize, seed=42,
-                 proprio_feedback=True, proprio_resync=0.15, imagenet_norm=False):
+                 proprio_feedback=True, proprio_resync=0.15, imagenet_norm=False,
+                 grip_close_thr=None, grip_open_thr=None, grip_min_hold=0):
         self._p = policy
         self._device = device
         self._dtype = dtype
@@ -210,6 +211,16 @@ class XVLAServerPolicy(_base_policy.BasePolicy):
         self._domain_id = int(default_domain_id)
         self._TL, self._TR = T_world_baseL, T_world_baseR
         self._g_open, self._g_close, self._binarize, self._thr = g_open, g_close, binarize, 0.5
+        # ② 夹爪迟滞 + 抓取保持 (Exp4): 杀掉 chunk 内/边界处夹爪在 0.5 阈值附近的抖动 (抓→松)。
+        # close_thr/open_thr 形成迟滞带 (close>open → 带内维持上一态); min_hold = commit 闭合后
+        # 至少强制闭合的额外 anchor 数 (防过早松手)。默认 thr=thr & hold=0 → 与逐帧二值完全一致。
+        # 顺序整-chunk 开环按序播放每个 anchor → latch 状态跨 infer 持续, reset() 每 episode 清。
+        self._g_close_thr = float(grip_close_thr) if grip_close_thr is not None else self._thr
+        self._g_open_thr = float(grip_open_thr) if grip_open_thr is not None else self._thr
+        self._g_min_hold = int(grip_min_hold)
+        self._grip_latch_on = (self._g_close_thr > self._g_open_thr) or (self._g_min_hold > 0)
+        self._grip_closed = {"L": False, "R": False}
+        self._grip_hold = {"L": 0, "R": 0}
         self._chunk = int(policy.config.chunk_size)
         # 固定 prompt 的 token 缓存 (与训练 cached_tokens 同: max_length=50)
         self._tok_cache: Dict[str, torch.Tensor] = {}
@@ -223,6 +234,26 @@ class XVLAServerPolicy(_base_policy.BasePolicy):
                 logger.warning("[trace] pipeline trace ON → %s", _tdir)
             except Exception as e:  # noqa: BLE001
                 logger.warning("[trace] init failed: %s", e)
+
+    def _resolve_grip_seq(self, sig_seq: np.ndarray, arm: str) -> np.ndarray:
+        """Exp4: 有状态夹爪迟滞 + 抓取保持。sig_seq=(H,) 原始 sigmoid (out dim 9/19) → grip 米。
+        latch 状态跨 infer 持续 (顺序整-chunk 开环按序播放), reset() 每 episode 清。"""
+        out = np.empty(len(sig_seq), dtype=np.float32)
+        closed = self._grip_closed[arm]
+        hold = self._grip_hold[arm]
+        for i in range(len(sig_seq)):
+            sig = float(sig_seq[i])
+            if hold > 0:                                    # 抓取保持: 维持闭合, 忽略松手
+                hold -= 1
+            elif not closed and sig > self._g_close_thr:    # 张→闭 commit
+                closed = True
+                hold = self._g_min_hold
+            elif closed and sig < self._g_open_thr:         # 闭→张 release
+                closed = False
+            out[i] = self._g_close if closed else self._g_open
+        self._grip_closed[arm] = closed
+        self._grip_hold[arm] = hold
+        return out
 
     def _tokens(self, prompt: str) -> torch.Tensor:
         if prompt not in self._tok_cache:
@@ -314,6 +345,12 @@ class XVLAServerPolicy(_base_policy.BasePolicy):
             out16[h, 8:16] = _ee6d_to_world8(acts[h, 10:20], self._TR,
                                              self._g_open, self._g_close, self._binarize, self._thr)
 
+        # ② Exp4 夹爪迟滞+保持: 用整-chunk sig 序列有状态地覆写 grip (out16 dim 7=L, 15=R)。
+        # 仅二值模式 + latch 开启时生效; 默认关 → 维持上方逐帧二值结果不变。
+        if self._binarize and self._grip_latch_on:
+            out16[:, 7] = self._resolve_grip_seq(acts[:, 9], "L")
+            out16[:, 15] = self._resolve_grip_seq(acts[:, 19], "R")
+
         total_ms = float((time.monotonic() - t0) * 1000.0)
 
         # pipeline trace: 落 server 侧一条 (收到的 state14/算出 state20/原始20D/world16/模型输入图)
@@ -351,6 +388,8 @@ class XVLAServerPolicy(_base_policy.BasePolicy):
 
     def reset(self) -> None:
         self._pred_proprio = None   # ① 新 episode 清掉预测 proprio, 下帧从实测重新初始化
+        self._grip_closed = {"L": False, "R": False}   # ② Exp4: 新 episode 夹爪 latch 复位 (张开)
+        self._grip_hold = {"L": 0, "R": 0}
         if hasattr(self._p, "reset"):
             self._p.reset()
 
@@ -438,6 +477,13 @@ def _parse_args():
                         "旧 30k/20k ckpt sidecar 标 none; P0 起标 imagenet。")
     p.add_argument("--proprio_resync", type=float, default=0.15,
                    help="预测 proprio 偏离实测 EE 位置超此 (m) 则 resync 回实测 (漂移保护)")
+    # Exp4 夹爪迟滞 + 抓取保持 (默认全关 → 逐帧二值, 行为不变):
+    p.add_argument("--gripper_close_thr", type=float, default=None,
+                   help="夹爪闭合 sigmoid 阈 (默认=0.5)。配合 --gripper_open_thr 形成迟滞带 (close>open)")
+    p.add_argument("--gripper_open_thr", type=float, default=None,
+                   help="夹爪张开 sigmoid 阈 (默认=0.5)。close_thr>open_thr 时带内维持上一态, 杀阈值抖动")
+    p.add_argument("--gripper_min_hold", type=int, default=0,
+                   help="commit 闭合后至少强制再闭合的 anchor 数 (15Hz 下 N≈N/15 s), 防过早松手。默认 0=关")
     return p.parse_args()
 
 
@@ -486,7 +532,12 @@ def main():
         g_open=args.gripper_open_value, g_close=args.gripper_close_value,
         binarize=args.binarize_gripper, seed=(None if args.seed < 0 else args.seed),
         proprio_feedback=args.proprio_feedback, proprio_resync=args.proprio_resync,
-        imagenet_norm=imagenet_norm)
+        imagenet_norm=imagenet_norm,
+        grip_close_thr=args.gripper_close_thr, grip_open_thr=args.gripper_open_thr,
+        grip_min_hold=args.gripper_min_hold)
+    if srv_policy._grip_latch_on:
+        logger.info("[gripper] latch ON: close_thr=%.2f open_thr=%.2f min_hold=%d anchors",
+                    srv_policy._g_close_thr, srv_policy._g_open_thr, srv_policy._g_min_hold)
 
     metadata = {
         "action_kind": "ee",

@@ -20,9 +20,9 @@
 #   SKIP_CAN_DIAG=1    跳过 CAN 健康监控后台任务 (默认启用, 30s 间隔, 出事自动打包到 /tmp/can_diag/)
 #   CAN_DIAG_INTERVAL=N (默认 30) — can_diag 快照间隔秒数
 #   KAI0_DATA_ROOT=... 采集落盘根目录 (默认 /data1/DATA_IMP/KAI0)
-#                      磁盘布局: $KAI0_DATA_ROOT/<Task>/<subset>/<YYYY-MM-DD>/{data,meta,videos}/
-#                      (subset=base|dagger|...; 同一 subset 的多日数据聚在一棵子树, 方便整 subset
-#                       做训练/同步; 路径生成在 web/data_manager/backend/app/layout.py)
+#                      磁盘布局: $KAI0_DATA_ROOT/<Task>/<subset>/<vN>/<YYYY-MM-DD>-vN/{data,meta,videos}/
+#                      (subset=base|dagger|...; <vN>=内容版本, 当前 v4; 同一 subset+版本的多日数据聚在
+#                       一棵子树, 方便整 subset 做训练/同步; 路径生成在 web/data_manager/backend/app/layout.py)
 #   PEDAL_VID/PEDAL_PID/PEDAL_KEY/PEDAL_EDGE/PEDAL_DEBOUNCE_MS
 #                      踏板硬件参数覆盖, 详见 web/data_manager/backend/tools/pedal_listener.py
 ###############################################################################
@@ -157,7 +157,9 @@ export CAM_FPS=30
 # bilateral capture (master command goes into action). Consumed by
 # web/data_manager/backend/app/ros_bridge.py::get_state_action.
 export KAI0_ACTION_EQ_STATE="${KAI0_ACTION_EQ_STATE:-1}"
-# V3 collection (2026-06-15): generate V3 datasets directly at record time.
+# Online capture features (2026-06-15): generate trimmed datasets at record time.
+# With the arms now on the official 0–70mm gripper calibration these land as v4
+# (see the version block below).
 #   KAI0_FRONT_TRIM=1         online leading-idle trim (EpisodeWriter rolling
 #                             buffer; same semantics as build_no_release, keeps
 #                             MARGIN=15 lead-in — NOT a full delete).
@@ -188,13 +190,20 @@ export KAI0_VALIDATE_TRIM="${KAI0_VALIDATE_TRIM:-1}"
 # Output is bit-identical to sync. KAI0_ASYNC_WRITER=0 reverts to inline encode.
 export KAI0_ASYNC_WRITER="${KAI0_ASYNC_WRITER:-1}"
 # Dataset CONTENT version → auto-creates a version folder and tags the date leaf.
-# Layout: KAI0/<Task>/<subset>/<vN>/<date>-<vN>/  (e.g. Task_A/base/v3/2026-06-15-v3).
-# The recorder mkdir's the full path, so the v2/v3 folder is created on the fly
-# and each episode lands under its version's subtree (train v2/v3 separately).
-#   V3 = online front-trim + gripper-action-from-master; else legacy v2.
+# Layout: KAI0/<Task>/<subset>/<vN>/<date>-<vN>/  (e.g. Task_A/base/v4/2026-06-29-v4).
+# The recorder mkdir's the full path, so the version folder is created on the fly
+# and each episode lands under its version's subtree (train each version separately).
+#   v4 = online front/tail-trim + gripper-action-from-master + gripper dims (6,13)
+#        in the canonical 0–70mm frame. The arms are now officially calibrated to
+#        0–70mm (command 0 = 机械全闭, set_zero 掉电不丢; see gripper_calibration.md),
+#        so freshly recorded state AND master/action grippers are ALREADY canonical
+#        → new captures are v4 natively, no offline remap. (The offline
+#        make_v4_gripper_remap.py only retrofits OLD pre-recalibration v3 data.)
+#   v3 = pre-recalibration era (trimmed but old 100mm / encoder-offset gripper frame).
+#   v2 = legacy (no online trim).
 #   Override the version explicitly with KAI0_DATASET_VERSION=vN.
 if [[ "$KAI0_FRONT_TRIM" == "1" && "$KAI0_GRIPPER_FROM_MASTER" != "0" ]]; then
-    export KAI0_DATASET_VERSION="${KAI0_DATASET_VERSION:-v3}"
+    export KAI0_DATASET_VERSION="${KAI0_DATASET_VERSION:-v4}"
 else
     export KAI0_DATASET_VERSION="${KAI0_DATASET_VERSION:-v2}"
 fi
@@ -215,8 +224,8 @@ if [[ "${ACTION:-start}" == "start" || "${ACTION:-start}" == "restart" ]]; then
     else
         info "data convention: action = master (legacy bilateral; falls back to state if master topic missing)"
     fi
-    info "V3 front-trim: $([ "$KAI0_FRONT_TRIM" = "1" ] && echo 'ON (leading-idle trimmed at record time, keep 15-frame lead-in)' || echo 'OFF (raw V2 capture)')"
-    info "V3 tail-trim:  $([ "$KAI0_TAIL_TRIM" = "1" ] && echo 'ON (trailing post-task idle capped to 15-frame settle; arm+gripper static)' || echo 'OFF')"
+    info "front-trim: $([ "$KAI0_FRONT_TRIM" = "1" ] && echo 'ON (leading-idle trimmed at record time, keep 15-frame lead-in)' || echo 'OFF (raw V2 capture)')"
+    info "tail-trim:  $([ "$KAI0_TAIL_TRIM" = "1" ] && echo 'ON (trailing post-task idle capped to 15-frame settle; arm+gripper static)' || echo 'OFF')"
     info "async writer:  $([ "$KAI0_ASYNC_WRITER" = "1" ] && echo 'ON (capture thread enqueues; bg thread encodes → no record-time frame drops)' || echo 'OFF (inline encode)')"
     info "dataset version: $KAI0_DATASET_VERSION → auto folder <task>/<subset>/$KAI0_DATASET_VERSION/$(date +%Y-%m-%d)$KAI0_DATE_SUFFIX/"
     info "video codec: $KAI0_VIDEO_CODEC$([ "$KAI0_VIDEO_CODEC" = "nvenc" ] && echo " (GPU h264_nvenc @ GPU $KAI0_NVENC_GPU; auto-falls back to libx264 if unavailable)")"

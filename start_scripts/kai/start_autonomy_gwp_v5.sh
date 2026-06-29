@@ -33,7 +33,7 @@ CKPT_ROOT="${GWP_CKPT_ROOT:-/data2/gwp_eval/checkpoints}"
 T5_PKL="${GWP_T5_PKL:-/data1/tim/workspace/deepdive_kai0/kai0/data/wam_fold_v3/visrobot01_v3_val/t5_embedding/episode_000000.pt}"
 # 控制参数 (与 kai0 V1 一致, 便于公平对比); enable_rtc=false 因 gwp 不消费 RTC 引导。
 # inference_rate / rtc_execute_horizon / publish_rate 由 --flag 注入 (见下); 其余固定。
-CTRL_ARGS=( "latency_k:=6" "min_smooth_steps:=8" "publish_smooth_alpha:=0.7" "enable_rtc:=false"
+CTRL_ARGS=( "latency_k:=6" "min_smooth_steps:=8" "publish_smooth_alpha:=0.7" "enable_rtc:=false" "proprio_cmd_feedback:=false"
             "cam_fps:=30" "fast_obs_pipeline:=true"
             "obs_image_h:=480" "obs_image_w:=640" )   # gwp 要近原生帧 (server 拼 768x192)
 EXTRA_ARGS=()

@@ -346,6 +346,30 @@ CONFIGS = {
         lr_schedule="constant",
         use_proprio=False,            # ⭐ 两链叠加: 关 proprio 输入 (proprio_dim=0) — 唯一相对 E0 的变量
     ),
+    # ===== TaskP_local (2026-06-28): KAI0/Task_P "pick and place in box" 本地单卡 5090 微调。
+    # 完全沿用 E0 官方配方 (4group / constant LR / bf16 / qdur2.0 / static_skip / ImageNet+jitter),
+    # 唯一差异 = 数据 (Task_P EE6D) + 域/prompt。数据需先经 joint_to_ee6d.py 转 EE6D parquet 到
+    # $XVLA_SB/TaskP_ee6d/<date>。Task_P 仅 ~101 ep (单 date), 故 steps 取 20k (官方 50k 是大数据量级);
+    # 真正 step 数训完按 inline/真机再调。per-gpu batch 默认 8, 本地用 --batch_size 按 32G 显存自适应。
+    "TaskP_local": dict(
+        datasets=[
+            dict(root=f"{SB}/TaskP_ee6d/2026-04-21", domain_id=22,
+                 prompt="pick and place in box", weight=1.0),
+        ],
+        steps=20_000,
+        lr=1e-4,                      # 官方 base lr (vlm_lr_scale=0.1 → vlm/soft_prompt 1e-5)
+        warmup_steps=2000,            # 官方
+        freeze_steps=1000,            # 官方 (冻 vlm+transformer_core 前 1000 步)
+        weight_decay=0.0,             # 官方
+        batch_size_per_gpu=8,         # 本地用 --batch_size 覆盖 (5090 32G 自适应)
+        vlm_lr_scale=0.1,             # 官方 learning_coef
+        image_aug=True,               # 官方 ColorJitter(0.2)
+        action_qdur=2.0,              # 官方 intention abstraction
+        static_skip=True,             # 官方 退化静止帧丢弃
+        bf16=True,                    # 官方 mixed precision bf16
+        param_groups="4group_official",
+        lr_schedule="constant",       # 官方 constant + warmup
+    ),
 }
 
 # ==================== TRAIN ====================
@@ -397,6 +421,9 @@ def main(args):
     if args.max_steps is not None:  # smoke: cap loop length only (scheduler/warmup unchanged)
         cfg = {**cfg, "steps": args.max_steps}
         if is_main(rank): print(f"⚠ SMOKE: steps capped to {args.max_steps}")
+    if args.batch_size is not None:  # 本地单卡 VRAM 自适应: 覆盖 per-gpu batch (eff batch 随之变)
+        cfg = {**cfg, "batch_size_per_gpu": args.batch_size}
+        if is_main(rank): print(f"⚠ batch_size_per_gpu override → {args.batch_size}")
     device = torch.device(f"cuda:{local_rank}")
 
     if is_main(rank):
@@ -479,6 +506,20 @@ def main(args):
                   f"(load missing={len(missing)} unexpected={len(unexpected)})")
     else:
         model = XVLAPolicy.from_pretrained(CKPT_INIT).to(device)
+    # 梯度检查点 (32G 单卡兜底): 在 DDP 包裹前对内层 XVLAModel 的 VLM/transformer 开启。
+    # XVLAModel 本身无 gradient_checkpointing_enable, 故下钻到 vlm (Florence2, HF PreTrainedModel)
+    # 与 transformer (SoftPromptedTransformer)。主显存大头是 VLM, 开它即拿到绝大部分收益。
+    if args.grad_checkpointing:
+        _inner = getattr(model, "model", model)
+        _on = []
+        _vlm = getattr(_inner, "vlm", None)
+        if _vlm is not None and hasattr(_vlm, "gradient_checkpointing_enable"):
+            _vlm.gradient_checkpointing_enable(); _on.append("vlm")
+        _tf = getattr(_inner, "transformer", None)
+        if _tf is not None and hasattr(_tf, "gradient_checkpointing"):
+            _tf.gradient_checkpointing = True; _on.append("transformer")
+        if is_main(rank):
+            print(f"grad checkpointing ON: {_on or 'NOTHING (无可支持的子模块)'}")
     if world > 1:
         model = DDP(model, device_ids=[local_rank], find_unused_parameters=True)
 
@@ -603,5 +644,9 @@ if __name__ == "__main__":
     ap.add_argument("--output_dir", required=True)
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--max_steps", type=int, default=None, help="smoke: cap training loop steps")
+    ap.add_argument("--batch_size", type=int, default=None,
+                    help="override cfg batch_size_per_gpu (本地单卡 5090 32G VRAM 自适应)")
+    ap.add_argument("--grad_checkpointing", action="store_true",
+                    help="enable gradient checkpointing on VLM/transformer (省显存, 略慢) — 32G 卡兜底")
     args = ap.parse_args()
     main(args)

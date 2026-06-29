@@ -44,7 +44,7 @@ done
 case "$INFER_RATE" in *.*) ;; *) INFER_RATE="${INFER_RATE}.0" ;; esac   # 节点声明 DOUBLE, 必须带小数
 
 # 控制参数(与 gwp/kai0 一致);enable_rtc=false(FastWAM 不消费 RTC);obs_image 近原生(server 侧拼 384x320)
-CTRL_ARGS=( "latency_k:=6" "min_smooth_steps:=8" "publish_smooth_alpha:=0.7" "enable_rtc:=false"
+CTRL_ARGS=( "latency_k:=6" "min_smooth_steps:=8" "publish_smooth_alpha:=0.7" "enable_rtc:=false" "proprio_cmd_feedback:=false"
             "cam_fps:=30" "fast_obs_pipeline:=true" "obs_image_h:=480" "obs_image_w:=640"
             "inference_rate:=${INFER_RATE}" "rtc_execute_horizon:=${EXEC_HORIZON}" "publish_rate:=${PUBLISH_RATE}" )
 

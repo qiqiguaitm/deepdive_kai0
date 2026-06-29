@@ -25,9 +25,39 @@ from fastapi import HTTPException
 
 from .stack import DATA_ROOT
 
-CAMERAS = ("top_head", "hand_left", "hand_right")
 SUBSETS = ("dagger", "inference")
+C_CAM = ("top_head", "hand_left", "hand_right")
 SAFE_NAME = re.compile(r"^[A-Za-z0-9_\-.]+$")
+
+def _camera_video_path(date_root: Path, cam: str, ep: int) -> Path:
+    """Try `observation.images.<cam>` (v4+) then bare `<cam>` (v3)."""
+    name = f"episode_{ep:06d}.mp4"
+    p = date_root / "videos" / "chunk-000" / f"observation.images.{cam}" / name
+    if p.exists():
+        return p
+    return date_root / "videos" / "chunk-000" / cam / name
+
+
+def _camera_video_candidates(date_root: Path, cam: str, ep: int) -> list[Path]:
+    """All possible video paths for deletion."""
+    name = f"episode_{ep:06d}.mp4"
+    return [
+        date_root / "videos" / "chunk-000" / f"observation.images.{cam}" / name,
+        date_root / "videos" / "chunk-000" / cam / name,
+    ]
+
+
+def _camera_depth_candidates(date_root: Path, cam: str, ep: int) -> list[Path]:
+    """All possible depth paths for deletion."""
+    stem, zarr_n = f"episode_{ep:06d}", f"episode_{ep:06d}.zarr"
+    return [
+        date_root / "videos" / "chunk-000" / f"observation.depth.{cam}" / zarr_n,
+        date_root / "videos" / "chunk-000" / f"observation.depth.{cam}" / (stem + ".zarr.zip"),
+        date_root / "videos" / "chunk-000" / f"observation.depth.{cam}" / (stem + ".mkv"),
+        date_root / "videos" / "chunk-000" / f"{cam}_depth" / zarr_n,
+        date_root / "videos" / "chunk-000" / f"{cam}_depth" / (stem + ".zarr.zip"),
+        date_root / "videos" / "chunk-000" / f"{cam}_depth" / (stem + ".mkv"),
+    ]
 
 
 def _safe(*parts: str) -> None:
@@ -125,8 +155,9 @@ def list_episodes(task: str = "Task_A") -> list[dict]:
                 ep = int(d.get("episode_id", -1))
                 if ep < 0:
                     continue
-                # Has at least the head-cam mp4? (used to grey out broken rows)
-                head_mp4 = video_dir / "top_head" / f"episode_{ep:06d}.mp4"
+                # Has at least the head-cam mp4? (try compliant v4+ key first, then bare v3 key)
+                head_mp4_v4 = video_dir / "observation.images.top_head" / f"episode_{ep:06d}.mp4"
+                head_mp4_v3 = video_dir / "top_head" / f"episode_{ep:06d}.mp4"
                 out.append({
                     "subset": subset,
                     "date": date_dir.name,
@@ -138,7 +169,7 @@ def list_episodes(task: str = "Task_A") -> list[dict]:
                     "success": bool(d.get("success", True)),
                     "note": d.get("note", ""),
                     "created_at": d.get("created_at"),
-                    "has_video": head_mp4.is_file(),
+                    "has_video": head_mp4_v4.is_file() or head_mp4_v3.is_file(),
                 })
     out.sort(key=lambda e: (e["date"], e["episode_id"]), reverse=True)
     return out
@@ -146,10 +177,10 @@ def list_episodes(task: str = "Task_A") -> list[dict]:
 
 def episode_video_path(task: str, subset: str, date: str, episode_id: int,
                        camera: str) -> Path:
-    if camera not in CAMERAS:
+    if camera not in C_CAM:
         raise HTTPException(400, f"unknown camera {camera!r}")
     root = _date_root(task, subset, date)
-    return root / "videos" / "chunk-000" / camera / f"episode_{episode_id:06d}.mp4"
+    return _camera_video_path(root, camera, episode_id)
 
 
 def episode_meta(task: str, subset: str, date: str, episode_id: int) -> dict:
@@ -172,17 +203,17 @@ def delete_episode(task: str, subset: str, date: str, episode_id: int) -> None:
     pq = root / "data" / "chunk-000" / f"episode_{episode_id:06d}.parquet"
     if pq.exists():
         pq.unlink()
-    for cam in CAMERAS:
-        v = root / "videos" / "chunk-000" / cam / f"episode_{episode_id:06d}.mp4"
-        if v.exists():
-            v.unlink()
-        # depth — new format single `.zarr.zip` file, legacy `.zarr/` dir; clear both
-        dz = root / "videos" / "chunk-000" / f"{cam}_depth" / f"episode_{episode_id:06d}.zarr"
-        if dz.exists():
-            shutil.rmtree(dz, ignore_errors=True)
-        dzz = dz.with_name(dz.name + ".zip")
-        if dzz.exists():
-            dzz.unlink()
+    for cam in C_CAM:
+        for vp in _camera_video_candidates(root, cam, episode_id):
+            if vp.exists():
+                vp.unlink()
+        import shutil as _sh
+        for dp in _camera_depth_candidates(root, cam, episode_id):
+            if dp.exists():
+                if dp.suffix == ".zarr" and dp.is_dir():
+                    _sh.rmtree(dp, ignore_errors=True)
+                else:
+                    dp.unlink()
     meta_fp = root / "meta" / "episodes.jsonl"
     if meta_fp.is_file():
         keep: list[str] = []
