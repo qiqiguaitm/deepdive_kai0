@@ -11,10 +11,18 @@ from typing import Literal, Protocol, SupportsIndex, TypeVar
 # even for local paths, which crashes in offline containers (no network).
 # This patch skips the network call for paths starting with "/" or "local/".
 import huggingface_hub
+from dataclasses import dataclass
+
+@dataclass
+class _EmptyGitRefs:
+    """Mock GitRefs with empty branches/tags lists (satisfies lerobot's .branches/.tags)."""
+    branches: list = dataclass.field(default_factory=list)
+    tags: list = dataclass.field(default_factory=list)
+
 _orig_list_repo_refs = huggingface_hub.HfApi.list_repo_refs
 def _patched_list_repo_refs(self, repo_id: str, **kwargs):
     if isinstance(repo_id, str) and repo_id.startswith(("/", "local/")):
-        return []
+        return _EmptyGitRefs()
     return _orig_list_repo_refs(self, repo_id, **kwargs)
 huggingface_hub.HfApi.list_repo_refs = _patched_list_repo_refs
 
