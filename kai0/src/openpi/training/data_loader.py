@@ -10,14 +10,15 @@ from typing import Literal, Protocol, SupportsIndex, TypeVar
 # Newer huggingface_hub (>=0.30) strictly validates repo_id against the HF API
 # even for local paths, which crashes in offline containers (no network).
 # This patch skips the network call for paths starting with "/" or "local/".
+# lerobot expects list_repo_refs to return an object with .branches and .tags
+# (see lerobot/common/datasets/utils.py:309-310).
+import dataclasses
 import huggingface_hub
-from dataclasses import dataclass
 
-@dataclass
+@dataclasses.dataclass
 class _EmptyGitRefs:
-    """Mock GitRefs with empty branches/tags lists (satisfies lerobot's .branches/.tags)."""
-    branches: list = dataclass.field(default_factory=list)
-    tags: list = dataclass.field(default_factory=list)
+    branches: list = dataclasses.field(default_factory=list)
+    tags: list = dataclasses.field(default_factory=list)
 
 _orig_list_repo_refs = huggingface_hub.HfApi.list_repo_refs
 def _patched_list_repo_refs(self, repo_id: str, **kwargs):
