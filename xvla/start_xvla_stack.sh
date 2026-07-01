@@ -5,10 +5,10 @@
 # (相机 + 双臂 + policy node + rerun)。Ctrl+C 一次同时收掉 client 与 server。
 #
 # 用法:
-#   ./start_scripts/xvla/start_xvla_stack.sh                       # 用默认 X3.C ckpt, observe-only
-#   ./start_scripts/xvla/start_xvla_stack.sh <ckpt_dir>            # 指定 ckpt
-#   ./start_scripts/xvla/start_xvla_stack.sh <ckpt_dir> --execute  # client 直接驱动臂
-#   ./start_scripts/xvla/start_xvla_stack.sh '' --execute          # 默认 ckpt + 驱动
+#   ./xvla/start_xvla_stack.sh                       # 用默认 X3.C ckpt, observe-only
+#   ./xvla/start_xvla_stack.sh <ckpt_dir>            # 指定 ckpt
+#   ./xvla/start_xvla_stack.sh <ckpt_dir> --execute  # client 直接驱动臂
+#   ./xvla/start_xvla_stack.sh '' --execute          # 默认 ckpt + 驱动
 #
 # 起来后(若未 --execute)翻开关驱动:
 #   ros2 topic pub /policy/execute std_msgs/Bool 'data: true' --once
@@ -20,6 +20,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 XVLA="$SCRIPT_DIR/start_xvla_autonomy.sh"
 PORT=8003
 DEFAULT_CKPT="/data1/DATA_IMP/checkpoints/ckpt_xvla/xvla_x3c_smooth800_p0_step_final"  # P0 (ImageNet 归一化, 60k)
@@ -164,7 +165,7 @@ if [ -n "$TRACE_DIR" ]; then
   # 整个丢掉 (含最关键的 /pos_cmd_* 下发命令)。
   set +u
   source /opt/ros/jazzy/setup.bash 2>/dev/null || true
-  source "$SCRIPT_DIR/../../ros2_ws/install/setup.bash" 2>/dev/null || true
+  source "$REPO_ROOT/ros2_ws/install/setup.bash" 2>/dev/null || true
   set -u
   ros2 bag record -o "$TRACE_DIR/rosbag" \
     -e '/(pos_cmd|policy|master|puppet|enable_flag).*' \

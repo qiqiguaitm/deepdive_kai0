@@ -28,6 +28,7 @@ import torch
 
 # import the actual serve building blocks so preprocessing is byte-identical to deploy
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "kai0", "scripts"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "xvla", "serve"))
 import serve_policy_xvla as S  # noqa: E402
 
 # E1 (use_proprio=False ckpts): lerobot EE6DActionSpace.preprocess indexes proprio gripper

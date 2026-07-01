@@ -88,8 +88,8 @@ docs/
 | 文件 | 作用 |
 |---|---|
 | [`inference/sim01_deployment.md`](deployment/inference/sim01_deployment.md) | sim01 部署文档 |
-| [`inference/xvla_inference_bringup.md`](deployment/inference/xvla_inference_bringup.md) | X-VLA 推理 bring-up (ckpt → 真机跑通) |
-| [`inference/xvla_upstream_vs_local_consistency.md`](deployment/inference/xvla_upstream_vs_local_consistency.md) | X-VLA 上游 vs 本地一致性分析 |
+| [`inference/xvla_inference_bringup.md`](../xvla/docs/deployment/inference/xvla_inference_bringup.md) | X-VLA 推理 bring-up (ckpt → 真机跑通) |
+| [`inference/xvla_upstream_vs_local_consistency.md`](../xvla/docs/deployment/inference/xvla_upstream_vs_local_consistency.md) | X-VLA 上游 vs 本地一致性分析 |
 | [`inference/rtc_implementation.md`](deployment/inference/rtc_implementation.md) | RTC (Real-Time Chunking) 实现方案 |
 | [`inference/fixed_noise_inference_fix.md`](deployment/inference/fixed_noise_inference_fix.md) | Fixed-noise 推理修复 (真机 oscillation 诊断) |
 | [`inference/ipc_inference_deployment_review.md`](deployment/inference/ipc_inference_deployment_review.md) | IPC & 推理服务部署 review |
@@ -130,10 +130,10 @@ docs/
 **`analysis/` — 结果分析与归因** (索引: [`analysis/README.md`](training/analysis/README.md))
 | 文件 | 作用 |
 |---|---|
-| [`analysis/xvla_vs_official_gap_rootcause.md`](training/analysis/xvla_vs_official_gap_rootcause.md) | X3.C vs 官方 X-VLA vs pi05 真机差根因 |
+| [`analysis/xvla_vs_official_gap_rootcause.md`](../xvla/docs/training/analysis/xvla_vs_official_gap_rootcause.md) | X3.C vs 官方 X-VLA vs pi05 真机差根因 |
 | [`analysis/x3c_realrobot_trace_20260601.md`](training/analysis/x3c_realrobot_trace_20260601.md) | X3.C 真机 trace 震荡/折返实证 |
-| [`analysis/xvla_dataset_vs_official.md`](training/analysis/xvla_dataset_vs_official.md) | 我们 EE6D 数据 vs 官方 Agilex 对齐审计 |
-| [`analysis/xvla_innovation_directions.md`](training/analysis/xvla_innovation_directions.md) | X-VLA 优化/创新方向研究 |
+| [`analysis/xvla_dataset_vs_official.md`](../xvla/docs/training/analysis/xvla_dataset_vs_official.md) | 我们 EE6D 数据 vs 官方 Agilex 对齐审计 |
+| [`analysis/xvla_innovation_directions.md`](../xvla/docs/training/analysis/xvla_innovation_directions.md) | X-VLA 优化/创新方向研究 |
 | [`analysis/pi05_cross_embodiment_training_deep_dive.md`](training/analysis/pi05_cross_embodiment_training_deep_dive.md) | pi0.5 跨本体训练深度研究 (官方 vs 我们) |
 | [`analysis/data_scale_vs_quality_vis_v2_full_vs_pure_200.md`](training/analysis/data_scale_vs_quality_vis_v2_full_vs_pure_200.md) | 数据规模 vs 质量 (vis_v2_full vs pure_200) |
 | [`analysis/vis_v2_full_data_audit.md`](training/analysis/vis_v2_full_data_audit.md) | vis_v2_full 数据侧 audit (oscillation 根因) |
@@ -144,10 +144,10 @@ docs/
 **`future_plans/plans/` — 未来训练计划** (索引: [`future_plans/README.md`](training/future_plans/README.md))
 | 文件 | 作用 |
 |---|---|
-| [`xvla_proprio_shortcut_openloop_fix.md`](training/future_plans/plans/xvla_proprio_shortcut_openloop_fix.md) | X-VLA vision-blind 开环根因认证 + 修复 (E0/E1/E2/E3) |
-| [`xvla_track_x_curriculum.md`](training/future_plans/plans/xvla_track_x_curriculum.md) | Track X — X-VLA 官方架构 native 训练 (X3.A/B/C) |
-| [`xvla_camera_robust_grasp_final.md`](training/future_plans/plans/xvla_camera_robust_grasp_final.md) | X-VLA 相机鲁棒精确抓取最终方案 |
-| [`xvla_domain_slot_init_ablation.md`](training/future_plans/plans/xvla_domain_slot_init_ablation.md) | XVLA domain 槽位 warm-init ablation |
+| [`xvla_proprio_shortcut_openloop_fix.md`](../xvla/docs/training/plans/xvla_proprio_shortcut_openloop_fix.md) | X-VLA vision-blind 开环根因认证 + 修复 (E0/E1/E2/E3) |
+| [`xvla_track_x_curriculum.md`](../xvla/docs/training/plans/xvla_track_x_curriculum.md) | Track X — X-VLA 官方架构 native 训练 (X3.A/B/C) |
+| [`xvla_camera_robust_grasp_final.md`](../xvla/docs/training/plans/xvla_camera_robust_grasp_final.md) | X-VLA 相机鲁棒精确抓取最终方案 |
+| [`xvla_domain_slot_init_ablation.md`](../xvla/docs/training/plans/xvla_domain_slot_init_ablation.md) | XVLA domain 槽位 warm-init ablation |
 | [`idle_data_trimming_experiments.md`](training/future_plans/plans/idle_data_trimming_experiments.md) | idle(静止/投放)数据裁剪影响 (v3/v3.2) |
 | [`gripper_action_clip_experiment.md`](training/future_plans/plans/gripper_action_clip_experiment.md) | 夹爪 action 裁剪对真机夹持稳定性影响 |
 | [`corrected_plan_a_conditioning_premerge.md`](training/future_plans/plans/corrected_plan_a_conditioning_premerge.md) | Plan A — embodiment conditioning + per-DS norm |

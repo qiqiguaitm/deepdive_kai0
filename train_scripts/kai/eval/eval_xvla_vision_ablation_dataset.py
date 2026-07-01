@@ -30,7 +30,8 @@ import torch
 
 _REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO / "kai0" / "scripts"))
-sys.path.insert(0, str(_REPO / "train_scripts" / "xvla" / "data"))
+sys.path.insert(0, str(_REPO / "xvla" / "data"))
+sys.path.insert(0, str(_REPO / "xvla" / "serve"))
 import serve_policy_xvla as S  # noqa: E402
 from multi_domain_dataset import LeRobotEE6DDataset, imagenet_normalize_chw  # noqa: E402
 

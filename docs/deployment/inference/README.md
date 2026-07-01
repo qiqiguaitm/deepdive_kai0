@@ -27,13 +27,13 @@ inference/
 | 文件 | 行数 | 用途 |
 |---|---|---|
 | [`rtc_implementation.md`](rtc_implementation.md) | ~249 | RTC (Inference Real-Time Chunking) 算法实现, 4 schedules + jax.vjp guidance |
-| [`xvla_rtc_design.md`](xvla_rtc_design.md) | ~design | X-VLA RTC 移植设计 — EE6D 原生空间 + **前向过程 inpaint** (vs 算术平均的 IK/decode 失败率差异) + 多层 IK 兜底; 异步双时钟前置; gated 于 E0 读视觉 |
+| [`xvla_rtc_design.md`](../../../xvla/docs/deployment/inference/xvla_rtc_design.md) | ~design | X-VLA RTC 移植设计 — EE6D 原生空间 + **前向过程 inpaint** (vs 算术平均的 IK/decode 失败率差异) + 多层 IK 兜底; 异步双时钟前置; gated 于 E0 读视觉 |
 | [`ipc_inference_deployment_review.md`](ipc_inference_deployment_review.md) | ~178 | IPC 推理服务架构 — 与原版差异分析 |
 | [`ros2_image_inference_validation_review.md`](ros2_image_inference_validation_review.md) | ~430 | ROS2 图像处理 + 推理结果校验策略 review |
 | [`sim01_deployment.md`](sim01_deployment.md) | ~611 | sim01 仿真机器人部署 / 完整 step-by-step |
 | [`fixed_noise_inference_fix.md`](fixed_noise_inference_fix.md) | ~150 | G0 fixed-noise inference 修复 — vis_v2_full 真机 oscillation 诊断 + sim01 端代码补丁 (RTC 兼容) |
 | [`build_web_venv.md`](build_web_venv.md) | ~137 | 通用 web 推理服务 venv — 支持多框架, 与代码解耦, 可用于 data_manager + 推理 host |
-| [`xvla_inference_bringup.md`](xvla_inference_bringup.md) | ~210 | X-VLA ckpt 真机 bring-up 计划 (修订版) — server-only `ee` 16D; 端到端审计后 4 层阻塞 (旧ckpt作废/新ckpt训练中/R4 server改lerobot类/客户端ee链缺失) + R1-R4 正确性契约 (link6/interleaved/二值gripper/lerobot预处理) |
+| [`xvla_inference_bringup.md`](../../../xvla/docs/deployment/inference/xvla_inference_bringup.md) | ~210 | X-VLA ckpt 真机 bring-up 计划 (修订版) — server-only `ee` 16D; 端到端审计后 4 层阻塞 (旧ckpt作废/新ckpt训练中/R4 server改lerobot类/客户端ee链缺失) + R1-R4 正确性契约 (link6/interleaved/二值gripper/lerobot预处理) |
 | [`realtime_vla/`](realtime_vla/README.md) | series | 实时 VLA 推理优化 (P50 76→32ms 已达成, Layer B 下一阶段) |
 
 ## 按需求找文件

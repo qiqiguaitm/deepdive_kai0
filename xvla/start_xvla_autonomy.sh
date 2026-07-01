@@ -8,16 +8,16 @@
 # computed on the server from X-VLA's native 20D arm-base interleaved-Rot6D output.
 #
 # Usage:
-#   ./start_scripts/xvla/start_xvla_autonomy.sh server <ckpt_dir> [server flags...]    # terminal A
-#   ./start_scripts/xvla/start_xvla_autonomy.sh client [autonomy_launch.py args...]     # terminal B
+#   ./xvla/start_xvla_autonomy.sh server <ckpt_dir> [server flags...]    # terminal A
+#   ./xvla/start_xvla_autonomy.sh client [autonomy_launch.py args...]     # terminal B
 #
 # After client is up + arms homed, flip to drive:
 #   ros2 topic pub /policy/execute std_msgs/Bool 'data: true' --once
 #
 # Examples:
-#   ./start_scripts/xvla/start_xvla_autonomy.sh server /data1/DATA_IMP/checkpoints/ckpt_xvla/xvla_x3c_smooth800_step_final
-#   ./start_scripts/xvla/start_xvla_autonomy.sh client                 # observe-only (default)
-#   ./start_scripts/xvla/start_xvla_autonomy.sh client --execute       # drive arms immediately
+#   ./xvla/start_xvla_autonomy.sh server /data1/DATA_IMP/checkpoints/ckpt_xvla/xvla_x3c_smooth800_step_final
+#   ./xvla/start_xvla_autonomy.sh client                 # observe-only (default)
+#   ./xvla/start_xvla_autonomy.sh client --execute       # drive arms immediately
 #
 # NOTE: use --execute (script flag forwarded to start_autonomy.sh) NOT
 # execute_mode:=true (launch arg) — the script-level flag flips both the
@@ -27,10 +27,10 @@
 # implementation-dependent and not relied upon here).
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 KAI0="$REPO_ROOT/kai0"
 VENV_PY="$KAI0/.venv_xvla/bin/python"   # R4方案②: lerobot.policies.xvla 训练同款类 (cu128, 独立 venv)
-SERVE="$KAI0/scripts/serve_policy_xvla.py"
+SERVE="$REPO_ROOT/xvla/serve/serve_policy_xvla.py"
 DEFAULT_PORT=8003
 
 if [ ! -x "$VENV_PY" ]; then

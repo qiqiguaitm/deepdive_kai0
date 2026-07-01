@@ -32,7 +32,7 @@ EE6D_META = EE6D_ROOT + "/meta/episodes.jsonl"
 BASE_ROOT = "/data/shared/ubuntu_old/data/Task_A/A_new_smooth_800/base"
 CKPT = "/data/shared/ubuntu_old/workspace/deepdive_kai0/kai0/checkpoints/pi05_flatten_fold_a_new_smooth_800_new_norm/task_a_new_smooth_800_new_norm/49999"
 NORM_STATS_DIR = "/data/shared/ubuntu_old/workspace/deepdive_kai0/kai0/checkpoints/pi05_flatten_fold_a_new_smooth_800_new_norm/task_a_new_smooth_800_new_norm"
-FK_CONVERTER = "/data/shared/ubuntu/workspace/deepdive_kai0/train_scripts/xvla/data"
+FK_CONVERTER = "/data/shared/ubuntu/workspace/deepdive_kai0/xvla/data"
 
 PROMPT = "Flatten and fold the cloth."
 N_HELDOUT_EP = 50

@@ -19,12 +19,16 @@ from piper_sdk.kinematics.piper_fk import C_PiperForwardKinematics
 
 # Per-process FK instance (init lazily)
 _FK = None
+# Global flag for continuous gripper mode (set before convert_parquet)
+_CONTINUOUS_GRIPPER = False
+
 
 def get_fk():
     global _FK
     if _FK is None:
         _FK = C_PiperForwardKinematics(0x01)  # 2° j2/j3 offset
     return _FK
+
 
 def joint_to_ee6d_row(q14: np.ndarray) -> np.ndarray:
     """14D (7+7: 6 joints + 1 gripper per arm) → 20D EE6D."""
@@ -43,9 +47,14 @@ def joint_to_ee6d_row(q14: np.ndarray) -> np.ndarray:
         rot6d = R[:, :2].flatten().astype(np.float32)
         out[arm*10 : arm*10+3] = xyz_m
         out[arm*10+3 : arm*10+9] = rot6d
-        # Binarize gripper to {0,1} — action_hub uses BCEWithLogitsLoss on this channel.
-        # Matches upstream AIRAgilex (real_world.py): raw*50<1.0 → 1 (closed). gripper in meters.
-        out[arm*10+9] = np.float32(gripper * 50.0 < 1.0)
+        if _CONTINUOUS_GRIPPER:
+            # Preserve raw gripper value (m) clipped to [0, 0.08] — matches physical Piper range.
+            # Continuous mode for agibot_ee6d action space (MSE loss, no binarization).
+            out[arm*10+9] = np.float32(np.clip(gripper, 0.0, 0.08))
+        else:
+            # Binarize gripper to {0,1} — action_hub uses BCEWithLogitsLoss on this channel.
+            # Matches upstream AIRAgilex (real_world.py): raw*50<1.0 → 1 (closed). gripper in meters.
+            out[arm*10+9] = np.float32(gripper * 50.0 < 1.0)
     return out
 
 def convert_parquet(in_path: Path, out_path: Path) -> int:
@@ -65,11 +74,15 @@ def convert_parquet(in_path: Path, out_path: Path) -> int:
     pq.write_table(pa.Table.from_pandas(df), out_path)
     return n
 
-def convert_dataset(in_root: Path, out_root: Path, num_workers: int = 16):
+def convert_dataset(in_root: Path, out_root: Path, num_workers: int = 16,
+                    continuous_gripper: bool = False):
     """Convert all parquets in in_root → out_root, mirror video/meta structure."""
+    global _CONTINUOUS_GRIPPER
+    _CONTINUOUS_GRIPPER = continuous_gripper
     in_root, out_root = Path(in_root), Path(out_root)
     parquets = sorted(in_root.rglob("data/**/*.parquet"))
-    print(f"[{in_root.name}] {len(parquets)} parquets to convert")
+    mode = "continuous [0,0.08]" if continuous_gripper else "binary {0,1}"
+    print(f"[{in_root.name}] {len(parquets)} parquets to convert (gripper={mode})")
 
     # Mirror meta + symlink videos
     if (in_root / "meta").exists() and not (out_root / "meta").exists():
@@ -114,5 +127,9 @@ if __name__ == "__main__":
     ap.add_argument("--in_dir", required=True)
     ap.add_argument("--out_dir", required=True)
     ap.add_argument("--workers", type=int, default=16)
+    ap.add_argument("--continuous", action="store_true",
+                    help="Preserve continuous gripper values [0,0.08] instead of binarizing to {0,1}. "
+                         "Use with agibot_ee6d action space (MSE loss) for pick-and-place tasks.")
     args = ap.parse_args()
-    convert_dataset(Path(args.in_dir), Path(args.out_dir), args.workers)
+    convert_dataset(Path(args.in_dir), Path(args.out_dir), args.workers,
+                    continuous_gripper=args.continuous)

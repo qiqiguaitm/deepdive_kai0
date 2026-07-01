@@ -49,7 +49,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "kai0" / "src"))
 sys.path.insert(0, str(_REPO_ROOT / "kai0" / "packages" / "openpi-client" / "src"))
 sys.path.insert(0, str(_REPO_ROOT / "kai0" / "scripts"))
-sys.path.insert(0, str(_REPO_ROOT / "train_scripts" / "xvla" / "data"))
+sys.path.insert(0, str(_REPO_ROOT / "xvla" / "data"))
 
 import cv2  # noqa: E402
 import torch  # noqa: E402
@@ -463,7 +463,10 @@ def _parse_args():
     # 对齐 vis Piper 物理行程 [0, 0.08] m (非 SoftFold-Agilex 默认 open=0.0656/close=-0.00547):
     # open=0.0656 只到 82% 行程夹爪开不满; close 负值在 arm_reader_node 会被夹成 0。
     p.add_argument("--gripper_open_value", type=float, default=0.08)
-    p.add_argument("--gripper_close_value", type=float, default=0.0)
+    p.add_argument("--gripper_close_value", type=float, default=0.04,
+                   help="夹爪闭合目标值 (m)。0.0=全闭(0mm), 0.08=全开(~70mm)。"
+                        "pick-and-place 建议 0.03-0.05 (物体宽度 25-45mm)。"
+                        "折叠任务 0.0 可能合适 (布料薄)。")
     p.add_argument("--binarize_gripper", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--seed", type=int, default=42,
                    help="flow-matching 确定性采样种子 (固定→连续 chunk 一致, 减卡顿); -1=随机重采")

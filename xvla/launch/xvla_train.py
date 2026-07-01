@@ -370,6 +370,30 @@ CONFIGS = {
         param_groups="4group_official",
         lr_schedule="constant",       # 官方 constant + warmup
     ),
+    # ===== TaskP_local_continuous (2026-07-01): 连续夹爪版本 — 核心差异 vs TaskP_local。
+    # 数据用 joint_to_ee6d.py --continuous (保留遥操作原始夹爪 [0,0.08] m), action_mode=agibot_ee6d
+    # (MSE loss on gripper, 不置零 proprio 夹爪通道 → 模型能感知当前夹爪开度 → 可学到跨 chunk 保持闭合)。
+    # 其他配方不变 (4group / constant LR / bf16 / qdur2.0 / static_skip / ImageNet+jitter)。
+    "TaskP_local_continuous": dict(
+        datasets=[
+            dict(root=f"{SB}/TaskP_ee6d_continuous/2026-04-21", domain_id=23,
+                 prompt="pick and place in box", weight=1.0),
+        ],
+        action_mode="agibot_ee6d",    # ⭐ 连续夹爪 (MSE, 不置零 proprio 夹爪通道)
+        steps=20_000,
+        lr=1e-4,
+        warmup_steps=2000,
+        freeze_steps=1000,
+        weight_decay=0.0,
+        batch_size_per_gpu=8,
+        vlm_lr_scale=0.1,
+        image_aug=True,
+        action_qdur=2.0,
+        static_skip=True,
+        bf16=True,
+        param_groups="4group_official",
+        lr_schedule="constant",
+    ),
 }
 
 # ==================== TRAIN ====================
@@ -477,11 +501,18 @@ def main(args):
     # lerobot from_pretrained 把 strict 写死成 True (modeling_xvla.py:489) → 无法吞下这个形状变化
     #   (不是 unexpected key, 是 present key 的 shape mismatch)。故手动加载: 把 init ckpt 的
     #   action_encoder.fc.weight 切掉 proprio 那几列再 load (保留 action/time 预训练列), 其余照常。
-    if cfg.get("use_proprio", True) is False:
+    #
+    # action_mode override (cfg.action_mode != default "ee6d"): 切换到 agibot_ee6d 等 action space。
+    # 架构相同 (dim_action=20, gripper_idx 一致) → 无需切片, 只改 config.action_mode + 重建 action_space。
+    _action_override = cfg.get("action_mode")
+    if (cfg.get("use_proprio", True) is False) or (_action_override and _action_override != "ee6d"):
         import os, safetensors.torch
         from lerobot.configs.policies import PreTrainedConfig
         _ovr = PreTrainedConfig.from_pretrained(CKPT_INIT)
-        _ovr.use_proprio = False
+        if cfg.get("use_proprio", True) is False:
+            _ovr.use_proprio = False
+        if _action_override:
+            _ovr.action_mode = _action_override
         model = XVLAPolicy(_ovr)
         sd = safetensors.torch.load_file(os.path.join(CKPT_INIT, "model.safetensors"))
         ek = "model.vlm.language_model.model.encoder.embed_tokens.weight"
@@ -494,15 +525,21 @@ def main(args):
         nd = sd[key].shape[0]
         assert sd[key].shape[1] == (da + dp + dt) * out, \
             f"fc layout mismatch: {tuple(sd[key].shape)} vs ({da}+{dp}+{dt})*{out}"
-        # forward views fc as [in, out] (soft_transformer.py:251); input cols = [action, proprio, time]
-        w = sd[key].view(nd, da + dp + dt, out)
-        w = torch.cat([w[:, :da, :], w[:, da + dp:, :]], dim=1)       # drop proprio rows
-        sd[key] = w.reshape(nd, (da + dt) * out).contiguous()
+        if cfg.get("use_proprio", True) is False:
+            # forward views fc as [in, out] (soft_transformer.py:251); input cols = [action, proprio, time]
+            w = sd[key].view(nd, da + dp + dt, out)
+            w = torch.cat([w[:, :da, :], w[:, da + dp:, :]], dim=1)       # drop proprio rows
+            sd[key] = w.reshape(nd, (da + dt) * out).contiguous()
         missing, unexpected = model.load_state_dict(sd, strict=False)
         model.model._apply_dtype()
         model = model.to(device)
         if is_main(rank):
-            print(f"⭐ E1 use_proprio=False: proprio_dim→0, sliced action_encoder.fc {da+dp+dt}→{da+dt} cols/domain "
+            flags = []
+            if cfg.get("use_proprio", True) is False:
+                flags.append(f"proprio_dim→0, sliced action_encoder.fc {da+dp+dt}→{da+dt} cols/domain")
+            if _action_override:
+                flags.append(f"action_mode={_action_override}")
+            print(f"⭐ config override: {'; '.join(flags)} "
                   f"(load missing={len(missing)} unexpected={len(unexpected)})")
     else:
         model = XVLAPolicy.from_pretrained(CKPT_INIT).to(device)
