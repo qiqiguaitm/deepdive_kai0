@@ -26,19 +26,20 @@ CRAVE demo videos -> DINO/state features -> milestone ids/prototypes
 
 See `docs/recurrence_state_world_model_plan.md` for the current plan.
 
-## Documentation
+## 文档索引
 
-| Doc | Purpose |
+| 文档 | 内容 |
 |---|---|
-| [docs/lmwm_stage_overview.md](docs/lmwm_stage_overview.md) | **Start here** — single-page tour of all stages, results, and honest limitations |
-| [docs/phase_a_real_future_20260702.md](docs/phase_a_real_future_20260702.md) | Phase A — real-future labels + graph-independent evaluation (the 0.96→0.23 honest reframing, and the real-future win) |
-| [docs/phase_b_calibration_prior_20260702.md](docs/phase_b_calibration_prior_20260702.md) | Phase B — calibration (ECE 0.10→0.005 via T=1.30) + graph-as-soft-prior fusion (λ=0.3: top1 0.38→0.42, NLL 1.98→1.80) |
-| [docs/phase_c_history_20260702.md](docs/phase_c_history_20260702.md) | Phase C — frame-history conditioning (negative result: no gain, single-frame is at ceiling) |
-| [docs/vla_integration_20260702.md](docs/vla_integration_20260702.md) | **Phase D — VLA integration interface** (`lmwm.vla_interface.VLALMWMPredictor`); LMWM is VLA-ready |
-| [docs/recurrence_state_world_model_plan.md](docs/recurrence_state_world_model_plan.md) | Design rationale, LaWAM reference points, staged plan |
-| [docs/automatic_iteration_log_20260701.md](docs/automatic_iteration_log_20260701.md) | Exhaustive step-by-step record of every iteration (artifacts, commands, metrics) |
-| [docs/stage1_dinov3h_run_20260701.md](docs/stage1_dinov3h_run_20260701.md) | Stage-1 DINOv3-H prototype run record |
-| [docs/stage1_smoke_run_20260701.md](docs/stage1_smoke_run_20260701.md) | Stage-1 smoke run record (one-hot representation) |
+| [docs/lmwm_technical_report.md](docs/lmwm_technical_report.md) | **技术报告** — 方法 + 配图结果 + 解码预测可视化 |
+| [docs/lmwm_stage_overview.md](docs/lmwm_stage_overview.md) | 阶段总览 — 所有阶段、结果和诚实局限的单页导览 |
+| [docs/phase_a_real_future_20260702.md](docs/phase_a_real_future_20260702.md) | Phase A — 真实未来标签 + 图无关评估(0.94→0.23 诚实重塑) |
+| [docs/phase_b_calibration_prior_20260702.md](docs/phase_b_calibration_prior_20260702.md) | Phase B — 校准(ECE 0.10→0.005)+ 图作软先验融合(λ=0.3) |
+| [docs/phase_c_history_20260702.md](docs/phase_c_history_20260702.md) | Phase C — 帧历史条件(负结果:无增益) |
+| [docs/vla_integration_20260702.md](docs/vla_integration_20260702.md) | Phase D — VLA 集成接口(`lmwm.vla_interface.VLALMWMPredictor`) |
+| [docs/recurrence_state_world_model_plan.md](docs/recurrence_state_world_model_plan.md) | 设计规划 — 设计原理、LaWAM 参考点、分阶段路线 |
+| [docs/automatic_iteration_log_20260701.md](docs/automatic_iteration_log_20260701.md) | 自动迭代日志 — 每一步实验的详尽记录 |
+| [docs/stage1_dinov3h_run_20260701.md](docs/stage1_dinov3h_run_20260701.md) | Stage-1 DINOv3-H 训练记录 |
+| [docs/stage1_smoke_run_20260701.md](docs/stage1_smoke_run_20260701.md) | Stage-1 smoke 运行记录 |
 
 ## Terminology Lock
 

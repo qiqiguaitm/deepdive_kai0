@@ -1,17 +1,12 @@
-# LMWM ↔ VLA Integration Interface (Phase D)
+# LMWM ↔ VLA 集成接口(Phase D)
 
-> Date: 2026-07-02. Packages the real-future-validated LMWM (Phases A/B/C) into a
-> single online predictor for use as a VLA planning prior.
+> 日期:2026-07-02。将真实未来验证的 LMWM(Phase A/B/C)打包成一个在线预测器,供 VLA planning prior 使用。
 
-## Why now
+## 为什么是现在
 
-Phase C showed the standalone single-frame world model is at its ceiling: frame
-history does not improve real-future prediction, and the remaining levers (action
-conditioning, less-jittery labels) live on the VLA / data side. So the right next
-move is to expose the current, honestly-validated LMWM to a policy — not to keep
-tuning the world model alone.
+Phase C 证明独立的单帧世界模型已达天花板:帧历史不改善真实未来预测,剩余杠杆(动作条件、更少抖动的标签)在 VLA/数据侧。因此正确的下一步是将当前经诚实验证的 LMWM 暴露给策略 —— 而非继续调优世界模型本身。
 
-## The recipe (validated vs the real observed next milestone)
+## 配方(对真实观测未来验证)
 
 ```
 p_cal   = softmax(greedy_logits / T),         T = 1.30
@@ -19,10 +14,7 @@ p_prior = transition_probs[current_milestone]
 p_fused ∝ p_cal^(1-λ) · p_prior^λ,            λ = 0.30
 ```
 
-`T=1.30` and `λ=0.30` are the held-out optima from Phase B. On held-out episodes,
-vs the real observed next milestone: top1 ≈ **0.42**, top3 ≈ **0.73**, top5 ≈
-**0.86**, NLL ≈ **1.80**, calibrated ECE ≈ **0.005**. These are honest numbers —
-scored against reality, not the circular graph-lookup metric.
+`T=1.30` 和 `λ=0.30` 是 Phase B 的 held-out 最优参数。在 held-out episode 上,对真实观测下一 milestone:top1 ≈ **0.42**,top3 ≈ **0.73**,top5 ≈ **0.86**,NLL ≈ **1.80**,校准 ECE ≈ **0.005**。这些是诚实数字 —— 对现实打分,不是循环图查找指标。
 
 ## API
 
@@ -32,55 +24,43 @@ from lmwm.vla_interface import VLALMWMPredictor
 predictor = VLALMWMPredictor.from_yaml(
     "lmwm/configs/inference/kai0base_dinov3h_vla_realfuture.yaml"
 )
-out = predictor.predict(current_features)          # (B, feature_dim) or (feature_dim,)
-# or predictor.predict_one(current_feature)
+out = predictor.predict(current_features)          # (B, feature_dim) 或 (feature_dim,)
+# 或 predictor.predict_one(current_feature)
 ```
 
-`current_milestones` is optional; if omitted it is assigned by nearest DINOv3-H
-prototype (uses the last `frame_dim` dims, so history-augmented inputs also work).
+`current_milestones` 可选的;若省略则按最近 DINOv3-H prototype 分配(使用最后 `frame_dim` 维,因此历史增强输入也可用)。
 
-### Returned fields (per sample)
+### 返回字段(每样本)
 
-| field | shape | meaning |
+| 字段 | 形状 | 含义 |
 |---|---|---|
-| `next_milestone` | () | argmax of the fused distribution (top-1 next milestone) |
-| `next_milestone_probs` | (M,) | frame-conditional distribution with soft graph prior — the main output |
-| `topk_milestones` / `topk_probs` | (k,) | ranked next-milestone candidates + probabilities |
-| `subgoal_latent` | (latent_dim,) | L2-normalized prototype subgoal for the greedy next milestone |
-| `confidence` | () | max fused prob (calibrated; usable for gating) |
-| `entropy` | () | entropy of the fused distribution (task-branch uncertainty) |
-| `calibrated_probs` | (M,) | neural-only temperature-scaled distribution (no prior) |
-| `current_milestone` | () | assigned/observed current stage |
+| `next_milestone` | () | 融合分布 argmax(top-1 下一 milestone) |
+| `next_milestone_probs` | (M,) | 带软图先验的帧条件分布 —— **主要输出** |
+| `topk_milestones` / `topk_probs` | (k,) | 排序的下一 milestone 候选 + 概率 |
+| `subgoal_latent` | (latent_dim,) | 贪心下一 milestone 的 L2 归一 prototype subgoal |
+| `confidence` | () | 最大融合概率(已校准;可用于门控) |
+| `entropy` | () | 融合分布的熵(任务分支不确定性) |
+| `calibrated_probs` | (M,) | 仅神经温度缩放分布(无先验) |
+| `current_milestone` | () | 分配的/观测的当前阶段 |
 
-## Suggested VLA usage
+## 建议的 VLA 使用方式
 
-- **Subgoal conditioning**: feed `subgoal_latent` (a DINOv3-H prototype) as a
-  latent visual goal, LaWAM-style.
-- **Candidate set, not a hard target**: prefer `topk_milestones` / probabilities
-  over a single next milestone — the problem has ~13 branches, so top-1 is often
-  wrong while top-5 covers 86%.
-- **Gate on `confidence` / `entropy`**: defer to the policy's own priors when the
-  LMWM is uncertain (high entropy / low confidence).
-- Do **not** treat top-1 as ground truth, and do not use the old graph-hybrid
-  `runtime.UnifiedLMWMPredictor` fallback numbers (0.997) — those were validated
-  against the graph that defined their labels.
+- **Subgoal 条件**:将 `subgoal_latent`(DINOv3-H prototype)作为隐变量视觉目标输入,LaWAM 风格。
+- **候选集而非硬目标**:优先使用 `topk_milestones`/概率而非单一下一 milestone —— 问题有 ~13 分支,top-1 常在错而 top-5 覆盖 86%。
+- **按 `confidence`/`entropy` 门控**:当 LMWM 不确定(高熵/低置信)时将决策权交给策略自身先验。
+- **不要**将 top-1 视为 ground truth,也不要用旧 graph-hybrid `runtime.UnifiedLMWMPredictor` 回退数字(0.997) —— 那些是对定义其标签的图验证的。
 
-## Config
+## 配置
 
 `configs/inference/kai0base_dinov3h_vla_realfuture.yaml`:
-`checkpoint` (single-frame real-future best), `graph_npz`, `temperature: 1.30`,
-`prior_weight: 0.30`, `topk: 5`.
+`checkpoint`(单帧 real-future best),`graph_npz`,`temperature: 1.30`,`prior_weight: 0.30`,`topk: 5`。
 
-## Honest limits carried into VLA
+## 带入 VLA 的诚实边界
 
-- Single `kai0_base` DINOv3-H, same-task held-out; `T` / `λ` re-fit per dataset.
-- Output is a milestone distribution + latent prototype subgoal — not decoded
-  images or robot actions.
-- Absolute top-1 ≈ 0.42 reflects intrinsic ~13-branch ambiguity; rely on top-k +
-  confidence, not point prediction.
+- 单 `kai0_base` DINOv3-H,同任务 held-out;`T`/`λ` 按数据集重新拟合。
+- 输出是 milestone 分布 + 隐变量 prototype subgoal —— 不是解码图像或机器人动作。
+- 绝对 top-1 ≈ 0.42 反映固有 ~13 分支歧义;依靠 top-k + 置信度,不靠点预测。
 
-## Status
+## 状态
 
-**LMWM is ready for VLA integration.** The interface exposes a calibrated,
-real-future-validated next-milestone distribution, ranked candidates, a latent
-subgoal, and uncertainty signals through one online predictor.
+**LMWM 已准备好 VLA 集成。** 该接口通过一个在线预测器,曝露一个经校准、真实未来验证的下一 milestone 分布、排序候选、隐变量子目标和不确定信号。

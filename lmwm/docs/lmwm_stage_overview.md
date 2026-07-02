@@ -1,192 +1,128 @@
-# LMWM Stage Overview
+# LMWM 阶段总览
 
-> Single-page tour of how the Latent Milestone World Model was built: what each
-> stage did and what it produced. For the exhaustive step-by-step record see
+> LMWM 构建过程的单页导览:每个阶段做了什么、产出什么。如需详尽的逐步记录,参见
 > [automatic_iteration_log_20260701.md](automatic_iteration_log_20260701.md);
-> for the design rationale see
-> [recurrence_state_world_model_plan.md](recurrence_state_world_model_plan.md).
+> 设计原理参见
+> [recurrence_state_world_model_plan.md](recurrence_state_world_model_plan.md)。
 >
-> Last updated: 2026-07-02.
+> 最后更新:2026-07-02。
 
-## What LMWM is
+## LMWM 是什么
 
-LMWM is **not** pixel prediction and **not** a full VLA policy. It is a compact
-recurrence world model over CRAVE milestone states. It consumes the current
-DINOv3-H frame feature and outputs, for VLA planning-prior use:
+LMWM **不是**像素预测,也**不是**完整 VLA 策略。它是 CRAVE milestone 状态上的紧凑循环世界模型,消费当前 DINOv3-H 帧特征,为 VLA planning-prior 用途输出:
 
-- next milestone (greedy);
-- highest-completion next milestone (max-product);
-- a transition distribution over milestones;
-- a latent prototype subgoal per head;
-- confidence / entropy signals for downstream gating.
+- 下一 milestone(贪心);
+- 最高完成度下一 milestone(最大积);
+- milestone 上的转移分布;
+- 每个头的隐变量 prototype subgoal;
+- 用于下游门控的置信度/熵信号。
 
-The design borrows LaWAM's idea of predicting a latent subgoal in a frozen
-encoder space (DINOv3), but the latent is CRAVE's task-aware milestone state
-rather than a generic visual-future token.
+设计借鉴 LaWAM 在冻结编码器空间(DINOv3)中预测隐变量子目标的思路,但隐变量是 CRAVE 的任务感知 milestone 状态,而非通用视觉未来 token。
 
-**Data base**: `kai0_base` DINOv3-H — 334,875 valid frames / 3,055 episodes /
-37 milestone prototypes.
+**数据基座**:`kai0_base` DINOv3-H —— 334,875 有效帧 / 3,055 episode / 37 个 milestone prototype。
 
-## The four modeling stages
+## 四个建模阶段
 
-### Stage-1 — LaWM-shaped transition model (pipeline validation)
+### Stage-1 — LaWM 形状转移模型(管线验证)
 
-- **What**: `(r_t, r_future) -> inverse code u_t -> r_hat_future -> milestone
-  classifier`. First a one-hot smoke run to validate the loop, then real
-  DINOv3-H 1280D prototypes.
-- **Result**: val top1 = **1.0**, MSE ≈ 0.002–0.007.
-- **Honest read**: high accuracy is expected because inputs and targets are both
-  drawn from a finite table of 37 prototypes. This validates data handling and
-  architecture, **not** the world model itself.
+- **做了什么**:`(r_t, r_future) -> 逆向码 u_t -> r_hat_future -> milestone 分类器`。先用 one-hot smoke 运行验证循环,再换真 DINOv3-H 1280D prototype。
+- **结果**:val top1 = **1.0**,MSE ≈ 0.002–0.007。
+- **诚实解读**:高分是预期的,因为输入和目标都取自 37 个 prototype 的有限表。这验证了数据处置和架构,**不是**世界模型本身。
 
-### Recurrence Latent State Probability Graph (the explicit graph)
+### Recurrence Latent State Probability Graph(循环隐状态概率图,显式图)
 
-- **What**: assign each frame to the nearest milestone center, sort within each
-  episode, compress consecutive identical stages, count transitions,
-  row-normalize with smoothing. Greedy = `argmax P(next|cur)`; max-product =
-  finite-horizon DP toward the highest-progress terminal milestone.
-- **Result**: 1,232 non-zero edges, mean compressed episode length 54, terminal
-  milestone #36 (progress 0.954).
-- **Nature**: first-order Markov + finite horizon → a planning prior, not ground
-  truth.
+- **做了什么**:每帧→最近 milestone 中心→episode 内排序→压缩连续相同→统计转移→行归一化+平滑。Greedy = `argmax P(next|cur)`;max-product = 向最高 progress 终点 milestone 的有限 horizon DP。
+- **结果**:1,232 条非零边,平均压缩 episode 长度 54,终点 milestone #36(progress 0.954)。
+- **性质**:一阶 Markov + 有限 horizon → planning prior,不是 ground truth。
 
-### Stage-2 — Graph-supervised policy (distillation)
+### Stage-2 — 图监督策略(蒸馏)
 
-- **What**: distill the graph into a neural model: `frame feature -> transition
-  row + greedy next + max-product next`.
-- **Result** (best step 1100): val KL = 0.156, greedy top1 = **0.935**,
-  max-product top1 = **0.935**.
+- **做了什么**:将图蒸馏进神经模型:`帧特征 -> 转移行 + 贪心下一 + 最大积下一`。
+- **结果**(最佳步 1100):val KL = 0.156,greedy top1 = **0.935**,max-product top1 = **0.935**。
 
-### Stage-3 — Unified LMWM (current best artifact)
+### Stage-3 — Unified LMWM(统一 LMWM,当前最佳产物)
 
-- **What**: combine graph prediction and latent-subgoal prediction in one model
-  (shared trunk + 5 heads).
-- **Result** (best step 1100): greedy 0.936 / max-product 0.935 / prototype
-  cosine **0.99**.
-- **Artifact**:
-  `checkpoints/stage3_unified/20260701_142850+kai0base_dinov3h_stage3_unified/best.pt`.
+- **做了什么**:将图预测和隐变量 subgoal 预测合并到一个模型(共享 trunk + 5 头)。
+- **结果**(最佳步 1100):greedy 0.936 / max-product 0.935 / prototype cosine **0.99**。
+- **产物**:`checkpoints/stage3_unified/20260701_142850+kai0base_dinov3h_stage3_unified/best.pt`。
 
-## Robustness & deployment iterations (around Stage-3)
+## 鲁棒性 & 部署迭代(围绕 Stage-3)
 
-| # | Iteration | Key result |
+| # | 迭代 | 关键结果 |
 |---|---|---|
-| 5 | Inference wrapper | 4096 samples: greedy top1 0.965, proto cosine 0.99 |
-| 6 | Per-milestone error analysis | weak milestones located: **#34 / #30 / #5 / #2** (boundary/ambiguous stages) |
-| 7 | Hybrid graph fallback | hybrid top1 **0.997** (⚠ uses the graph prior that also defines the labels — not independent proof) |
-| 8 | Gate threshold sweep | default `greedy=0.90 / max=0.92`, top1 ≈ 0.998, fallback ≈ 0.196 |
-| 9 | Online runtime API | `UnifiedLMWMPredictor`; batch/runtime consistency passes (tol 5e-6) |
-| 10 | Confidence calibration | ECE 0.007, AURC 0.002 → confidence usable for ranking reliable predictions |
-| 11 | Validation-driven weak set | 10 weak milestones auto-selected; top1 0.998 but fallback rises to ~33% |
-| 12 | Learned uncertainty fallback | logistic error-risk model replaces hard weak list; fallback ≈ 16% |
-| 13 | Tuned learned policy | fixes #34 (0.906 → 1.0); fallback ≈ 21% |
-| 14 | Full 200k-pair eval | final policy comparison (below) |
+| 5 | 推理 wrapper | 4096 样本:greedy top1 0.965,proto cosine 0.99 |
+| 6 | 逐 milestone 误差分析 | 定位弱 milestone:**#34 / #30 / #5 / #2**(边界/歧义阶段) |
+| 7 | Hybrid 图回退 | hybrid top1 **0.997**(⚠ 回退用的图先验也是标签定义来源 —— 非独立证明) |
+| 8 | Gate 阈值 sweep | 默认 `greedy=0.90 / max=0.92`,top1 ≈ 0.998,fallback ≈ 0.196 |
+| 9 | 在线运行时 API | `UnifiedLMWMPredictor`;离线/运行时一致性通过(tol 5e-6) |
+| 10 | 置信度校准 | ECE 0.007,AURC 0.002 → 置信度可用于排序可靠预测 |
+| 11 | 验证驱动弱集选择 | 自动选 10 个弱 milestone;top1 0.998 但 fallback 升至 ~33% |
+| 12 | 学习型 uncertainty fallback | 逻辑回归误差模型替代硬编码弱集;fallback ≈ 16% |
+| 13 | 调优学习型策略 | 修好 #34(0.906→1.0);回退率 ≈ 21% |
+| 14 | 全量 20 万 pair 评估 | 最终策略对比(见下) |
 
-### Full 200k-pair policy comparison (final conclusion)
+### 全量 20 万 pair 策略对比(最终结论)
 
-| Policy | mean top1 | mean fallback | Role |
+| 策略 | 平均 top1 | 平均回退率 | 定位 |
 |---|---|---|---|
-| validation_selected_safe | **0.9976** | 0.331 | most accurate, heavily graph-prior-reliant |
-| **recommended (default)** | 0.9965 | **0.200** | balanced default |
-| learned_tuned | 0.9955 | 0.220 | strongest learned-fallback candidate; still trails default at scale |
+| validation_selected_safe | **0.9976** | 0.331 | 最准,重度依赖图先验 |
+| **recommended(默认)** | 0.9965 | **0.200** | 平衡默认 |
+| learned_tuned | 0.9955 | 0.220 | 最强学习型回退候选;全量仍略逊默认 |
 
-**Conclusion**: keep `recommended` as the default; `learned_tuned` fixes #34 but
-does not surpass the default on full-set mean top1; `validation_selected_safe`
-is the high-accuracy, graph-prior-heavy safe mode.
+**结论**:`recommended` 保持默认;`learned_tuned` 修好了 #34 但全量 mean top1 仍未反超;`validation_selected_safe` 是高准确率、图先验权重模式。
 
-Paper-table snapshot:
-`docs/icra_experiments/README.md` is generated by
-`scripts/summarize_icra_experiments.py` and collects the recurrence graph,
-training-stage metrics, and runtime-policy comparison into Markdown/CSV/JSON
-tables for ICRA-style experiment planning.
+论文表格快照:`docs/icra_experiments/README.md` 由 `scripts/summarize_icra_experiments.py` 生成,将循环图、训练阶段指标和运行时策略比较汇总为 Markdown/CSV/JSON 表格,供 ICRA 风格实验规划使用。
 
-### Second split pipeline check: kai0bd
+### 第二个划分管线检查:kai0bd
 
-`kai0bd_feature_stage1` now exercises the same LMWM pipeline on a smaller
-base+dagger cached-feature split: 501 episodes (251 base-like / 250
-dagger-like), 45k frames, 796D feature states, 64 milestones. It has exported
-fixed-horizon and next-unique pairs, a pair-level recurrence graph, Stage-1/2/3
-checkpoints, and a runtime summary. This is still pipeline validation because
-the graph labels are deterministic table targets, but it proves the code path is
-not limited to the original kai0_base DINOv3-H cache.
+`kai0bd_feature_stage1` 现在在较小的 base+dagger 缓存特征划分上运行了相同的 LMWM 管线:501 episode(251 base-like / 250 dagger-like),45k 帧,796D 特征状态,64 milestone。它已导出 fixed-horizon 和 next-unique pair、pair 级循环图、Stage-1/2/3 checkpoint 和运行时摘要。这仍是管线验证,因为图标签是确定性表目标,但它证明了代码路径不限于原始的 kai0_base DINOv3-H 缓存。
 
-## Honest limitations (must know)
+## 诚实局限(必须知道)
 
-1. **Table-like labels**: training targets `greedy[current_m]` and
-   `max_product[current_m]` are deterministic graph-table lookups indexed by the
-   current milestone id, and the current milestone is itself the nearest
-   prototype. So top1 ≈ 0.96 mostly reflects frame→cluster separability, not true
-   dynamics prediction.
-2. **Circular fallback**: hybrid fallback uses the graph prior that also defines
-   the graph-supervised labels, so hybrid 0.997 is **not** independent evidence
-   that the neural model improved.
-3. Only `kai0_base` DINOv3-H (no `kai0_dagger` cache); evaluation is same-task
-   held-out only for the main 1280D artifact. A smaller `kai0bd` base+dagger
-   cached-feature split now validates the same pipeline, but it is not yet an
-   independent cross-task result. The model predicts latent prototype subgoals,
-   not decoded images or robot actions.
+1. **表式标签**:训练目标 `greedy[current_m]` 和 `max_product[current_m]` 是以当前 milestone id 为索引的确定性图表查找,而当前 milestone 本身是最近 prototype。所以 top1 ≈ 0.96 主要反映帧→簇可分性,而非真正的动态预测。
+2. **循环回退**:hybrid 回退使用的图先验也是图监督标签的定义来源,因此 hybrid 0.997 **不是**神经模型改进的独立证明。
+3. 仅 `kai0_base` DINOv3-H(无 `kai0_dagger` 缓存);主 1280D 产物的评估仅为同任务 held-out。较小的 `kai0bd` base+dagger 缓存特征划分现在验证了相同管线,但尚不是独立的跨任务结果。模型预测隐变量 prototype subgoal,非解码图像或机器人动作。
 
-## Phase A (done 2026-07-02) — real-future labels + graph-independent eval
+## Phase A(已完成 2026-07-02) — 真实未来标签 + 图无关评估
 
-Moved off the circular "predict-the-graph-table" setup. Trained against the real
-observed next milestone (`future_milestone`) and evaluated against reality on
-held-out episodes. See [phase_a_real_future_20260702.md](phase_a_real_future_20260702.md).
+脱离循环"预测图表"设置。对真实观测的下一 milestone(`future_milestone`)训练,在 held-out episode 上对现实验证。参见 [phase_a_real_future_20260702.md](phase_a_real_future_20260702.md)。
 
-Key honest numbers (held-out, vs REAL future):
+关键诚实数字(held-out,对真实未来):
 
-| | vs graph (circular) | vs REAL top1 | top5 | NLL |
+| | vs graph(循环) | vs 真实 top1 | top5 | NLL |
 |---|---|---|---|---|
-| graph-trained greedy head | 0.936 | 0.233 | 0.474 | 16.0 |
-| empirical dist baseline | — | 0.240 | 0.633 | 2.57 |
-| **real-future-trained greedy head** | 0.275 | **0.383** | **0.822** | **1.98** |
+| 图训练贪心头 | 0.936 | 0.233 | 0.474 | 16.0 |
+| 经验分布基线 | — | 0.240 | 0.633 | 2.57 |
+| **真实未来训练贪心头** | 0.275 | **0.383** | **0.822** | **1.98** |
 
-Takeaways: the old 0.96 collapses to 0.23 vs reality; real-future training lifts
-top1 to 0.38 / top5 to 0.82 and beats the non-neural empirical baseline on NLL —
-first evidence that frame features carry dynamics beyond the milestone-id lookup.
+核心:旧 0.94 对现实崩塌到 0.23;真实未来训练将 top1 提升到 0.38/top5 到 0.82 且 NLL 反超非神经经验基线 —— LMWM 第一次证明帧特征携带 milestone-id 查表之外的动态。
 
-## Phase B (done 2026-07-02) — calibration + graph-as-prior fusion
+## Phase B(已完成 2026-07-02) — 校准 + 图作先验融合
 
-Answered two honest questions on held-out episodes vs the real future, no retrain.
-See [phase_b_calibration_prior_20260702.md](phase_b_calibration_prior_20260702.md).
+在 held-out episode 上对真实未来回答了两个诚实问题,无须重训。参见 [phase_b_calibration_prior_20260702.md](phase_b_calibration_prior_20260702.md)。
 
-- **Calibration**: raw ECE 0.10 → **0.005** with a single temperature `T=1.30`;
-  the frame-conditional distribution is trustworthy after a one-parameter fix.
-- **Graph as soft prior** (log-linear pool, not hard fallback): best at
-  `lam≈0.3` → top1 0.383→**0.417**, top5 0.822→**0.856**, NLL 1.978→**1.798**.
-  The graph genuinely helps as a ~30% prior — the principled, honestly-evaluated
-  replacement for the old circular hybrid fallback.
+- **校准**:原始 ECE 0.10 → **0.005**(单温度 `T=1.30`);帧条件分布在单参数修复后可信。
+- **图作软先验**(对数线性池化,非硬回退):最优 `lam≈0.3` → top1 0.383→**0.417**,top5 0.822→**0.856**,NLL 1.978→**1.798**。图作为 ~30% 先验确实有帮助 —— 旧循环 hybrid 回退的原则性、诚实评估的替代品。
 
-Recommended real-future recipe:
-`p = softmax(logits/1.30)^0.7 · P(next|cur_milestone)^0.3`; report top-k + NLL.
+推荐 real-future 配方:`p = softmax(logits/1.30)^0.7 · P(next|cur_milestone)^0.3`;汇报 top-k + NLL。
 
-## Phase C (done 2026-07-02) — frame-history conditioning: negative result
+## Phase C(已完成 2026-07-02) — 帧历史条件:负结果
 
-Augmented pairs with short frame-history windows (H=4 s=2 and H=6 s=4) and
-retrained real-future models. Result: **history does not help** — top1
-0.383→0.377→0.367, NLL flat/worse, and larger inputs overfit faster. Single-frame
-is at its ceiling; the ~13-branch entropy is intrinsic task ambiguity. The
-remaining levers (action conditioning, less-jittery labels) live on the VLA/data
-side. See [phase_c_history_20260702.md](phase_c_history_20260702.md).
+用短视频历史窗(H=4 s=2 和 H=6 s=4)增强 pair 并重训真实未来模型。结果:**历史没有帮助** —— top1 0.383→0.377→0.367,NLL 持平/更差,更大输入过拟合更快。单帧已到天花板;~13 分支熵是固有任务歧义。剩余杠杆(动作条件、更少抖动的标签)在 VLA/数据侧。参见 [phase_c_history_20260702.md](phase_c_history_20260702.md)。
 
-## Phase D (done 2026-07-02) — VLA integration interface: LMWM is VLA-ready
+## Phase D(已完成 2026-07-02) — VLA 集成接口:LMWM 已 VLA-ready
 
-Packaged the real-future recipe into `lmwm.vla_interface.VLALMWMPredictor`:
-`p = softmax(logits/1.30)^0.7 · P(next|cur_milestone)^0.3`, exposing a calibrated
-next-milestone distribution, top-k candidates, a latent prototype subgoal, and
-confidence/entropy. Held-out vs real future: top1 ≈ 0.42, top5 ≈ 0.86, NLL ≈ 1.80,
-ECE ≈ 0.005. See [vla_integration_20260702.md](vla_integration_20260702.md).
+将真实未来配方打包为 `lmwm.vla_interface.VLALMWMPredictor`:`p = softmax(logits/1.30)^0.7 · P(next|cur_milestone)^0.3`,曝露经校准的下一 milestone 分布、top-k 候选、隐变量 prototype subgoal 和 confidence/entropy。Held-out 对真实未来:top1 ≈ 0.42,top5 ≈ 0.86,NLL ≈ 1.80,ECE ≈ 0.005。参见 [vla_integration_20260702.md](vla_integration_20260702.md)。
 
-**Status: ready for VLA integration.** Further standalone LMWM tuning has
-diminishing returns; the next gains require action conditioning on the VLA side.
+**状态:已准备好 VLA 集成。** 进一步独立 LMWM 调优有边际收益递减;下一步增益需要 VLA 侧的动作条件。
 
-## Code map
+## 代码地图
 
-- Models (single source of truth): `src/lmwm/models.py`
-  (`UnifiedLMWM`, `GraphSupervisedLMWM`, `LaWMShapedLMWM`, `MLP`).
-- Data/config/splits: `src/lmwm/data.py`.
-- Training scaffolding: `src/lmwm/training.py`.
-- Online runtime API: `src/lmwm/runtime.py` (`UnifiedLMWMPredictor`).
-- Trainers (thin orchestration): `scripts/train_state_world_model.py` (Stage-1),
-  `scripts/train_graph_policy_model.py` (Stage-2),
-  `scripts/train_unified_lmwm.py` (Stage-3).
-- Graph builder: `scripts/build_recurrence_graph.py`.
-- Paper table summarizer: `scripts/summarize_icra_experiments.py`.
+- 模型(唯一真源):`src/lmwm/models.py`(`UnifiedLMWM`,`GraphSupervisedLMWM`,`LaWMShapedLMWM`,`MLP`)。
+- 数据/配置/划分:`src/lmwm/data.py`。
+- 训练脚手架:`src/lmwm/training.py`。
+- 在线运行时 API:`src/lmwm/runtime.py`(`UnifiedLMWMPredictor`)。
+- VLA 接口:`src/lmwm/vla_interface.py`(`VLALMWMPredictor`)。
+- 训练器(薄编排):`scripts/train_state_world_model.py`(Stage-1),`scripts/train_graph_policy_model.py`(Stage-2),`scripts/train_unified_lmwm.py`(Stage-3)。
+- 图构建:`scripts/build_recurrence_graph.py`。
+- 论文表格汇总:`scripts/summarize_icra_experiments.py`。

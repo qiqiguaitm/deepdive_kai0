@@ -1,57 +1,50 @@
-# ICRA-Oriented LMWM Experiment Snapshot
+# ICRA 导向的 LMWM 实验快照
 
-Generated from existing local artifacts. This is a paper-table snapshot, not a
-new training run.
+从已有本地产物生成。这是论文表格快照,非新训练运行。
 
-## Terminology
+## 术语
 
-- **Greedy**: one-step local prediction, `argmax P(stage_{t+1} | stage_t)`.
-- **Max-product**: finite-horizon dynamic programming / max-product search
-  toward the terminal milestone; report the next step on that path.
+- **Greedy(贪心)**:单步局部预测,`argmax P(stage_{t+1} | stage_t)`。
+- **Max-product(最大积)**:向终点 milestone 的有限 horizon 动态规划/最大积搜索;报告该路径上的下一步。
 
-## Recurrence Graphs
+## 循环图
 
-| Graph | Frames/Pairs | Episodes | Milestones | Edges | Mean compressed len | Terminal | Terminal progress |
+| 图 | 帧/Pair | Episode | Milestone | 边数 | 平均压缩长度 | 终点 | 终点 progress |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | kai0base_dinov3h | 334875 | 3055 | 37 | 1232 | 54.0815 | #36 | 0.9541 |
-| kai0bd_feature_stage1 | 44967 | 501 | 64 | 1562 | - | #63 | 0.9616 |
+| kai0bd_feature_stage1 | 44967 | 501 | 64 | 1562 | — | #63 | 0.9616 |
 
-## Training Stages
+## 训练阶段
 
-| Stage | Pairs | Input dim | Milestones | Step | Top1 | Greedy top1 | Max-product top1 | KL | Greedy proto cos | Max-product proto cos |
+| 阶段 | Pair | 输入维度 | Milestone | 步 | Top1 | 贪心 top1 | 最大积 top1 | KL | 贪心 proto cos | 最大积 proto cos |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| stage1ab_fixed | 200000 | 1280 | 37 | 1200 | 1.0000 | - | - | - | - | - |
-| stage1c_next_unique | 200000 | 1280 | 37 | 1200 | 1.0000 | - | - | - | - | - |
-| stage1d_frame2proto | 200000 | 1280 | 37 | 1200 | 1.0000 | - | - | - | - | - |
-| stage2_graph_policy | 200000 | 1280 | 37 | 1200 | - | 0.9271 | 0.9234 | 0.1604 | - | - |
-| stage3_unified | 200000 | 1280 | 37 | 1200 | - | 0.9274 | 0.9246 | 0.1595 | 0.9888 | 0.9908 |
-| kai0bd_stage1ab_fixed | 41655 | 796 | 64 | 1200 | 1.0000 | - | - | - | - | - |
-| kai0bd_stage1c_next_unique | 44967 | 796 | 64 | 1200 | 1.0000 | - | - | - | - | - |
-| kai0bd_stage2_graph_policy | 44967 | 796 | 64 | 1200 | - | 1.0000 | 1.0000 | 0.0007 | - | - |
-| kai0bd_stage3_unified | 44967 | 796 | 64 | 1200 | - | 1.0000 | 1.0000 | 0.0006 | 1.0000 | 1.0000 |
+| stage1ab_fixed | 200000 | 1280 | 37 | 1200 | 1.0000 | — | — | — | — | — |
+| stage1c_next_unique | 200000 | 1280 | 37 | 1200 | 1.0000 | — | — | — | — | — |
+| stage1d_frame2proto | 200000 | 1280 | 37 | 1200 | 1.0000 | — | — | — | — | — |
+| stage2_graph_policy | 200000 | 1280 | 37 | 1200 | — | 0.9271 | 0.9234 | 0.1604 | — | — |
+| stage3_unified | 200000 | 1280 | 37 | 1200 | — | 0.9274 | 0.9246 | 0.1595 | 0.9888 | 0.9908 |
+| kai0bd_stage1ab_fixed | 41655 | 796 | 64 | 1200 | 1.0000 | — | — | — | — | — |
+| kai0bd_stage1c_next_unique | 44967 | 796 | 64 | 1200 | 1.0000 | — | — | — | — | — |
+| kai0bd_stage2_graph_policy | 44967 | 796 | 64 | 1200 | — | 1.0000 | 1.0000 | 0.0007 | — | — |
+| kai0bd_stage3_unified | 44967 | 796 | 64 | 1200 | — | 1.0000 | 1.0000 | 0.0006 | 1.0000 | 1.0000 |
 
-## Runtime Policies
+## 运行时策略
 
-| Policy | Samples | Mean top1 | Greedy top1 | Max-product top1 | Mean fallback | Greedy fallback | Max-product fallback |
+| 策略 | 样本数 | 平均 top1 | 贪心 top1 | 最大积 top1 | 平均回退率 | 贪心回退率 | 最大积回退率 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | validation_selected_safe | 200000 | 0.9976 | 0.9974 | 0.9977 | 0.3315 | 0.3265 | 0.3365 |
 | recommended | 200000 | 0.9965 | 0.9963 | 0.9967 | 0.2002 | 0.1943 | 0.2062 |
 | learned_tuned | 200000 | 0.9955 | 0.9958 | 0.9952 | 0.2197 | 0.2227 | 0.2167 |
 | kai0bd_recommended | 44967 | 1.0000 | 1.0000 | 1.0000 | 0.0000 | 0.0000 | 0.0000 |
 
-## Paper Read
+## 论文解读
 
-- `recommended` remains the balanced default: high mean top1 with lower fallback
-  than the graph-prior-heavy safe policy.
-- `validation_selected_safe` is the highest-accuracy safety mode, but it relies
-  more heavily on graph fallback.
-- `learned_tuned` is the strongest learned-fallback candidate, but it does not
-  replace the default until it wins on broader held-out or cross-task data.
+- `recommended` 保持平衡默认:高平均 top1,回退率低于图先验权重安全策略。
+- `validation_selected_safe` 是最高准确率安全模式,但更重度依赖图回退。
+- `learned_tuned` 是最强学习型回退候选,但在更广泛的 held-out 或跨任务数据上获胜之前不会替代默认。
 
-## Current Gap To ICRA-Ready Evidence
+## 当前与 ICRA-ready 证据的差距
 
-- Promote the new `kai0bd` evidence from Stage-1/2/3 pipeline validation into
-  an independent held-out or cross-task evaluation.
-- Add independent criteria beyond graph-table labels.
-- Add VLA-side ablations showing whether latent milestone subgoals improve
-  downstream execution or data selection.
+- 将新的 `kai0bd` 证据从 Stage-1/2/3 管线验证提升为独立 held-out 或跨任务评估。
+- 添加超出图表标签的独立判据。
+- 添加 VLA 侧消融,显示隐变量 milestone subgoal 是否改善下游执行或数据选择。

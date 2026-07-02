@@ -1,30 +1,26 @@
-# LMWM Stage-1 DINOv3-H Run - 2026-07-01
+# LMWM Stage-1 DINOv3-H 运行 — 2026-07-01
 
-## Purpose
+## 目的
 
-Validate the first LaWM-shaped LMWM training path on real CRAVE DINOv3-H
-milestone prototypes, instead of the earlier one-hot smoke representation.
+在真实 CRAVE DINOv3-H milestone prototype 上验证第一个 LaWM 形状的 LMWM 训练路径,而非早期的 one-hot smoke 表示。
 
-This is still a small-step prototype-to-prototype experiment. It verifies that
-the data export, episode split, two-GPU execution, checkpointing, and transition
-model training path work on 1280D CRAVE features.
+这仍然是一个小步 prototype-to-prototype 实验。它验证数据导出、episode 划分、双 GPU 执行、checkpoint 保存和转移模型训练路径在 1280D CRAVE 特征上是否工作。
 
-## Source Features
+## 源特征
 
-- Feature cache: `temp/crave_full_dinov3h`
-- Encoder: DINOv3-H
-- Feature dimension: 1280
-- Valid frames: 334875
-- Episodes: 3055
-- Milestone file: `temp/crave_full_dinov3h/milestones_uniform_dinov3h.npz`
-- Milestone prototypes: 37 DINOv3-H cluster centers
+- 特征缓存:`temp/crave_full_dinov3h`
+- 编码器:DINOv3-H
+- 特征维度:1280
+- 有效帧:334875
+- Episode:3055
+- Milestone 文件:`temp/crave_full_dinov3h/milestones_uniform_dinov3h.npz`
+- Milestone prototype:37 个 DINOv3-H 簇中心
 
-No matching DINOv3-H cache for `kai0_dagger` was found in this pass. This run
-uses the existing full `kai0_base` DINOv3-H cache.
+本轮未找到匹配的 DINOv3-H `kai0_dagger` 缓存。本次运行使用已有的全量 `kai0_base` DINOv3-H 缓存。
 
-## Exported Datasets
+## 导出的数据集
 
-Command:
+命令:
 
 ```bash
 python lmwm/scripts/export_dinov3h_milestone_pairs.py \
@@ -34,24 +30,24 @@ python lmwm/scripts/export_dinov3h_milestone_pairs.py \
   --config lmwm/configs/datasets/kai0base_dinov3h_next_unique.yaml
 ```
 
-Outputs:
+输出:
 
 - `lmwm/data/crave_sequences/kai0base_dinov3h/pairs_fixed_h3.npz`
 - `lmwm/data/crave_sequences/kai0base_dinov3h/pairs_next_unique.npz`
 
-Both exports contain 200000 pairs. Each pair is LaWM-shaped:
+两个导出各包含 200000 对。每对为 LaWM 形状:
 
 ```text
 current DINOv3-H milestone prototype r_t
 future DINOv3-H milestone prototype r_{t+h}
 current/future milestone id
-episode_id for episode-level train/val split
-progress_t / progress_future as CRAVE progress metadata
+episode_id 用于 episode 级 train/val 划分
+progress_t / progress_future 作为 CRAVE progress 元数据
 ```
 
-## Model Shape
+## 模型形状
 
-The Stage-1 model intentionally follows the LAWM first-stage pattern:
+Stage-1 模型有意遵循 LAWM 第一阶段模式:
 
 ```text
 r_t, r_future -> inverse transition code u_t
@@ -59,69 +55,65 @@ r_t, u_t      -> predicted future latent r_hat_future
 r_hat_future  -> future milestone classifier
 ```
 
-This keeps the first version close to LAWM and avoids jumping directly to the
-final recurrence graph / planning model.
+这使得第一版保持接近 LAWM,避免直接跳到最终的循环图/规划模型。
 
-## Training Commands
+## 训练命令
 
-GPU0, fixed-horizon Stage-1A/B:
+GPU0,固定 horizon Stage-1A/B:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python lmwm/scripts/train_state_world_model.py \
   --config lmwm/configs/training/kai0base_dinov3h_stage1ab_fixed.yaml
 ```
 
-GPU1, next-unique Stage-1C:
+GPU1,next-unique Stage-1C:
 
 ```bash
 CUDA_VISIBLE_DEVICES=1 python lmwm/scripts/train_state_world_model.py \
   --config lmwm/configs/training/kai0base_dinov3h_stage1c_next_unique.yaml
 ```
 
-Both configs use `device: cuda:0` because each process sees only its assigned
-physical GPU after `CUDA_VISIBLE_DEVICES`.
+两个配置皆使用 `device: cuda:0`,因为 `CUDA_VISIBLE_DEVICES` 分配后每个进程仅看到其分配的物理 GPU。
 
-## Results
+## 结果
 
-Fixed-horizon run:
+Fixed-horizon 运行:
 
-- Run dir: `lmwm/logs/stage1ab/20260701_140401+kai0base_dinov3h_stage1ab_fixed`
-- Checkpoints: `lmwm/checkpoints/stage1ab/20260701_140401+kai0base_dinov3h_stage1ab_fixed`
-- Train pairs: 159428
-- Val pairs: 40572
-- Final step: 1200
-- Val loss: 0.0082213071
-- Val MSE: 0.0070061434
-- Val CE: 0.0024303274
-- Val top1: 1.0
-- Val top3: 1.0
+- 运行目录:`lmwm/logs/stage1ab/20260701_140401+kai0base_dinov3h_stage1ab_fixed`
+- Checkpoint:`lmwm/checkpoints/stage1ab/20260701_140401+kai0base_dinov3h_stage1ab_fixed`
+- 训练对:159428
+- 验证对:40572
+- 最终步:1200
+- Val loss:0.0082213071
+- Val MSE:0.0070061434
+- Val CE:0.0024303274
+- Val top1:1.0
+- Val top3:1.0
 
-Next-unique run:
+Next-unique 运行:
 
-- Run dir: `lmwm/logs/stage1c/20260701_140401+kai0base_dinov3h_stage1c_next_unique`
-- Checkpoints: `lmwm/checkpoints/stage1c/20260701_140401+kai0base_dinov3h_stage1c_next_unique`
-- Train pairs: 159428
-- Val pairs: 40572
-- Final step: 1200
-- Val loss: 0.0038437987
-- Val MSE: 0.0021513989
-- Val CE: 0.0033847997
-- Val top1: 1.0
-- Val top3: 1.0
+- 运行目录:`lmwm/logs/stage1c/20260701_140401+kai0base_dinov3h_stage1c_next_unique`
+- Checkpoint:`lmwm/checkpoints/stage1c/20260701_140401+kai0base_dinov3h_stage1c_next_unique`
+- 训练对:159428
+- 验证对:40572
+- 最终步:1200
+- Val loss:0.0038437987
+- Val MSE:0.0021513989
+- Val CE:0.0033847997
+- Val top1:1.0
+- Val top3:1.0
 
-## Interpretation
+## 解读
 
-The high accuracy is expected for this step because the inputs and targets are
-drawn from a finite table of 37 milestone prototypes. This run should be treated
-as a pipeline and architecture validation, not as evidence that the final
-Latent Milestone World Model is solved.
+该步的高准确率是预期的,因为输入和目标都取自 37 个 milestone prototype 的有限表。此运行应被视为管线和架构验证,而非最终隐变量里程碑世界模型已解决的证据。
 
-The next useful step is to make the prediction problem less table-like:
+下一个有用的步骤是使预测问题不那么像查表:
 
-- train on frame-level DINOv3-H features while supervising milestone-prototype
-  targets;
-- add multi-candidate next milestone likelihood instead of only one target;
-- evaluate by held-out episodes and by transition types, especially low-support
-  transitions;
-- only then introduce recurrence graph planning and Viterbi / max-product route
-  supervision.
+- 在帧级 DINOv3-H 特征上训练,同时监督 milestone-prototype 目标;
+- 添加多候选下一 milestone 似然而非仅一个目标;
+- 按 held-out episode 和转移类型(尤其是低 support 转移)评估;
+- 只有在此之后才引入循环图规划和 Viterbi / max-product 路径监督。
+
+## 第二个划分管线检查:kai0bd
+
+`kai0bd_feature_stage1` 现在在较小的 base+dagger 缓存特征划分上运行了相同的 LMWM 管线:501 episode(251 base-like / 250 dagger-like),45k 帧,796D 特征状态,64 milestone。它已导出 fixed-horizon 和 next-unique pair、pair 级循环图、Stage-1/2/3 checkpoint 和运行时摘要。这仍是管线验证,因为图标签是确定性表目标,但它证明了代码路径不限于原始的 kai0_base DINOv3-H 缓存。

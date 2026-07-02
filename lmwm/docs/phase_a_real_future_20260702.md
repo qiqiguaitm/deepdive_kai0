@@ -1,91 +1,54 @@
-# Phase A — Real-Future Labels and Graph-Independent Evaluation
+# Phase A — 真实未来标签与图无关评估
 
-> Date: 2026-07-02.
-> Goal: break LMWM out of the circular "predict-the-graph-table" setup by (1)
-> training against the **real observed next milestone** and (2) evaluating
-> against reality on held-out episodes, independent of the graph.
+> 日期:2026-07-02。
+> 目标:通过(1)对**真实观测的下一 milestone** 训练和(2)在 held-out episode 上对真实未来评估,打破 LMWM"预测图表"的循环设置。
 
-## Motivation
+## 动机
 
-The exported pair dataset already stores `future_milestone` — the actually
-observed next-unique milestone after frame `t`. But every prior trainer ignored
-it and trained the greedy / max-product heads on `greedy_next[current_m]`, a
-deterministic **graph-table lookup** indexed by the discretized current state.
+导出的 pair 数据集已存储 `future_milestone` —— 帧 `t` 之后的真实观测下一独特 milestone。但之前所有训练器都忽略了它,将贪心/max-product 头训练在 `greedy_next[current_m]` 上,这是一个确定性**图表查找**,以离散化当前状态为索引。
 
-Two problems:
+两个问题:
 
-1. The graph-lookup label matches the real observed future only **24.2%** of the
-   time (75.8% of pairs disagree). The target discards the real trajectory.
-2. Given the current state, the real next milestone has entropy **~2.56 nats
-   (~13 effective branches)** — highly multimodal. A single argmax cannot be
-   right most of the time, so "top1 vs graph = 0.96" was measuring reproduction
-   of the table, not prediction of reality.
+1. 图查找标签与真实观测未来在**仅 24.2%** 的情况下一致(75.8% 的 pair 不一致)。目标丢弃了真实轨迹。
+2. 给定当前状态,真实下一 milestone 的熵 ≈ **2.56 nats(~13 有效分支)** —— 高度多模态。单个 argmax 不可能在大多数时候正确,所以"vs graph top1=0.96"衡量的是表的复现,而非对现实的预测。
 
-## What changed
+## 改动
 
-- `src/lmwm/data.py`: `load_graph_policy_data(..., label_source=...)` with
-  `"graph_lookup"` (default, backward compatible) and `"real_future"` (greedy /
-  max-product / prototype heads target `future_milestone`). The transition head
-  always targets the empirical milestone-level distribution
-  `transition_probs[current_m]`, so its real-future NLL is comparable across
-  label sources.
-- `scripts/train_unified_lmwm.py`: reads `label_source` from config, records it
-  in run meta.
-- `configs/training/kai0base_dinov3h_stage3_realfuture.yaml`: real-future run.
-- `scripts/eval_real_future.py`: graph-independent evaluator. On the held-out
-  episode split it scores predictions against `future_milestone` (top-1/3/5,
-  NLL) plus non-neural baselines. Works on any `UnifiedLMWM` checkpoint.
+- `src/lmwm/data.py`:`load_graph_policy_data(..., label_source=...)`,支持 `"graph_lookup"`(默认,向后兼容)和 `"real_future"`(贪心/max-product/prototype 头以 `future_milestone` 为目标)。转移头始终以经验 milestone 级分布 `transition_probs[current_m]` 为目标,使其 real-future NLL 在不同标签源之间可比。
+- `scripts/train_unified_lmwm.py`:从配置读取 `label_source`,记录到 run meta。
+- `configs/training/kai0base_dinov3h_stage3_realfuture.yaml`:real-future 运行。
+- `scripts/eval_real_future.py`:图无关评估器。在 held-out episode 划分上对 `future_milestone` 评分(top-1/3/5,NLL)并附非神经基线。适用于任何 `UnifiedLMWM` checkpoint。
 
-## Results (held-out: 40,572 pairs / 611 episodes / 37 milestones)
+## 结果(held-out:40,572 pairs / 611 episodes / 37 milestones)
 
-| Model / baseline | vs graph (circular) top1 | vs REAL top1 | top3 | top5 | NLL |
+| 模型/基线 | vs graph(循环) top1 | vs 真实 top1 | top3 | top5 | NLL |
 |---|---|---|---|---|---|
-| uniform | — | 0.024 | 0.057 | 0.109 | 3.61 |
-| graph argmax (greedy) | — | 0.240 | — | — | — |
-| empirical dist `P(next\|cur milestone)` | — | 0.240 | 0.483 | 0.633 | 2.57 |
-| graph-trained · neural greedy head | **0.936** | 0.233 | 0.366 | 0.474 | 16.04 |
-| graph-trained · neural transition head | — | 0.207 | 0.434 | 0.582 | 2.68 |
-| **real-future-trained · neural greedy head** | 0.275 | **0.383** | **0.686** | **0.822** | **1.98** |
-| real-future-trained · neural transition head | — | 0.201 | 0.438 | 0.594 | 2.67 |
+| 均匀分布 | — | 0.024 | 0.057 | 0.109 | 3.61 |
+| 图 argmax(greedy) | — | 0.240 | — | — | — |
+| 经验分布 `P(next\|cur milestone)` | — | 0.240 | 0.483 | 0.633 | 2.57 |
+| 图训练·神经贪心头 | **0.936** | 0.233 | 0.366 | 0.474 | 16.04 |
+| 图训练·神经转移头 | — | 0.207 | 0.434 | 0.582 | 2.68 |
+| **真实未来训练·神经贪心头** | 0.275 | **0.383** | **0.686** | **0.822** | **1.98** |
+| 真实未来训练·神经转移头 | — | 0.201 | 0.438 | 0.594 | 2.67 |
 
-Artifacts:
+产物:
 
-- Graph-trained eval: `outputs/real_future_eval/graph_trained/summary.json`
-- Real-future-trained checkpoint:
+- 图训练评估:`outputs/real_future_eval/graph_trained/summary.json`
+- 真实未来训练 checkpoint:
   `checkpoints/stage3_realfuture/20260702_045756+kai0base_dinov3h_stage3_realfuture/best.pt`
-- Real-future-trained eval: `outputs/real_future_eval/realfuture_trained/summary.json`
+- 真实未来训练评估:`outputs/real_future_eval/realfuture_trained/summary.json`
 
-## Findings
+## 发现
 
-1. **The 0.96 was circular.** The graph-trained greedy head scores 0.936 vs the
-   graph table but only **0.233 vs reality** — barely above the non-neural
-   baselines (graph argmax 0.240, empirical 0.240) and its NLL of **16.0** shows
-   a pathologically overconfident point predictor.
-2. **Real-future training genuinely helps.** vs reality, the greedy head goes
-   from 0.233 → **0.383** top1, 0.474 → **0.822** top5, and NLL 16.0 → **1.98**.
-3. **Frame features carry dynamics beyond the milestone id.** The real-future
-   greedy head's NLL (1.98) now **beats the empirical milestone-level
-   distribution baseline** (2.57). This is the first evidence that LMWM is
-   learning something the current-milestone lookup does not already contain —
-   i.e. moving from "table validation" toward a real world model.
-4. **The transition head is capped by its target.** Both models' transition
-   heads (~2.67 NLL) sit at or slightly above the empirical baseline (2.57),
-   because they are trained to match exactly that milestone-level distribution.
-   To exceed it, the distributional target must itself become frame-conditional
-   (Phase B).
+1. **0.94 是循环的。** 图训练贪心头对图表得 0.936,但对**现实仅 0.233** —— 勉强超过非神经基线(图 argmax 0.240,经验 0.240),其 NLL **16.0** 表明一个病态过自信的点预测器。
+2. **真实未来训练确实有帮助。** 对现实,贪心头从 0.233 → **0.383** top1,0.474 → **0.822** top5,NLL 16.0 → **1.98**。
+3. **帧特征携带当前 milestone id 之外的动态信息。** 真实未来贪心头的 NLL(1.98)现在**反超经验 milestone 级分布基线**(2.57)。这是 LMWM 第一次证明它学到了"当前 milestone 查表"之外的东西 —— 即从"表验证"向真实世界模型迈进。
 
-## Honest caveats
+## 诚实说明
 
-- Real-future top1 of 0.38 is not "good" in absolute terms — but the problem has
-  ~13 branches, so top-3/top-5 and NLL are the meaningful metrics, and there the
-  model is clearly informative.
-- Still single `kai0_base` DINOv3-H, same-task held-out, latent-prototype output
-  (not decoded images or actions).
+- 真实未来 top1 0.38 绝对值不算"好" —— 但问题有 ~13 分支,所以 top-3/top-5 和 NLL 是有意义的指标,且模型在这些指标上明显有信息。
+- 仍为单 `kai0_base` DINOv3-H,同任务 held-out,隐变量 prototype 输出(非解码图像或动作)。
 
-## Next (Phase B)
+## 下一步(Phase B)
 
-Make the **distribution** frame-conditional: train a distributional next-milestone
-target from real futures (soft labels / direct CE against observed), evaluate NLL
-+ calibration, and use the graph only as a prior — not as ground truth. Re-derive
-the fallback logic under the real-future criterion (the old hybrid 0.997 does not
-survive it).
+使**分布**帧条件化:从真实未来训练分布性下一 milestone 目标(soft label/直接对观测做 CE),评估 NLL + 校准,并仅将图用作先验 —— 不作为 ground truth。在 real-future 判据下重新推导回退逻辑(旧的 hybrid 0.997 在新判据下不成立)。
