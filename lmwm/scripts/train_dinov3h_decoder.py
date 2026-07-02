@@ -72,6 +72,7 @@ def main() -> None:
     ap.add_argument("--n_pairs", type=int, default=16000)
     ap.add_argument("--res", type=int, default=128)
     ap.add_argument("--epochs", type=int, default=60)
+    ap.add_argument("--gdl_weight", type=float, default=0.0, help="gradient-difference loss weight (sharpness)")
     ap.add_argument("--device", default="cuda:0")
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--seed", type=int, default=2026)
@@ -124,6 +125,12 @@ def main() -> None:
             x, y = X[bi].to(device), Y[bi].to(device)
             pred = dec(x)
             loss = (pred - y).abs().mean() + 0.5 * ((pred - y) ** 2).mean()
+            if args.gdl_weight > 0:
+                # gradient-difference loss: match image edges -> discourages the
+                # mean-seeking (L1/L2) blur by penalizing gradient mismatch.
+                gdl = ((pred[:, :, :, 1:] - pred[:, :, :, :-1]) - (y[:, :, :, 1:] - y[:, :, :, :-1])).abs().mean()
+                gdl += ((pred[:, :, 1:, :] - pred[:, :, :-1, :]) - (y[:, :, 1:, :] - y[:, :, :-1, :])).abs().mean()
+                loss = loss + args.gdl_weight * gdl
             opt.zero_grad(); loss.backward(); opt.step()
         if ep == 0 or (ep + 1) % 10 == 0 or ep == args.epochs - 1:
             dec.eval()

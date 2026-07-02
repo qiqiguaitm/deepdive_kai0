@@ -38,6 +38,8 @@ See `docs/recurrence_state_world_model_plan.md` for the current plan.
 | [docs/vla_integration_20260702.md](docs/vla_integration_20260702.md) | Phase D — VLA 集成接口(`lmwm.vla_interface.VLALMWMPredictor`) |
 | [docs/lawm_reference_20260702.md](docs/lawm_reference_20260702.md) | LaWM/LAM 训练配方参考 + 在 LMWM 数据上的损失测试 + 优化建议 |
 | [docs/ceiling_analysis_20260702.md](docs/ceiling_analysis_20260702.md) | 是否到瓶颈?深度分析(kNN 上界 + 标签/混叠诊断)+ 突破方法 |
+| [docs/mean_variance_research_20260702.md](docs/mean_variance_research_20260702.md) | 均值+方差双降研究(7B否决;ensemble+CVaR+code因子化 → top1 0.453/std −40%) |
+| [docs/optimization_plan_20260702.md](docs/optimization_plan_20260702.md) | **自动迭代优化(L1–L7 滚动日志)** — patch-token/多假设/容量/蒸馏/温度/异构;终态 top1 0.459、部署单模型蒸馏 0.449、frame-only 天花板论证 |
 | [docs/episode_medoid_target_analysis_20260702.md](docs/episode_medoid_target_analysis_20260702.md) | 提议分析:用 episode-local medoid latent 作 milestone 目标(实测 0.877 > 簇心 0.836) |
 | [docs/recurrence_state_world_model_plan.md](docs/recurrence_state_world_model_plan.md) | 设计规划 — 设计原理、LaWAM 参考点、分阶段路线 |
 | [docs/automatic_iteration_log_20260701.md](docs/automatic_iteration_log_20260701.md) | 自动迭代日志 — 每一步实验的详尽记录 |

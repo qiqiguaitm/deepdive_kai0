@@ -7,6 +7,7 @@ from lmwm.models import (
     UnifiedLMWM,
     count_params,
 )
+from lmwm.retrieval_decoder import LatentRetrievalDecoder
 
 __all__ = [
     "MLP",
@@ -14,4 +15,5 @@ __all__ = [
     "GraphSupervisedLMWM",
     "LaWMShapedLMWM",
     "count_params",
+    "LatentRetrievalDecoder",
 ]

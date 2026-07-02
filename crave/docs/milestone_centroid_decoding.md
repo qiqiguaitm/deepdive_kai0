@@ -25,6 +25,23 @@ milestone 代表图原来用"离簇心最近的真实帧(medoid)"。本线探索
 
 > 附:挖矿 episode 数对 value 质量的影响(~100–200 ep 饱和)`crave_mine_episode_sweep.png`。
 
+## 2b. DINOv3-H 解码器 · pooled vs patch-grid 保真对比(2026-07-02)
+
+> LMWM 侧需要"把预测的 latent 解回图像"。解码器本身属 CRAVE 方法,故结论沉淀于此;LMWM 侧的具体应用(解码预测 latent)见 `lmwm/docs/decoder_blur_diagnosis_20260702.md`。
+>
+> **目标澄清**:不是要"清晰",而是要**解码保留原图相同信息(保真)**。据此重排三种解码器,held-out 单帧自重建(decode 帧自己的 latent vs 真实帧,L1↓ 越忠实):
+
+| 解码器 | 输入表示 | 自重建 L1 | 定位 |
+|---|---|---|---|
+| pooled L1 | DINOv3-H pooled 1280 | 6.2% | 颜色对但丢空间细节、糊(L1 求均值天生糊) |
+| pooled GAN(PatchGAN+hinge) | 同上 | ~7% | 锐但**幻觉+掉色**(粉→tan)→ **保真更差,弃** |
+| **DINOv3-H patch-grid**(CRAVE 空间解码器) | **patch grid 1280×16×16** | **2.7%** | **~2.3× 更忠实**,颜色/形状/臂位全保住 |
+
+**结论**:与 §2 一致并量化 —— **保真的杠杆是"换表示(pooled→patch-grid)",不是换损失/加规模**。pooled 把 16×16 patch 平均掉 → 空间信息损失 → 自重建天花板 ~6%;patch-grid 保住空间 → 2.7%。GAN 用幻觉换锐度,反伤保真(印证 §2.4:平均输入 ill-posed,单帧才能清晰;而"忠实"只能靠保住空间的 patch-grid)。
+
+- 复现:`crave.encoders.load_encoder("dinov3-h").encode_grid(imgs)` → (N,1280,16,16);`crave.decoding.decoder.train_dec` 训 small 空间解码器。脚本 `lmwm/scripts/train_patch_decoder.py`;数据 `lmwm/outputs/patch_decoder/{summary.json,patch_recon_compare.png}`。
+- 数值:DINOv3-H patch-grid recon L1 2.7%,与 §2.2/§2.4 早先 DINOv2 patch 版 recon L1 ~2.9% 同量级 —— 换编码器到 DINOv3-H 结论不变。
+
 ## 3. ep2302 30Hz 端到端演示(本标准配置)
 脚本 `train_scripts/kai/data/crave_ep2302_30hz_decoded.py`。全程 DINOv2-large 编码 + small 解码器:
 

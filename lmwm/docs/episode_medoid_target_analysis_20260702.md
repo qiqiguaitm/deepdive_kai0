@@ -61,8 +61,31 @@
 
 剩余头空间(0.864→0.877+)可用 delta 目标(预测 `next_medoid − current_frame`,需 proto 头去归一/残差化)或更长训练进一步逼近 —— 边际较小,列为可选后续。
 
+## 规范:统一使用检索解码器(canonical decoder)
+
+**结论(2026-07-02 定)**:latent → 图像一律用**检索**(最近真实帧),不用 pooled 合成解码器。
+
+- 理由:LMWM 预测的是**真实帧的 latent**;pooled 1280-D 合成解码天生糊(丢空间布局 + L1/L2 预测均值),即使解码真实帧自身的 latent 也糊(已验证 = 解码器问题,非预测问题)。检索给出锐利、真实、忠实预测(cos≈0.87)的图。
+- **规范组件**:`lmwm.retrieval_decoder.LatentRetrievalDecoder`(`from lmwm import LatentRetrievalDecoder`)。`.decode(latents)` → 最近真实帧图;`.retrieve(latents, topk)` → 索引+cos。
+- **弃用**:`scripts/train_dinov3h_decoder.py` 的 pooled 合成解码器仅作对照,**不再用于可视化/VLA subgoal 渲染**。
+- 参考视图:`scripts/viz_ep_retrieval.py`(`ep2032_subgoal_retrieval.png`)。
+
+## 方差/尾部感知损失(risk-averse:不只降均值,也降大误差次数)
+
+需求:subgoal 预测里有约 7% 的样本 cos<0.75(mean 0.864 但 p05=0.725),这些"灾难性跑偏"对 VLA 危害大。加**尾部惩罚**:trainer `proto_tail_mode: variance | cvar`(`train_unified_lmwm._proto_loss`)。
+
+| 模型 | mean | std | p05 | frac<0.7 | frac<0.75 |
+|---|---|---|---|---|---|
+| baseline(纯均值) | 0.864 | 0.069 | 0.725 | 3.5% | 7.3% |
+| **cvar(w0.5,q0.1)** | 0.859 | 0.060 | 0.741 | **2.4%** | 5.9% |
+| **variance(w1.0)** | 0.858 | **0.059** | 0.741 | 2.5% | 5.9% |
+
+**结果**:牺牲 0.7% 均值(0.864→0.858),换来 **std −15%、cos<0.7 的次数 −31%、p05 +0.016**。正是 mean-variance 取舍——大误差预测更少、分布更紧。配置项 `proto_tail_mode`(默认 none 向后兼容)。
+
 ## 产物
 - `scripts/probe_episode_medoid_target.py` → `outputs/ceiling_diag/medoid_probe.json`;kNN 帧→下一 medoid = 0.877/0.879 vs 簇心 0.836
+- `src/lmwm/retrieval_decoder.py`(规范解码器);`scripts/viz_ep_retrieval.py`(检索式可视化)
+- 尾部损失:trainer `proto_tail_mode/proto_tail_weight/proto_cvar_q`;configs `..._medoid_{cvar,variance}.yaml`;checkpoints `stage3_realfuture_medoid_{cvar,variance}/`
 - `scripts/export_episode_medoid_pairs.py` → `data/.../pairs_next_unique_medoid.npz`(加 `next_medoid`)
 - `data.py` 新增 `proto_target_source`(默认 centroid,向后兼容);config `kai0base_dinov3h_stage3_realfuture_medoid.yaml`
 - 训练:`checkpoints/stage3_realfuture_medoid/`;评估:`scripts/eval_proto_subgoal.py` → `outputs/proto_subgoal_eval/{centroid,medoid}_trained.json`

@@ -46,17 +46,61 @@ class Metrics:
     val_max_product_proto_cos: float
 
 
+def _proto_loss(pred: torch.Tensor, tgt: torch.Tensor, beta: float, tail_mode: str, tail_w: float, cvar_q: float) -> torch.Tensor:
+    """Per-sample smooth_l1, reduced with an optional variance / tail (CVaR) penalty
+    so the loss shrinks large-error predictions, not just the mean.
+      - "none":     mean (original behavior)
+      - "variance": mean + tail_w * std(per-sample)  (minimize error variance)
+      - "cvar":     (1-tail_w)*mean + tail_w * mean(worst cvar_q fraction)  (shrink the tail)
+    """
+    per = F.smooth_l1_loss(pred, tgt, beta=beta, reduction="none").mean(dim=-1)  # (B,)
+    base = per.mean()
+    if tail_mode == "variance":
+        return base + tail_w * per.std()
+    if tail_mode == "cvar":
+        k = max(1, int(cvar_q * per.numel()))
+        worst = torch.topk(per, k).values.mean()
+        return (1.0 - tail_w) * base + tail_w * worst
+    return base
+
+
+def _ce_loss(logits: torch.Tensor, target: torch.Tensor, mode: str, tail_w: float, cvar_q: float, gamma: float) -> torch.Tensor:
+    """Cross-entropy with an optional risk-averse reduction on the discrete heads.
+      - "none":  mean CE (original)
+      - "focal": focal loss (down-weight easy samples, focus hard ones -> shrink tail)
+      - "cvar":  (1-w)*mean + w*mean(worst q fraction of per-sample CE)
+      - "variance": mean + w*std(per-sample CE)
+    """
+    per = F.cross_entropy(logits, target, reduction="none")  # (B,)
+    if mode == "focal":
+        p = torch.exp(-per)
+        return ((1 - p) ** gamma * per).mean()
+    if mode == "cvar":
+        k = max(1, int(cvar_q * per.numel()))
+        return (1.0 - tail_w) * per.mean() + tail_w * torch.topk(per, k).values.mean()
+    if mode == "variance":
+        return per.mean() + tail_w * per.std()
+    return per.mean()
+
+
 def compute_losses(out: dict[str, torch.Tensor], data: dict[str, torch.Tensor], b: torch.Tensor, weights: dict[str, float]) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     # proto_beta: smooth_l1 transition point. LaWM uses 0.1 for DINO-feature
     # regression (errors are tiny, so beta=1.0 leaves them in the weak-gradient
     # quadratic regime); default 1.0 keeps the original LMWM behavior.
     beta = float(weights.get("proto_beta", 1.0))
+    tail_mode = str(weights.get("proto_tail_mode", "none"))
+    tail_w = float(weights.get("proto_tail_weight", 0.0))
+    cvar_q = float(weights.get("proto_cvar_q", 0.1))
+    ce_mode = str(weights.get("ce_tail_mode", "none"))
+    ce_w = float(weights.get("ce_tail_weight", 0.0))
+    ce_q = float(weights.get("ce_cvar_q", 0.1))
+    ce_gamma = float(weights.get("ce_focal_gamma", 2.0))
     logp = F.log_softmax(out["transition_logits"], dim=-1)
     kl = F.kl_div(logp, data["transition_target"][b], reduction="batchmean")
-    greedy_ce = F.cross_entropy(out["greedy_logits"], data["greedy_target"][b])
-    max_product_ce = F.cross_entropy(out["max_product_logits"], data["max_product_target"][b])
-    greedy_proto_mse = F.smooth_l1_loss(out["greedy_proto"], data["greedy_proto_target"][b], beta=beta)
-    max_product_proto_mse = F.smooth_l1_loss(out["max_product_proto"], data["max_product_proto_target"][b], beta=beta)
+    greedy_ce = _ce_loss(out["greedy_logits"], data["greedy_target"][b], ce_mode, ce_w, ce_q, ce_gamma)
+    max_product_ce = _ce_loss(out["max_product_logits"], data["max_product_target"][b], ce_mode, ce_w, ce_q, ce_gamma)
+    greedy_proto_mse = _proto_loss(out["greedy_proto"], data["greedy_proto_target"][b], beta, tail_mode, tail_w, cvar_q)
+    max_product_proto_mse = _proto_loss(out["max_product_proto"], data["max_product_proto_target"][b], beta, tail_mode, tail_w, cvar_q)
     loss = (
         weights["kl"] * kl
         + weights["greedy_ce"] * greedy_ce
@@ -118,6 +162,13 @@ def main() -> None:
         z, n, float(cfg["training"].get("val_ratio", 0.2)), seed, device, str(cfg.get("split_mode", "random"))
     )
 
+    # init_seed: re-seed AFTER the split so ensemble members share the identical
+    # episode split (governed by `seed`) but differ in init + batch order.
+    init_seed = cfg.get("init_seed")
+    if init_seed is not None:
+        torch.manual_seed(int(init_seed))
+        torch.cuda.manual_seed_all(int(init_seed))
+
     mc = cfg["model"]
     model = UnifiedLMWM(in_dim, latent_dim, num_milestones, int(mc.get("hidden_dim", 512)), int(mc.get("depth", 2))).to(device)
     weight_decay = float(cfg["training"].get("weight_decay", 1e-6))
@@ -135,6 +186,13 @@ def main() -> None:
         "greedy_proto": float(cfg["training"].get("greedy_proto_weight", 5.0)),
         "max_product_proto": float(cfg["training"].get("max_product_proto_weight", 5.0)),
         "proto_beta": float(cfg["training"].get("proto_smooth_l1_beta", 1.0)),
+        "proto_tail_mode": str(cfg["training"].get("proto_tail_mode", "none")),
+        "proto_tail_weight": float(cfg["training"].get("proto_tail_weight", 0.0)),
+        "proto_cvar_q": float(cfg["training"].get("proto_cvar_q", 0.1)),
+        "ce_tail_mode": str(cfg["training"].get("ce_tail_mode", "none")),
+        "ce_tail_weight": float(cfg["training"].get("ce_tail_weight", 0.0)),
+        "ce_cvar_q": float(cfg["training"].get("ce_cvar_q", 0.1)),
+        "ce_focal_gamma": float(cfg["training"].get("ce_focal_gamma", 2.0)),
     }
     batch_size = int(cfg["training"].get("batch_size", 2048))
     max_steps = int(cfg["training"].get("max_steps", 1200))
