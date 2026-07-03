@@ -35,7 +35,7 @@ for _n, _s in [("latent_action_model", _BASE), ("latent_action_model.core", _BAS
     _m = types.ModuleType(_n); _m.__path__ = [str(_s)]; sys.modules[_n] = _m
 from latent_action_model.core.utils.lam_encoder import LAMEncoder  # noqa: E402
 
-EXTRA = 1280 + 14  # milestone-1 latent + state
+EXTRA = 1280 + 1280 + 14  # milestone-1 latent + current-milestone latent (H3) + state
 
 
 class GridStore:
@@ -77,7 +77,9 @@ def build_extra(z, proto_tbl):
     prev_id = cur[:, 1280:1280 + 38].argmax(1)
     prev_latent = np.where(prev_id[:, None] < len(proto_tbl),
                            proto_tbl[np.clip(prev_id, 0, len(proto_tbl) - 1)], 0.0).astype(np.float32)
-    return np.concatenate([prev_latent, cur[:, -14:]], 1).astype(np.float32)
+    cur_m = z["current_milestone"].astype(np.int64)                      # H3: current-milestone latent
+    cur_latent = proto_tbl[np.clip(cur_m, 0, len(proto_tbl) - 1)].astype(np.float32)
+    return np.concatenate([prev_latent, cur_latent, cur[:, -14:]], 1).astype(np.float32)
 
 
 def main() -> None:
@@ -91,7 +93,7 @@ def main() -> None:
     ap.add_argument("--bs", type=int, default=256)
     ap.add_argument("--ctx", type=int, default=768)
     ap.add_argument("--layers", type=int, default=6)
-    ap.add_argument("--lam", type=float, default=0.3)
+    ap.add_argument("--lam", type=float, default=0.5)  # H5: fusion optimum >= 0.5
     ap.add_argument("--save_dir", default="temp/lmwm_p0/lawm_members", type=Path)
     ap.add_argument("--members_glob", default="temp/lmwm_p0/lawm_members/member_*.pt")
     ap.add_argument("--out", default="temp/lmwm_p0/lawm_eval.json", type=Path)
@@ -122,7 +124,10 @@ def main() -> None:
             bi = ti[np.random.randint(0, len(ti), args.bs)]
             g = torch.from_numpy(store.gather(bi).astype(np.float32)).to(dev)
             lg, pr = model(g, Ex[bi].to(dev))
-            loss = F.cross_entropy(lg, Y[bi].to(dev)) + 5.0 * (1 - (pr * Md[bi].to(dev)).sum(-1)).mean()
+            per = F.cross_entropy(lg, Y[bi].to(dev), reduction="none")   # H4: CVaR-CE (mean+variance)
+            k = max(1, int(0.1 * len(per)))
+            ce = 0.5 * per.mean() + 0.5 * torch.topk(per, k).values.mean()
+            loss = ce + 5.0 * (1 - (pr * Md[bi].to(dev)).sum(-1)).mean()
             opt.zero_grad(); loss.backward(); opt.step(); sch.step()
             if s % 500 == 0:
                 print(f"seed{args.init_seed} step {s} loss {loss.item():.3f}", flush=True)
