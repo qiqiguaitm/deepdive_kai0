@@ -73,3 +73,33 @@ top1 **0.453** / NLL **1.740**(std **1.00** / p90 3.05 / CVaR10 **3.83**)/ subgo
 **7 个 lever 一致证明触到 frame-only 天花板**;本 session 净增益 = **top1 0.453→0.459(集成)+ 部署单模型 0.408→0.449(蒸馏)**,subgoal/方差在各自 frame-only 上界。
 
 **唯一能越过 subgoal 天花板的路 = 引入未来/历史信息**(L2 oracle 0.90 vs deploy 0.874 的 gap 只有未来态可及):即 (a) 多帧运动历史消歧分支,或 (b) VLA 闭环反馈把"实际走了哪个分支"喂回 —— 这正是 LaWM `inverse(当前,未来)→code` 的机制,属下一阶段架构升级,非当前 frame-only 模型可达。
+
+## L8 关键修正:decode-space loss 才是正确目标(2026-07-02,用户提出)
+
+**用户洞察**:训练目标应是"**预测 latent 解码后与 TRUE next-medoid 图像最像**",latent cosine 只是代理。实测(`lever_decode_loss.py`,pooled 解码器 dec.pt,held-out):
+
+| 训练 loss | decoded img L1(↓) | decoded img cos(↑) | latent cos |
+|---|---|---|---|
+| latent cos(旧基线) | 0.1667 | 0.704 | **0.868** |
+| **decode-space** `L1(D(pred),D(medoid))` | **0.1546(−7.3%)** | **0.731** | 0.854 |
+
+**结论(重要)**:decode-loss 模型 **latent cos 反而更低,但 decoded 图像 L1 好 7.3%** → **证明 latent cosine 与解码保真相悖,之前全程优化的 cos 0.874 不是正确指标**。凡以"解码效果"为目标,subgoal 头必须用 decode-space(感知)loss 训练。图 `assets/decode_loss_compare.png`。
+- 边界:pooled 解码器自身有 ~0.13 L1 底噪(模糊),decode-loss 降的是预测的**超出部分**;要绝对更清晰需 patch-grid 解码器(自重建 2.7% vs pooled 13%)。
+
+### Track A 落地(2026-07-02):decode-loss 进生产 subgoal 头
+全量数据复现:decoded img L1 latent 0.1566 → **decode 0.1451(−7.4%)**,img cos 0.725→0.750,latent cos 0.880→0.862。产出生产头 `lmwm/checkpoints/stage3_decode_subgoal/head_{decode,latent}.pt`(head_decode = decode 优化版)。**采纳**:凡以解码保真为目标,subgoal 用 head_decode。
+
+### Track B 进行中:patch-grid decode-loss(用户要的最终形态)
+- B1:持久化 patch 解码器 `lmwm/checkpoints/patch_decoder/patch_dec.pt`(`track_b1_patch_decoder.py`,存 state+mu/sd,可反传)。
+- B2:grid 生成头(augin pooled → 16×16×1280 grid)+ decode-space loss(`L1(D(grid), 真实medoid帧)`)vs grid+latent-loss 基线,`track_b2_grid_predict.py`。
+
+### L9 LaWM loss 对比(2026-07-03,用户要求)
+LaWM 重建 loss 在**特征空间**(`lam_lightinng.py:626-661`):recon/target = 特征 token `[B,K,dim]`,`loss = smooth_l1(recon,target,β=0.1) + (1 − 逐token余弦)`(+VQ+entropy);上报指标 = **逐 token 特征余弦** + 特征 L1。同数据 3 个 grid 预测头 × 2 把尺子:
+
+| grid 头(loss) | **LaWM 特征余弦**↑ | 特征 L1↓ | **解码 img L1**↓ | 解码 img cos |
+|---|---|---|---|---|
+| latent (特征 MSE) | **0.694** | 0.093 | 0.192 | 0.656 |
+| LaWM (smooth_l1+cos) | 0.694 | 0.093 | 0.185 | 0.668 |
+| decode-space (图像 L1) | **0.015** ⚠️off-manifold | 0.401 | **0.182** | 0.663 |
+
+**结论**:①两把尺子**近乎正交甚至反相关** → 证实 latent/特征余弦 ≠ 解码保真;decode-loss 的 grid 偏离特征流形(cos 0.015),只"骗解码器"。②**patch-grid 预测解码保真(0.182)反不如 pooled+decode-loss(0.145)** —— 预测 256 token 比 pooled 向量难太多,更保真的 patch 解码器补不回;图上三列 grid 全模糊+棋盘 artifact。**分叉**:输出喂 VLA 当特征 → 用 LaWM 特征空间 loss(保 on-manifold);产物是"未来图像" → 用 decode-loss 且当前 **pooled 优于 grid**。图 `assets/grid_decode_loss_compare.png`。

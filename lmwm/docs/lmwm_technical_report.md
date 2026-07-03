@@ -24,17 +24,21 @@ CRAVE 将跨 episode 重复度转化为带 progress 值的任务感知 **milesto
 
 ### 2.1 架构
 
-`UnifiedLMWM`(`src/lmwm/models.py`):当前 DINOv3-H 帧特征上的共享 MLP trunk,喂给五个头 —— 转移 logits、贪心/最大积 milestone logits、两个 L2 归一化的隐变量 prototype subgoal 头。
+> **收紧后的完整架构框架见 [`lmwm_architecture_20260703.md`](lmwm_architecture_20260703.md)**(单一事实源:augin 输入、集成/蒸馏部署、subgoal 双损失框架、解码旁路)。以下为骨架。
+
+`UnifiedLMWM`(`src/lmwm/models.py`):**augin 输入**(DINOv3-H pooled 1280 + prev-milestone one-hot 38 + proprio 14 = **1332-D**)上的共享 MLP trunk(512×2,~1.18M),喂给五个头:
 
 ```
-当前 DINOv3-H 帧特征 (1280-D)
-  └─ trunk (MLP)
-       ├─ 转移头      → P(下一 milestone)   [分布]
-       ├─ 贪心头      → 下一 milestone       [点]
-       ├─ 最大积头     → 完成下一             [点]
-       ├─ 贪心 proto 头 → 隐变量 subgoal (1280-D, 范数=1)
-       └─ 最大积 proto  → 隐变量 subgoal (1280-D, 范数=1)
+augin (1332-D) = pooled(1280) + prev-milestone(38) + proprio(14)
+  └─ trunk (MLP 512×2)
+       ├─ 转移头        → P(下一 milestone)   [分布]
+       ├─ 贪心头        → 下一 milestone       [点]
+       ├─ 最大积头       → 完成下一             [点]
+       ├─ 贪心 proto 头  → 隐变量 subgoal (1280-D, 范数=1)
+       └─ 最大积 proto   → 隐变量 subgoal (1280-D, 范数=1)
 ```
+
+**subgoal 头损失按输出去向选**(收紧核心):喂 VLA 特征→特征空间 loss(on-manifold);仅渲染图→decode-space loss。二者近乎正交,不可同头两用。详见架构文档 §5.2。
 
 ### 2.2 循环图(规划先验)
 

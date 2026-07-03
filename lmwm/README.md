@@ -30,6 +30,7 @@ See `docs/recurrence_state_world_model_plan.md` for the current plan.
 
 | 文档 | 内容 |
 |---|---|
+| [docs/lmwm_architecture_20260703.md](docs/lmwm_architecture_20260703.md) | **★架构框架(收紧版,单一事实源)** — augin 输入、UnifiedLMWM、subgoal 双损失框架、集成/蒸馏部署、解码旁路 |
 | [docs/lmwm_technical_report.md](docs/lmwm_technical_report.md) | **技术报告** — 方法 + 配图结果 + 解码预测可视化 |
 | [docs/lmwm_stage_overview.md](docs/lmwm_stage_overview.md) | 阶段总览 — 所有阶段、结果和诚实局限的单页导览 |
 | [docs/phase_a_real_future_20260702.md](docs/phase_a_real_future_20260702.md) | Phase A — 真实未来标签 + 图无关评估(0.94→0.23 诚实重塑) |
