@@ -1081,6 +1081,48 @@ _CONFIGS = [
         num_workers=24,
     ),
 
+    # ===== CRAVE→KAI0-AE 蒸馏 (crave_ae_distill_plan.md P1): 两种 CRAVE 逐帧 value 标签各训一个 AE, 对照 =====
+    # 现成 baseline AE-C = adv_est_v1/100000 (人工 stage_progress_gt). AE-A/AE-B = 用 CRAVE 零人工标签重训.
+    # 数据 crave_stage_{A,B} (3055ep, 以 advantage_q5 为底, stage_progress_gt 列覆盖为 CRAVE 逐帧 value 0→1,
+    # videos symlink→kai0_advantage, norm_stats copy 自 advantage_q5). model=AdvantageEstimatorConfig
+    # (train_pytorch.py 断言必须), loss_value=1/action=0 (纯回归 stage-progress). init pi05_base strict=False.
+    # 与 VIS_AWBC 同参 (batch144/worker24/save10k); 唯一变量=标签构造法 (A anchor-linear vs B viterbi+时间先验).
+    # plan §3 定 50k step (AE value 收敛快; ⚠️ AE-C baseline 是 100k, 对照取各自收敛 ckpt, 见 plan §4).
+    TrainConfig(
+        name="ADVANTAGE_TORCH_CRAVE_A",
+        model=pi0_config.AdvantageEstimatorConfig(
+            pi05=True, action_dim=32, action_horizon=50, max_token_len=200,
+            loss_action_weight=0.0, loss_value_weight=1.0,
+        ),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/crave_stage_A",
+            default_prompt="Flatten and fold the cloth.",
+        ),
+        pytorch_weight_path="/vePFS/tim/workspace/openpi_cache/modelscope_cache/lerobot/pi05_base",
+        advantage_estimator=True,
+        num_train_steps=50_000,
+        save_interval=10_000,
+        batch_size=144,
+        num_workers=24,
+    ),
+    TrainConfig(
+        name="ADVANTAGE_TORCH_CRAVE_B",
+        model=pi0_config.AdvantageEstimatorConfig(
+            pi05=True, action_dim=32, action_horizon=50, max_token_len=200,
+            loss_action_weight=0.0, loss_value_weight=1.0,
+        ),
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/crave_stage_B",
+            default_prompt="Flatten and fold the cloth.",
+        ),
+        pytorch_weight_path="/vePFS/tim/workspace/openpi_cache/modelscope_cache/lerobot/pi05_base",
+        advantage_estimator=True,
+        num_train_steps=50_000,
+        save_interval=10_000,
+        batch_size=144,
+        num_workers=24,
+    ),
+
     # ===== Cross-embodiment: per-DS-norm + Action-Head conditioning (2026-06-05) =====
     # Single PRE-MERGED kai+vis dataset `kai_vis_merged` (kai0_base+kai0_dagger=domain0 6512ep,
     # A_smooth800_dagger_full=domain1/vis 1033ep) → healthy single-source path (NOT datasets_yaml).
