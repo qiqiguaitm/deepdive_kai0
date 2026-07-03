@@ -213,8 +213,8 @@ a.link{color:var(--accent3);text-decoration:none;border-bottom:1px dashed var(--
 <h3>2.1 灵感来源:反复出现 = 任务必经结构</h3>
 <p>同一任务的众多 demo 里,<b>关键 milestone 会在不同 episode 反复出现</b>(抓取→摊开→对折→叠好)。把"跨 episode 的统计重复性"当作无标签的监督信号:<b>反复出现的状态 = 任务必经 milestone</b>。</p>
 <figure>
-  <img src="assets/recurrence_milestone.png" alt="同一 milestone 在不同 episode 反复出现(medoid)">
-  <figcaption><b>反复出现 = 任务必经结构</b>:一个高覆盖的 kai0 milestone(任务进度≈0.37,<b>覆盖 78% episodes</b>)—— 左=milestone 代表(<b>medoid</b>,离簇心最近的真实帧),右=该状态在 6 条不同 episode(不同布料颜色,cos 0.91–0.92)里反复出现的真实帧。CRAVE 正是把这种"跨 episode 复现"当作 progress 来源。</figcaption>
+  <img src="assets/recurrence_milestone.png" alt="同一 milestone 在不同 episode 反复出现">
+  <figcaption><b>反复出现 = 任务必经结构</b>:一个高覆盖的 kai0 簇(任务进度≈0.60,<b>覆盖 50% episodes</b>)—— 左=<b>簇中心解码图</b>(解码"平均 latent"→ 与右侧真实帧一致,证明簇中心是合理的语义平均),右=该状态在 6 条不同 episode(甚至不同布料颜色)里反复出现的真实帧。CRAVE 正是把这种"跨 episode 复现"当作 progress 来源。</figcaption>
 </figure>
 <h3>2.2 三步直觉(全程零训练)</h3>
 <div class="flow">
@@ -268,7 +268,7 @@ a.link{color:var(--accent3);text-decoration:none;border-bottom:1px dashed var(--
   <a href="assets/encoder_decoder_arch_hq.png" target="_blank" rel="noopener"><img src="assets/encoder_decoder_arch_hq.png" alt="CRAVE 编解码架构图高清版"></a>
   <figcaption><b>② 编解码架构</b>:真实帧→DINOv3-H 编码→token features→flatten + state 拼接→K-Means 统一 latent 聚类→去除 state component 得到 image-token 簇中心→decoder 重建簇中心图。页面内按普通配图宽度展示。</figcaption>
 </figure>
-<figure><img src="assets/milestone_repr_decode.png" alt="簇中心表示:合成质心 vs medoid"><figcaption><b>③ 簇中心表示升级(合成 → medoid)</b>:8 个 milestone 的簇中心表示 —— 上=旧合成质心(解码平均→<b>软</b>,锐度 113),下=<b>medoid</b> 检索最近真实帧(<b>锐利真实</b>,锐度 961≈真实,8.5×)。簇中心可解释、清晰代表靠 medoid;合成"平均质心"对可形变布料 <b>ill-posed 恒软</b>(换编码器/加规模救不动)。</figcaption></figure>
+<figure><img src="assets/milestone_repr_decode.png" alt="10 个代表 milestone 的簇中心解码图"><figcaption><b>③ 可解释 + 簇中心合理(簇中心解码图)</b>:同 10 个 milestone 的<b>簇中心解码图</b>(解码"平均 latent")—— 解码出的中心与上排真实帧一致,<b>证明簇中心是合理的语义平均</b>(medoid 只是最近成员、不能验证中心本身)。聚簇可解释、簇中心合理。</figcaption></figure>
 <h3>4.2 为什么用「簇平均 progress」当 milestone 进度(progress 一致性)</h3>
 <figure><img src="assets/value_consistency_proof.png" alt="progress 一致性证明">
   <figcaption><b>DINOv3-H 聚类的 progress 一致性证明</b>:(A)置信度过滤 t-SNE (K=10, CQ=0.85),仅高置信点训练降维,低置信点灰色投影,各簇一色;(B)每帧 progress vs 其所在簇平均 progress,相干簇(各色)紧贴对角线,R²=0.84,证明簇平均可以可靠代表 milestone 进度。</figcaption>

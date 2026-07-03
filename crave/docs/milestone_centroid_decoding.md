@@ -172,11 +172,16 @@ milestone 代表图原来用"离簇心最近的真实帧(medoid)"。本线探索
 
 **一句话**:`DINOv3-H 编码器 + 检索(最近真实帧)最佳解码器 + 自适应 milestone + 自适应 value bins`。
 
-## 可选:合成"可读质心"(已被检索取代为默认)
+## 簇中心解码图 vs medoid:两个**正交**用途,别相互取代
 
-需要**去具体化的合成原型图**(不绑某条 demo 的布料颜色)时,用 small(0.92M)空间解码器解码簇中心 **patch-grid**(非池化)+ L1 + ~9k 帧(历史最优合成配置,DINOv2/DINOv3-H patch-grid 通用)。注意其**天生软**(cos ~0.42、锐度 ~112 vs 真实 ~950)、且**平均质心 ill-posed**(加规模/换损失救不动,§2.4)。**默认代表图请用检索**;合成仅用于"必须造 demo 集外新状态"或"刻意抽象的示意图"。
+| 用途 | 用什么 | 为什么 |
+|---|---|---|
+| **最清晰的代表图**(可视化 / VLA 子目标) | **medoid / 检索**(锐,961) | 要真实照片级清晰;合成平均恒软 |
+| **证明簇中心合理**(平均 latent 是有意义的语义点) | **解码簇中心本身**(簇中心解码图) | **medoid 做不到** —— 最近成员对任何簇都平凡存在,不验证中心;唯有解码"平均 latent"、看它是否渲染出与成员一致的连贯状态,才证明这个平均有意义 |
 
-**"换更好的编码器能否救簇中心解码?"—— 不能,是平均 ill-posed,非编码器问题。** 逐 milestone 对比:合成质心(pooled 解码,锐度 **113**、软)vs medoid(检索离中心最近的真实帧,锐度 **961≈真实**,**8.5×**),换编码器/加规模都动不了合成那条。→ 清晰的簇中心图 = **medoid 检索**,编码器无关。证据图 `visualization/decoder_benchmark/milestone_synth_vs_medoid.png`;全 37 milestone 的 medoid 词表(按进度排序,升级版 milestone 配图)`visualization/decoder_benchmark/milestone_medoid_gallery.png`(脚本 `crave/experiments/milestone_centroid_repr.py`)。
+**关键澄清(修正早前措辞)**:簇中心解码图**不是被 medoid 取代**。它解码的是**中心本身**,其与真实成员帧的**一致性 = 簇中心合理性的证据**;此处**"软"是可接受的**(patch-grid 解码平均 latent,§2.4 已证可形变布料平均 ill-posed 恒软),要看的是**一致性不是锐度**。用于展示的合成质心用 small(0.92M)空间解码器解码 **patch-grid**(非池化)中心 + L1 + ~9k 帧。
+
+**"换更好的编码器能否让簇中心解码更锐?"—— 不能**(平均 ill-posed,非编码器问题;逐 milestone 合成 113 vs medoid 961,证据图 `visualization/decoder_benchmark/milestone_synth_vs_medoid.png`)。但这**不影响**其"证明簇中心合理"的用途 —— 那靠一致性,不靠锐度。附:全 37 milestone 的 medoid 词表(锐利代表图用)`visualization/decoder_benchmark/milestone_medoid_gallery.png`(脚本 `crave/experiments/milestone_centroid_repr.py`)。
 
 ## 适用范围与诚实边界
 
