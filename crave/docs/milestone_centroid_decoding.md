@@ -176,6 +176,8 @@ milestone 代表图原来用"离簇心最近的真实帧(medoid)"。本线探索
 
 需要**去具体化的合成原型图**(不绑某条 demo 的布料颜色)时,用 small(0.92M)空间解码器解码簇中心 **patch-grid**(非池化)+ L1 + ~9k 帧(历史最优合成配置,DINOv2/DINOv3-H patch-grid 通用)。注意其**天生软**(cos ~0.42、锐度 ~112 vs 真实 ~950)、且**平均质心 ill-posed**(加规模/换损失救不动,§2.4)。**默认代表图请用检索**;合成仅用于"必须造 demo 集外新状态"或"刻意抽象的示意图"。
 
+**"换更好的编码器能否救簇中心解码?"—— 不能,是平均 ill-posed,非编码器问题。** 逐 milestone 对比:合成质心(pooled 解码,锐度 **113**、软)vs medoid(检索离中心最近的真实帧,锐度 **961≈真实**,**8.5×**),换编码器/加规模都动不了合成那条。→ 清晰的簇中心图 = **medoid 检索**,编码器无关。证据图 `visualization/decoder_benchmark/milestone_synth_vs_medoid.png`;全 37 milestone 的 medoid 词表(按进度排序,升级版 milestone 配图)`visualization/decoder_benchmark/milestone_medoid_gallery.png`(脚本 `crave/experiments/milestone_centroid_repr.py`)。
+
 ## 适用范围与诚实边界
 
 - **默认代表图 = 检索最近真实帧**:最清晰(真实照片级)+ 阶段语义对齐(cos 中位 ~0.90,跨布料颜色泛化);唯**完成态偏弱**(进度≈0.95 时 cos ~0.80,折好态视觉混叠 + 样本少)。效果画廊 `visualization/decoder_benchmark/retrieval_decode_gallery.png`。
