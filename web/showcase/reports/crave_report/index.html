@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CRAVE:基于共现状态无监督的价值估计</title>
+<title>CRAVE:基于共现状态无监督的进度估计</title>
 <style>
 :root{
   --bg:#020010; --bg2:#05001a; --bg3:#0a0024; --panel:rgba(10,0,36,0.72);
@@ -89,6 +89,31 @@ footer{position:relative;z-index:1;border-top:1px solid var(--border);padding:26
 .cols2 .col.good h4{color:#5ee08a}.cols2 .col.bad h4{color:#f3d05a}
 .cols2 .col li{font-size:13.5px}
 a.link{color:var(--accent3);text-decoration:none;border-bottom:1px dashed var(--border2)}a.link:hover{border-color:var(--accent)}
+.latent-stage-figure{background:#07021f}
+.milestone-flow-board{padding:16px;display:grid;gap:14px}
+.milestone-flow-chain{display:grid;grid-template-columns:.82fr auto .82fr auto 1.55fr;gap:12px;align-items:center}
+.milestone-card{border:1px solid rgba(167,139,250,.45);border-radius:10px;background:rgba(12,7,40,.92);overflow:hidden;min-width:0}
+.milestone-card.current{border-color:rgba(34,197,94,.58)}
+.milestone-card.local{border-color:rgba(234,179,8,.62)}
+.milestone-card.goal{border-color:rgba(124,58,237,.72)}
+.milestone-card h4{margin:0;padding:9px 11px;font-size:12.5px;line-height:1.35;color:#eef0ff;border-bottom:1px solid rgba(255,255,255,.08)}
+.milestone-card.current h4{color:#9af0b7}.milestone-card.local h4{color:#f3d46a}.milestone-card.goal h4{color:#d8c8ff}
+.milestone-pair{display:grid;grid-template-columns:1fr 1fr;gap:0;background:#fff}
+.milestone-pair img{width:100%;height:auto;display:block;background:#fff}
+.milestone-single{background:#fff}
+.milestone-single img{width:100%;height:auto;display:block;background:#fff}
+.milestone-labels{display:grid;grid-template-columns:1fr 1fr;background:#f4f2ff;border-top:1px solid rgba(0,0,0,.08)}
+.milestone-labels span{padding:6px 7px;color:#33285f;font-size:10.5px;font-weight:700;text-align:center}
+.milestone-labels.single{grid-template-columns:1fr}
+.milestone-note{padding:9px 11px;font-size:11.5px;line-height:1.45;color:var(--text2);min-height:58px}
+.milestone-arrow{display:grid;gap:6px;justify-items:center;color:#d8c8ff;font-size:20px;font-weight:800;line-height:1}
+.milestone-arrow span{border:1px solid rgba(167,139,250,.42);border-radius:999px;background:rgba(124,58,237,.14);padding:4px 8px;font-size:10.5px;color:#cfc5ff;white-space:nowrap}
+.milestone-output-stack{display:grid;grid-template-columns:1fr 1fr;gap:12px;min-width:0}
+.milestone-flow-caption{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.milestone-flow-caption div{border:1px solid rgba(255,255,255,.08);border-radius:9px;background:rgba(255,255,255,.035);padding:10px 12px}
+.milestone-flow-caption b{display:block;color:#eef0ff;font-size:12px;margin-bottom:3px}
+.milestone-flow-caption span{display:block;color:var(--text2);font-size:11.5px;line-height:1.45}
+@media(max-width:980px){.milestone-flow-chain{grid-template-columns:1fr}.milestone-output-stack{grid-template-columns:1fr}.milestone-arrow{transform:none}.milestone-flow-caption{grid-template-columns:1fr}.milestone-card h4{font-size:12px}}
 </style>
 </head>
 <body>
@@ -99,9 +124,9 @@ a.link{color:var(--accent3);text-decoration:none;border-bottom:1px dashed var(--
 </div></header>
 
 <div class="hero">
-  <span class="kicker">Cross-episode Recurrence as Value Estimation</span>
-  <h1>CRAVE:基于共现状态无监督的价值估计</h1>
-  <p class="sub">面向观看者的方法汇报:先看清当前 value 模型的<b>三个痛点</b>,再看 CRAVE 怎么用"跨 episode 复现 + 簇间转移概率"逐一解决,最后给出<b>效果对比与优缺点</b>。</p>
+  <span class="kicker">Cross-episode Recurrence as Progress Estimation</span>
+  <h1>CRAVE:基于共现状态无监督的进度估计</h1>
+  <p class="sub">面向观看者的方法汇报:先看清当前监督 value/progress 模型的<b>三个痛点</b>,再看 CRAVE 怎么用"跨 episode 复现 + 簇间转移概率"逐一解决,最后给出<b>效果对比与优缺点</b>。</p>
   <div class="meta">
     <span>零训练 · frozen DINOv3-H</span><span>零人工标注</span>
     <span>跨数据集泛化</span><span>退步信号干净</span>
@@ -125,7 +150,7 @@ a.link{color:var(--accent3);text-decoration:none;border-bottom:1px dashed var(--
 <!-- ════ TL;DR ════ -->
 <section id="tldr">
 <h2><span class="n">TL;DR</span>关键结论</h2>
-<p class="lead">用监督模型一半的代价,拿到同等或更稳、还能跨任务直接复用的 value。</p>
+<p class="lead">用监督模型一半的代价,拿到同等或更稳、还能跨任务直接复用的 progress。</p>
 <div class="stats">
   <div class="stat"><div class="v">零训练</div><div class="l">frozen 特征 + 聚类 + DP,无梯度更新、无人工标注</div></div>
   <div class="stat"><div class="v">100% vs 52%</div><div class="l">in-distribution 单调性(CRAVE vs 监督 AE),且打平 corr</div></div>
@@ -136,18 +161,18 @@ a.link{color:var(--accent3);text-decoration:none;border-bottom:1px dashed var(--
 
 <!-- ════ 1. 痛点 ════ -->
 <section id="pain">
-<h2><span class="n">1</span>现状:当前 value 模型的三大痛点</h2>
-<p><b>value 模型是干嘛的?</b> AWBC / RL 训练需要每帧"任务完成到几成"的稠密信号,据此判每个动作是 <span class="tag g">POSITIVE</span>(该学)还是 <span class="tag r">NEGATIVE</span>(该避)。当前主流做法是<b>监督训练</b>一个 value 头。</p>
+<h2><span class="n">1</span>现状:当前监督 value/progress 模型的三大痛点</h2>
+<p><b>稠密进度模型是干嘛的?</b> AWBC / RL 类训练需要每帧"任务完成到几成"的稠密进度信号,再由进度变化派生出 <span class="tag g">POSITIVE</span>(该学)或 <span class="tag r">NEGATIVE</span>(该避)的动作标签。当前主流做法是<b>监督训练</b>一个 value/progress 头。</p>
 <div class="flow">
   <div class="node"><div class="ix">数据</div><div class="t">demo / rollout</div><div class="d">相机 + 动作</div></div>
   <div class="arrow">→</div>
-  <div class="node"><div class="ix">标注 / 回报</div><div class="t">stage_progress_gt</div><div class="d">人工 / 规则 / RL 回报</div></div>
+  <div class="node"><div class="ix">标注 / 奖励</div><div class="t">stage_progress_gt</div><div class="d">人工 / 规则 / reward 派生</div></div>
   <div class="arrow">→</div>
   <div class="node"><div class="ix">训练</div><div class="t">pi0-AE value 头</div><div class="d">监督回归(每任务重训)</div></div>
   <div class="arrow">→</div>
   <div class="node"><div class="ix">输出</div><div class="t">absolute_value</div><div class="d">+ advantage(P/N)</div></div>
 </div>
-<p style="color:var(--text2);font-size:13.5px">KAI0-AE = 上述监督路线;PI 系(π*0.6-RECAP 等)用监督进度差 / RL 回报,流程类似。</p>
+<p style="color:var(--text2);font-size:13.5px">KAI0-AE = 上述监督路线;PI 系(π*0.6-RECAP 等)可用监督进度差或外部奖励派生训练信号,流程类似。</p>
 
 <div class="pain"><span class="pn">痛点 ①</span>AE 输出抖动严重 → POSITIVE/NEGATIVE 评价极不稳定、互相交错</div>
 <p>监督 value 逐帧抖动,导致 AWBC 的正/负标签在同一段动作里来回横跳——学到的是噪声而非真信号。下图 kai0_base <b>ep2302</b>(成功叠衣)的 KAI0-AE 四联图:① absolute_value(进度值)→ ② relative_value(AE 直出、P/N 依据)<b>在 0 附近剧烈抖动、正负翻转 256 次</b> → ③ 二档(pos/neg)分类条<b>红绿满屏交错</b>,④ 三档(加 deadband)仍 churn。同一段成功动作被反复标成 NEGATIVE = 纯噪声。</p>
@@ -179,8 +204,8 @@ a.link{color:var(--accent3);text-decoration:none;border-bottom:1px dashed var(--
 <table>
 <thead><tr><th>痛点</th><th>CRAVE 怎么解</th></tr></thead>
 <tbody>
-<tr><td><b>① AE 抖动 → 正负交错</b></td><td>milestone 阶梯 + Viterbi-DP 全局最优 → value 平滑单调,正负<b>段化稀疏</b>而非逐帧横跳</td></tr>
-<tr><td><b>② 升降不可解释</b></td><td>value = "在哪个反复出现的 milestone 簇上" → 每次升/降都能<b>指着具体 milestone</b>说清楚</td></tr>
+<tr><td><b>① AE 抖动 → 正负交错</b></td><td>milestone 阶梯 + Viterbi-DP 全局最优 → progress 平滑单调,正负<b>段化稀疏</b>而非逐帧横跳</td></tr>
+<tr><td><b>② 升降不可解释</b></td><td>progress = "在哪个反复出现的 milestone 簇上" → 每次升/降都能<b>指着具体 milestone</b>说清楚</td></tr>
 <tr><td><b>③ 末端相似度假跌</b></td><td>不只看瞬时相似度:转移惩罚 + <b>簇间转移概率</b>(知道"末段不会跳回起始态")→ 压住假跌</td></tr>
 </tbody>
 </table>
@@ -188,8 +213,8 @@ a.link{color:var(--accent3);text-decoration:none;border-bottom:1px dashed var(--
 <h3>2.1 灵感来源:反复出现 = 任务必经结构</h3>
 <p>同一任务的众多 demo 里,<b>关键 milestone 会在不同 episode 反复出现</b>(抓取→摊开→对折→叠好)。把"跨 episode 的统计重复性"当作无标签的监督信号:<b>反复出现的状态 = 任务必经 milestone</b>。</p>
 <figure>
-  <img src="assets/recurrence_milestone.png" alt="同一 milestone 在不同 episode 反复出现">
-  <figcaption><b>反复出现 = 任务必经结构</b>:一个高覆盖的 kai0 簇(任务进度≈0.60,<b>覆盖 50% episodes</b>)—— 左=簇中心解码图(抽象代表),右=该状态在 6 条不同 episode(甚至不同布料颜色)里反复出现的真实帧。CRAVE 正是把这种"跨 episode 复现"当作 value 来源。</figcaption>
+  <img src="assets/recurrence_milestone.png" alt="同一 milestone 在不同 episode 反复出现(medoid)">
+  <figcaption><b>反复出现 = 任务必经结构</b>:一个高覆盖的 kai0 milestone(任务进度≈0.37,<b>覆盖 78% episodes</b>)—— 左=milestone 代表(<b>medoid</b>,离簇心最近的真实帧),右=该状态在 6 条不同 episode(不同布料颜色,cos 0.91–0.92)里反复出现的真实帧。CRAVE 正是把这种"跨 episode 复现"当作 progress 来源。</figcaption>
 </figure>
 <h3>2.2 三步直觉(全程零训练)</h3>
 <div class="flow">
@@ -197,7 +222,7 @@ a.link{color:var(--accent3);text-decoration:none;border-bottom:1px dashed var(--
   <div class="arrow">→</div>
   <div class="node"><div class="ix">② 聚类</div><div class="t">找"反复出现的态"</div><div class="d">KMeans → 自动浮现 milestone</div></div>
   <div class="arrow">→</div>
-  <div class="node"><div class="ix">③ 读出</div><div class="t">Viterbi-DP</div><div class="d">milestone → 稠密单调 value</div></div>
+  <div class="node"><div class="ix">③ 读出</div><div class="t">Viterbi-DP</div><div class="d">milestone → 稠密单调 progress</div></div>
 </div>
 <p style="color:var(--text2);font-size:13.5px">全链无梯度更新:DINOv3-H 冻结 + KMeans + DP,没有任何可学习参数被训练。</p>
 
@@ -217,19 +242,19 @@ a.link{color:var(--accent3);text-decoration:none;border-bottom:1px dashed var(--
 
 <h3>3.1 in-distribution(监督 AE 的主场)→ 解痛点①</h3>
 <p>同域(kai0)同数据公平对比,kai0_base 折叠成功 ep2302:零训练 CRAVE 与监督 AE 末值同到完成,但 CRAVE <b>更平滑、分类更干净</b> —— 单调率 <b>87% vs 52%</b>,POS/NORMAL/NEG 分类带 CRAVE 成块(绿/灰为主),AE 红碎噪声满布。</p>
-<figure><video src="assets/crave_vs_ae_full_ep2302.mp4" controls preload="metadata"></video><figcaption><b>CRAVE vs KAI0-AE 对齐视频 · ep2302</b>(成功叠衣):相机帧 + 双 value + 分类同步对照。</figcaption></figure>
+<figure><video src="assets/crave_vs_ae_full_ep2302.mp4" controls preload="metadata"></video><figcaption><b>CRAVE vs KAI0-AE 对齐视频 · ep2302</b>(成功叠衣):相机帧 + CRAVE progress / AE value + 分类同步对照。</figcaption></figure>
 <figure><img src="assets/crave_vs_ae_value_compare.png" alt="CRAVE vs AE value+分类对比">
-  <figcaption><b>value 曲线 + 分类带对比</b>:CRAVE(绿,单调 87%)vs KAI0-AE(红,单调 52%)。分类带 绿=pos / 灰=normal / 红=neg —— 成功 episode 理应几乎全绿+灰;<b>AE 下排红碎 = 监督 value 的 POS/NEG 噪声</b>(痛点①③ 的正面对照)。</figcaption>
+  <figcaption><b>progress/value 曲线 + 分类带对比</b>:CRAVE progress(绿,单调 87%)vs KAI0-AE value(红,单调 52%)。分类带 绿=pos / 灰=normal / 红=neg —— 成功 episode 理应几乎全绿+灰;<b>AE 下排红碎 = 监督 value 的 POS/NEG 噪声</b>(痛点①③ 的正面对照)。</figcaption>
 </figure>
 
-<h3>3.2 value 升降可解释 → 解痛点②</h3>
-<p>CRAVE 的每次升/降都对应明确的动作。下图 ep2302(0:06–1:17 段):<b>铺开 → value 上升(POSITIVE)</b>、<b>拎起 → value 下降(NEGATIVE)</b>、平稳保持 → NORMAL —— CRAVE 的升降与动作<b>对齐整齐</b>,主观一眼就能解释 value 为什么升/降。</p>
+<h3>3.2 progress 升降可解释 → 解痛点②</h3>
+<p>CRAVE 的每次 progress 升/降都对应明确的动作。下图 ep2302(0:06–1:17 段):<b>铺开 → progress 上升(POSITIVE)</b>、<b>拎起 → progress 下降(NEGATIVE)</b>、平稳保持 → NORMAL —— CRAVE 的升降与动作<b>对齐整齐</b>,主观一眼就能解释 progress 为什么升/降。</p>
 <figure><video src="assets/value_interp_video_ep2302.mp4" controls preload="metadata"></video>
-  <figcaption><b>CRAVE value 升降可解释 · ep2302(0:06–1:17)· vs KAI0-AE</b>:左=相机帧 + 实时分类;右上=CRAVE value(绿升/灰平/红降)+ 分类条,右下=KAI0-AE value + 分类条。CRAVE <b>铺开 value 升、拎起 value 降,与动作逐拍对齐</b>(可解释);AE 同段抖动、正负横跳(看不出为何升降)—— 正反对照。</figcaption>
+  <figcaption><b>CRAVE progress 升降可解释 · ep2302(0:06–1:17)· vs KAI0-AE</b>:左=相机帧 + 实时分类;右上=CRAVE progress(绿升/灰平/红降)+ 分类条,右下=KAI0-AE value + 分类条。CRAVE <b>铺开 progress 升、拎起 progress 降,与动作逐拍对齐</b>(可解释);AE 同段抖动、正负横跳(看不出为何升降)—— 正反对照。</figcaption>
 </figure>
 
 <h3>3.3 跨数据集泛化(配方逐字不改)</h3>
-<p>同一冻结配方套全新数据集:<b>XVLA 叠衣 corr 0.956</b>、<b>真实 ALOHA 咖啡 corr 0.988</b> —— 学的是"跨 demo 重复结构 = 进度"的通用规律,而非单数据集过拟合。下面两段为 CRAVE 在两个全新数据集上的逐帧 value + milestone 对齐演示:</p>
+<p>同一冻结配方套全新数据集:<b>XVLA 叠衣 corr 0.956</b>、<b>真实 ALOHA 咖啡 corr 0.988</b> —— 学的是"跨 demo 重复结构 = 进度"的通用规律,而非单数据集过拟合。下面两段为 CRAVE 在两个全新数据集上的逐帧 progress + milestone 对齐演示:</p>
 <figure><video src="assets/generalize_coffee_video.mp4" controls preload="metadata"></video><figcaption><b>真实 ALOHA 咖啡</b>(互联网真实数据,全新长程任务,corr 0.988)。</figcaption></figure>
 <figure><video src="assets/generalize_xvla_video.mp4" controls preload="metadata"></video><figcaption><b>XVLA 叠衣</b>(全新本体/相机/布料,corr 0.956)。</figcaption></figure>
 </section>
@@ -239,19 +264,22 @@ a.link{color:var(--accent3);text-decoration:none;border-bottom:1px dashed var(--
 <h2><span class="n">4</span>实现原理</h2>
 <h3>4.1 milestone 自动浮现</h3>
 <figure><img src="assets/milestone_repr_frames.png" alt="10 个代表 milestone 的最近真实帧"><figcaption><b>① 时序直观(最近真实帧)</b>:10 个代表 milestone 按任务进度 0.00→0.92 排开,各取最近真实帧 —— 一眼看清自动浮现的 milestone 时序。</figcaption></figure>
-<figure><img src="assets/encoder_decoder_arch.png" alt="编解码架构图"><figcaption><b>② 编解码架构</b>:真实帧→DINOv3-H 编码→1280D 特征→KMeans 聚类→簇中心→Wan2.2 VAE 或小 CNN 解码→簇中心解码图。左列=6 条不同 episode 的真实最近帧,中=聚类后的 latent 空间,右=解码回图像。</figcaption></figure>
-<figure><img src="assets/milestone_repr_decode.png" alt="10 个代表 milestone 的簇中心解码图"><figcaption><b>③ 可解释 + 簇中心合理(簇中心解码图)</b>:同 10 个 milestone 的簇中心解码图 —— 解码出的中心与上排真实帧一致,说明聚簇可解释、簇中心合理。</figcaption></figure>
-<h3>4.2 为什么用「簇平均 value」当 milestone 进度(value 一致性)</h3>
-<figure><img src="assets/value_consistency_proof.png" alt="value 一致性证明">
-  <figcaption><b>DINOv3-H 聚类的 value 一致性证明</b>:(A)置信度过滤 t-SNE (K=10, CQ=0.85),仅高置信点训练降维,低置信点灰色投影,各簇一色;(B)每帧 value vs 其所在簇平均 value,相干簇(各色)紧贴对角线,R²=0.84,证明簇平均可以可靠代表 milestone 进度。</figcaption>
+<figure>
+  <a href="assets/encoder_decoder_arch_hq.png" target="_blank" rel="noopener"><img src="assets/encoder_decoder_arch_hq.png" alt="CRAVE 编解码架构图高清版"></a>
+  <figcaption><b>② 编解码架构</b>:真实帧→DINOv3-H 编码→token features→flatten + state 拼接→K-Means 统一 latent 聚类→去除 state component 得到 image-token 簇中心→decoder 重建簇中心图。页面内按普通配图宽度展示。</figcaption>
 </figure>
-<h3>4.3 value 读出三步:无 Viterbi → Viterbi → 转移概率</h3>
+<figure><img src="assets/milestone_repr_decode.png" alt="簇中心表示:合成质心 vs medoid"><figcaption><b>③ 簇中心表示升级(合成 → medoid)</b>:8 个 milestone 的簇中心表示 —— 上=旧合成质心(解码平均→<b>软</b>,锐度 113),下=<b>medoid</b> 检索最近真实帧(<b>锐利真实</b>,锐度 961≈真实,8.5×)。簇中心可解释、清晰代表靠 medoid;合成"平均质心"对可形变布料 <b>ill-posed 恒软</b>(换编码器/加规模救不动)。</figcaption></figure>
+<h3>4.2 为什么用「簇平均 progress」当 milestone 进度(progress 一致性)</h3>
+<figure><img src="assets/value_consistency_proof.png" alt="progress 一致性证明">
+  <figcaption><b>DINOv3-H 聚类的 progress 一致性证明</b>:(A)置信度过滤 t-SNE (K=10, CQ=0.85),仅高置信点训练降维,低置信点灰色投影,各簇一色;(B)每帧 progress vs 其所在簇平均 progress,相干簇(各色)紧贴对角线,R²=0.84,证明簇平均可以可靠代表 milestone 进度。</figcaption>
+</figure>
+<h3>4.3 progress 读出三步:无 Viterbi → Viterbi → 转移概率</h3>
 
 <p><b>Viterbi：</b>Viterbi 不是单帧独立决策,而是用固定滞后窗口看一小段局部上下文来约束当前帧的选择,相当于给当前帧配了前后几秒的"连续性约束"。单帧因光照/褶皱/角度突变导致的模型输出抖动,被窗口内的路径连贯性平滑掉。</p>
 
-<p><b>转移概率：</b>从大量 demo 中学到"任务只能往前推进",所以当某帧突然像起始态(折叠时画面骤变→相似度假跌),Viterbi 会说"末段跳到起始的概率极低",不会真的跟丢、value 不会随之暴跌。两条一起:原始逐帧乱跳 → 变成段落式的干净阶梯,每个 POSITIVE/NEGATIVE 都有前后文支撑,不再是横跳的噪声。</p>
+<p><b>转移概率：</b>从大量 demo 中学到"任务只能往前推进",所以当某帧突然像起始态(折叠时画面骤变→相似度假跌),Viterbi 会说"末段跳到起始的概率极低",不会真的跟丢、progress 不会随之暴跌。两条一起:原始逐帧乱跳 → 变成段落式的干净阶梯,每个 POSITIVE/NEGATIVE 都有前后文支撑,不再是横跳的噪声。</p>
 
-<p><b>在线推理：</b>用固定滞后 Viterbi实现:每来一帧,向前多看一小段(3Hz 下约 12 帧=4 秒),然后局部回溯判断当前帧——相当于有 4 秒的"合理缓冲",不需要等整条 episode 完结,就能在线输出稳定的 value。固定滞后窗口足够小,真机实时可用,实测与全局 DP 相关度 0.9+、末值差小于 0.03。</p>
+<p><b>在线推理：</b>用固定滞后 Viterbi 实现:每来一帧,向前多看一小段(3Hz 下约 12 帧=4 秒),然后局部回溯判断当前帧——相当于有 4 秒的"合理缓冲",不需要等整条 episode 完结,就能在线输出稳定的 progress。固定滞后窗口足够小,真机实时可用,实测与全局 DP 相关度 0.9+、末值差小于 0.03。</p>
 
 <figure><img src="assets/viterbi_mechanism.png" alt="Viterbi 机制"><figcaption><b>① 无 Viterbi</b>(逐帧最近 milestone,乱抖)<b>→ ② Viterbi</b>(平滑单调 mono≈0.8→0.98);转移概率进一步压末端假跌。</figcaption></figure>
 </section>
@@ -272,7 +300,7 @@ a.link{color:var(--accent3);text-decoration:none;border-bottom:1px dashed var(--
     <li>依赖<b>挖矿域与目标域对齐</b>(挖矿数据要和评估任务同分布)</li>
     <li>转移概率<b>对正常走势是中性的</b>——只在"同态/循环态假跌"上有用,且须轻权重;<b>跳步检测不行</b></li>
     <li>milestone 空间形态下<b>完成态读数偏低</b>,需保留一个软 completion bias</li>
-    <li>τ 略低于监督 AE(前段动作多样、排序略噪)</li>
+    <li><b>跨任务能力有限</b>:不能只靠文本/单条视频零样本理解任意新任务,通常需要目标任务的一批 demo 来重新浮现 milestone</li>
     <li>需要<b>足够多的同任务 demo</b>才能让"重复"显现</li>
   </ul></div>
 </div>
@@ -294,69 +322,117 @@ a.link{color:var(--accent3);text-decoration:none;border-bottom:1px dashed var(--
 <h2><span class="n">6</span>下一步计划：从描述 → 预测 → 决策</h2>
 <p class="lead">当前 CRAVE 还是一个"描述器"。下一步是从"看懂"到"能预测、能规划、能决策"——构建一个以 <b>task-aware latent milestone</b> 为核心的世界模型。</p>
 
-<h3>6.1 Latent Milestone 世界模型定位</h3>
-<p>现有世界模型在两个极端之间摇摆:</p>
+<h3>6.1 AWBC + Process Reward (决策与在线优化)</h3>
+<p>有了 task-aware latent milestone 和转移图,下一步是让机器人<strong>能用这个模型做决策</strong>:</p>
+<ul>
+  <li><b>AWBC 离线策略</b>:milestone 天然的 state abstraction——在几十个有语义的状态上学习"当前阶段的最优动作",样本效率远高于像素级 RL;</li>
+  <li><b>Process Reward</b>:CRAVE 的 progress 是稠密进度信号,可进一步转换为 process reward / progress-derived reward;当实际进度落后于转移模型预期时,给出负向训练信号,让策略在线调整;</li>
+  <li><b>闭环迭代</b>:离线学→线上发现差距→收集新数据→改进策略。</li>
+</ul>
+
+<h3>6.2 Latent Milestone World Model -- Recurrence Latent Milestone Probability Graph (milestone 转移概率模型)</h3>
+<p>这一节把两件事合在一起:先把 <b>latent milestone</b> 定义为世界模型里的离散状态,再在这些状态之间统计 <b>Recurrence Latent Milestone Probability Graph</b>。也就是说,CRAVE 不是预测下一帧像素,而是预测“任务接下来更可能进入哪个 latent milestone”。</p>
+<p>现有世界模型通常卡在两个极端之间:</p>
 <ul>
   <li><b>Naive pixel-level</b>:预测下一帧像素,绝大部分像素对任务无意义,计算浪费且不抽象;</li>
   <li><b>"Physical state" 声称</b>(如 JEPA):声称学到了物理表征,但没有机制保障——模型可以"作弊"走捷径而不真正理解任务结构;</li>
   <li><b>3D/point-based</b>:深度噪声大、遮挡不稳定,且缺乏任务相关语义——它知道物体在哪,但不知道"这个状态在任务中意味着什么"。</li>
 </ul>
-<p>CRAVE 提出的是一条中间路线:</p>
+<p>CRAVE 采用中间路线:用 DINOv3-H 视觉语义、28D 本体状态和跨 episode 共现聚类共同定义 <b>task-aware latent milestone</b>。</p>
 <ul style="margin-top:8px">
   <li><b>视觉基座</b>:DINOv3-H (隐含分割/深度) → 提供<strong>视觉语义</strong></li>
   <li><b>本体状态</b>:28D 关节位置(加权 0.2)拼接 → 注入<strong>自身姿态感知</strong></li>
   <li><b>共现聚类</b>:将"任务中反复按顺序出现的状态"归为 milestone → 注入<strong>任务语义</strong></li>
 </ul>
-<p>三者融合为一个 1308D 的联合 latent 特征空间 → <b>latent milestone(任务阶段压缩表征)</b>。</p>
+<p>三者融合为一个 1308D 的联合 latent 特征空间 → <b>latent milestone(任务阶段压缩表征)</b>。当每一帧都能通过 Viterbi 读出为一个 latent milestone 后,大规模 episode 就变成 latent milestone 序列;在这些序列上统计 <b>P(milestone<sub>t+1</sub> | milestone<sub>t</sub>, a<sub>t</sub>)</b>,就得到 milestone 转移概率图。</p>
+<figure>
+  <img src="assets/transition_probability_network.svg" alt="CRAVE 簇间转移概率网络示意图">
+  <figcaption><b>簇间转移概率示意</b>:把 milestone 看作离散任务 milestone,从当前 milestone 向候选后继 milestone 连边,边上数值是从 demo 统计得到的经验概率 <code>P(next milestone | current milestone)</code>。粗线表示高概率前进路径,红线表示低概率回退/异常路径。图中用 3 层示意一段短期预测链。</figcaption>
+</figure>
 
-<h3>6.2 Recurrence State Graph (转移概率世界模型)</h3>
-<p>每个 milestone 本质是一个 <b>task-stage latent state</b>。
-从 Viterbi 解码的大规模 episode 数据中,可以直接统计 <b>P(s_{t+1} | s_t, a_t)</b>——构成一个离散化的、有任务语义的世界模型。</p>
-<p>这个图能做什么:</p>
-<ul>
-  <li><b>预测</b>:给定当前 milestone,知道下一步最可能走向哪个 milestone——"手在衣领上→大概率下一步是抓领子"。</li>
-  <li><b>异常检测</b>:当实际转移偏离高概率路径(如"刚叠好→回到第一步"),模型判定异常;</li>
-  <li><b>规划</b>:从当前 milestone 到目标 milestone 的最优路径搜索;</li>
-  <li><b>数据驱动</b>:低概率转移所在的帧→高信息量→指导在哪补数据。</li>
-</ul>
+<p>基于簇间转移概率可以得到两类下一 milestone:<b>Greedy Milestone</b> 在整张 milestone graph 上用 Viterbi / max-product 搜索通向完成态的最高概率路径,再取这条路径上的下一步 latent prototype 作为子目标提示;<b>Max-Probability Milestone</b> 则从当前 milestone 出发,直接取一步转移概率最大的 <code>argmax P(milestone<sub>t+1</sub>|milestone<sub>t</sub>)</code>,用于短期预测和异常检测。</p>
+<figure class="latent-stage-figure">
+  <div class="milestone-flow-board">
+    <div class="milestone-flow-chain" aria-label="CRAVE latent milestone prediction flow">
+      <div class="milestone-card current">
+        <h4>Current observation · real frame</h4>
+        <div class="milestone-single">
+          <img src="assets/milestone_flow/m8_real.png" alt="milestone #8 最近真实帧">
+        </div>
+        <div class="milestone-labels single"><span>real frame</span></div>
+        <div class="milestone-note">当前真实观测作为输入,先进入 DINOv3-H + 28D state 编码。</div>
+      </div>
+      <div class="milestone-arrow">→<span>encode + cluster</span></div>
+      <div class="milestone-card current">
+        <h4>Current milestone center · milestone #8</h4>
+        <div class="milestone-single">
+          <img src="assets/milestone_flow/m8_decode.png" alt="milestone #8 簇中心解码图">
+        </div>
+        <div class="milestone-labels single"><span>decoded center</span></div>
+        <div class="milestone-note">编码后的 latent 被归入当前 milestone 簇,其簇中心可解码为可视化 prototype。</div>
+      </div>
+      <div class="milestone-arrow">→<span>Milestone graph + Viterbi</span></div>
+      <div class="milestone-output-stack">
+        <div class="milestone-card goal">
+          <h4>Greedy Milestone · #13</h4>
+          <div class="milestone-single">
+            <img src="assets/milestone_flow/m13_decode.png" alt="milestone #13 簇中心解码图">
+          </div>
+          <div class="milestone-labels single"><span>decoded center</span></div>
+          <div class="milestone-note">Viterbi / max-product 完成路径上的下一 milestone。</div>
+        </div>
+        <div class="milestone-card local">
+          <h4>Max-Probability Milestone · #17</h4>
+          <div class="milestone-single">
+            <img src="assets/milestone_flow/m17_decode.png" alt="milestone #17 簇中心解码图">
+          </div>
+          <div class="milestone-labels single"><span>decoded center</span></div>
+          <div class="milestone-note">一步转移概率最大的候选 milestone。</div>
+        </div>
+      </div>
+    </div>
+    <div class="milestone-flow-caption">
+      <div><b>Greedy Milestone</b><span>在 milestone graph 上用 Viterbi / max-product 求最大完成概率路线,把路线上的下一 milestone 的 latent prototype 作为 VLA 子目标提示。</span></div>
+      <div><b>Max-Probability Milestone</b><span>从当前 milestone 出发,按 <code>argmax P(milestone<sub>t+1</sub>|milestone<sub>t</sub>)</code> 选择一步概率最大的后继,用于短期预测和异常检测。</span></div>
+    </div>
+  </div>
+  <figcaption><b>Latent milestone 预测能力</b>:这里只抽取 #8/#13/#17 三个 milestone 示意流程。当前真实帧与当前簇中心拆开展示:先由 real frame 编码并聚类得到 current milestone center,再基于该簇中心在 Recurrence Latent Milestone Graph 上分别得到 Greedy Milestone 与 Max-Probability Milestone。两个 next-milestone 候选只展示 decoded center,表示可直接作为可审查的 latent prototype。</figcaption>
+</figure>
 
-<h3>6.3 AWBC + Process Reward (决策与在线优化)</h3>
-<p>有了 task-aware latent state 和转移图,下一步是让机器人<strong>能用这个模型做决策</strong>:</p>
-<ul>
-  <li><b>AWBC 离线策略</b>:milestone 天然的 state abstraction——在几十个有语义的状态上学习"当前阶段的最优动作",样本效率远高于像素级 RL;</li>
-  <li><b>Process Reward</b>:CRAVE 的 value(进度)本身就是稠密奖励信号——当实际进度落后于转移模型预期时,给出 negative reward,让策略在线调整;</li>
-  <li><b>闭环迭代</b>:离线学→线上发现差距→收集新数据→改进策略。</li>
-</ul>
+<h3>6.3 与 VLA 架构结合: CRAVE + VLA → LMWAM</h3>
+<p>CRAVE 可以和通用 VLA 策略结合成 <b>LMWAM (Latent Milestone World Action Model)</b>:CRAVE 负责从真实 demo 中发现 latent milestone、预测下一 milestone 并给出转移概率,VLA 负责在语言、视觉历史与机器人状态条件下完成动作生成。这样把“世界模型的 milestone 预测”和“策略模型的动作执行”解耦,避免把未来目标强行生成成像素图。</p>
+<figure>
+  <img src="assets/rpvla_arch.png" alt="RPVLA Recurrence Prompt Vision Language Action Model 架构草图">
+  <figcaption><b>RPVLA (Recurrence Prompt Vision Language Action Model)</b>:这张图表达的是 CRAVE 如何作为 recurrence prompt 前端增强 VLA/PI07 类策略:概率/milestone 提示进入 VLM context,下一 milestone 的 latent prototype 经 subgoal adapter 投到 Action Expert conditioning stream,由 VLM backbone + Action Expert 生成 action chunk。</figcaption>
+</figure>
+<div class="card"><h4>CRAVE 对 PI07 类流程的额外价值</h4><ul>
+  <li><b>子任务指令自动生成</b>:按 milestone 语义排序形成“先A再B后C”的任务链,减少人工拆子任务。</li>
+  <li><b>任务元数据(质量标签)</b>:用稠密 progress 和 relative progress delta 生成质量/进度标签,替代手工评分。</li>
+  <li><b>更优子目标来源</b>:milestone 来自真实操作数据,可作为 BAGEL 子目标图像路线之外的更稳选择。</li>
+  <li><b>快速适配新任务</b>:采集目标任务 demo → CRAVE 挖结构 → VLA/PI07 类策略复用这些结构化提示。</li>
+</ul></div>
+<div class="callout warn"><b>Viterbi 的边界:</b>Viterbi 本质是动态规划解码方法,严格依赖一阶马尔可夫、观测独立、参数时不变和最优子结构等 HMM 假设。真实机器人数据往往存在长历史依赖、多状态共同影响观测、转移概率随 milestone / 策略漂移而变化等问题,因此 Viterbi 更适合作为稳定的离线解码器和伪标签生成器,而不是最终世界模型本身。下一步可以用 Viterbi 解出的 latent milestone 序列、转移概率和轨迹结果训练一个可学习的 <b>Latent Milestone World Model</b>,让模型从数据中学习更长程、更非马尔可夫的 milestone 动力学。</div>
+<figure>
+  <img src="assets/lswam_arch.png" alt="LMWAM Latent Milestone World Action Model 架构图">
+  <figcaption><b>LMWAM 架构图</b>:新的 LMWAM 将 CRAVE/Viterbi 产出的 latent milestone 数据进一步用于训练 Latent Milestone World Model,再与 VLA 的 perception-language-action 主干结合。相比只在图上做 Viterbi 搜索,LMWAM 的目标是学习可泛化的 latent milestone dynamics,并把下一 milestone 的 latent prototype / transition probability 作为策略执行的结构化条件。</figcaption>
+</figure>
+<div class="card"><h4>LMWAM 中 CRAVE 给 VLA 的输入</h4><ul>
+  <li><b>Latent milestone subgoal</b> → Action Expert 条件输入<br><span style="color:var(--text3)">下一 milestone 的簇中心 latent prototype 作为子目标提示,不依赖 BAGEL 或其他图像生成器。</span></li>
+  <li><b>Transition probability</b> → VLM context / 置信度提示<br><span style="color:var(--text3)">把“当前 milestone、候选 next milestone、路径概率”作为可解释的规划上下文注入 VLA。</span></li>
+</ul></div>
+<p style="margin-top:12px">简单说: <b>LMWAM = CRAVE 的 latent milestone world model + VLA 的 action model</b>。CRAVE 不替代 VLA,而是为 VLA 提供可审计、可规划、来自真实数据的 latent milestone 级提示;同时它也能为 PI07 类训练流程提供子任务指令、任务质量标签与规划先验。</p>
 
-<h3>6.4 与 π0.7 式 VLA 策略的天然互补: CRAVE 自动结构化 → π0.7 通用执行</h3>
-<p>π0.7 展示了强大的组合泛化与跨本体迁移能力,但其子任务边界需人工定义、子目标图像依赖 BAGEL 生成模型——新任务适配成本高。CRAVE 正好补上这两环,它本身就是为<strong>自动发现任务结构</strong>而设计的。两者的结合是非常自然的互补:</p>
-<div class="cols2">
-  <div class="col good" style="flex:1.4"><h4>🔄 CRAVE 为 π0.7 提供的输入</h4><ul>
-    <li><b>Milestone 关键帧</b> → 替代 BAGEL 子目标图像<br><span style="color:var(--text3)">自动从数据中挖掘每个任务阶段的关键帧,来自真实操作而非生成器幻想。</span></li>
-    <li><b>Milestone 语义排序</b> → 子任务指令自动生成<br><span style="color:var(--text3)">按进度排序形成"先A再B后C"的任务链,直接作为 π0.7 的子任务文本指令。</span></li>
-    <li><b>Value / advantage</b> → 任务元数据(质量标签)<br><span style="color:var(--text3)">稠密 value 和 relative advantage 替代手工打标的 1-5 分质量评分。</span></li>
-    <li><b>Recurrence State Graph</b> → 规划先验<br><span style="color:var(--text3)">转移概率图告诉 π0.7"当前在 milestone 3,下一步 90% 概率进 4"。</span></li>
-  </ul></div>
-  <div class="col bad" style="flex:1"><h4>🎯 结合后的能力</h4><ul>
-    <li><b>全自动流程</b>:原始操作视频 → CRAVE 自动拆结构 → π0.7 通用执行</li>
-    <li><b>无需生成模型</b>:milestone 来自真实数据,不需要 BAGEL</li>
-    <li><b>无手工标注</b>:任务分几步、质量几分,全自动产出</li>
-    <li><b>快速适配新任务</b>:采集操作数据 → CRAVE 挖结构 → 喂给 π0.7</li>
-  </ul></div>
-</div>
-<p style="margin-top:12px">简单说: <b>CRAVE 是 π0.7 的结构化前端</b>。π0.7 擅长"给定清晰任务结构后通用执行",CRAVE 擅长"从原始数据中自动发现任务结构"。两者结合,构成从原始数据到通用机器人执行的完整自动化 pipeline。</p>
-
-<h3>6.5 为什么要这样做</h3>
+<h3>6.4 为什么要这样做</h3>
 <div class="cols2">
   <div class="col good"><h4>🎯 核心价值</h4><ul>
-    <li><b>非两端</b>:CRAVE 的 latent state 既不是过细的像素,也不是无保障的"物理",而是任务语义中介——<b>看得见、分得开、预测得了</b></li>
+    <li><b>非两端</b>:CRAVE 的 latent milestone 既不是过细的像素,也不是无保障的"物理",而是任务语义中介——<b>看得见、分得开、预测得了</b></li>
     <li><b>全自动</b>:从原始操作视频到世界模型,不需要人工标注/奖励设计/任务编程——数据驱动</li>
     <li><b>可解释</b>:milestone 对应可理解的任务阶段,转移图可审计——"为什么决策?因为模型预测有80%概率下一步是这个"</li>
     <li><b>可迁移</b>:视觉基座(DINOv3)和共现聚类机制跨本体跨场景复用</li>
   </ul></div>
   <div class="col bad"><h4>📅 时间线</h4><ul>
-    <li><b>已完成</b>:CRAVE v2.4 多域 milestone 挖掘 + value 解码 + 跨域推理 ✓</li>
-    <li><b>2026 Q3</b>:多模态融合 + Recurrence State Graph 首版</li>
+    <li><b>已完成</b>:CRAVE v2.4 多域 milestone 挖掘 + progress 解码 + 跨域推理 ✓</li>
+    <li><b>2026 Q3</b>:多模态融合 + Recurrence Latent Milestone Graph 首版</li>
     <li><b>2026 Q4</b>:AWBC 离线策略原型</li>
     <li><b>2027 H1</b>:Process Reward 在线闭环</li>
   </ul></div>
@@ -366,6 +442,6 @@ a.link{color:var(--accent3);text-decoration:none;border-bottom:1px dashed var(--
 </main>
 </div>
 
-<footer>CRAVE 方法汇报 · 零训练跨 episode 复现度 → milestone → 稠密 value · deepdive_kai0</footer>
+<footer>CRAVE 方法汇报 · 零训练跨 episode 复现度 → milestone → 稠密 progress · deepdive_kai0</footer>
 </body>
 </html>
