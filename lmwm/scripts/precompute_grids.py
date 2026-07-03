@@ -30,6 +30,7 @@ def main() -> None:
     ap.add_argument("--shard", type=int, default=10000)
     ap.add_argument("--out_dir", default="lmwm/data/grid_cache", type=Path)
     ap.add_argument("--dino_path", default=None, help="override DINOv3-H weights dir (for gf3)")
+    ap.add_argument("--gated_dino", action="store_true", help="use pure-torch gated-H encoder (gf3, no transformers-dinov3)")
     ap.add_argument("--device", default="cuda:0")
     args = ap.parse_args()
 
@@ -37,7 +38,15 @@ def main() -> None:
     n = len(z["current_milestone"])
     hi = n if args.hi < 0 else min(args.hi, n)
     eps = z["episode_id"].astype(np.int64); ts = z["t"].astype(np.int64)
-    enc = load_encoder("dinov3-h", device=args.device, **({"path": args.dino_path} if args.dino_path else {}))
+    if args.gated_dino:
+        from dinov3h_gated import DINOv3HGated
+        _enc = DINOv3HGated(args.dino_path, device=args.device)
+        def encode(imgs):  # already (N,256,1280)
+            return _enc.encode_grid(imgs).astype(np.float16)
+    else:
+        _enc = load_encoder("dinov3-h", device=args.device, **({"path": args.dino_path} if args.dino_path else {}))
+        def encode(imgs):
+            return _enc.encode_grid(imgs).astype(np.float16).reshape(len(imgs), 1280, 256).transpose(0, 2, 1)
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     # contiguous [s:e] shards saved as .npy (memmap-able; row r lives in the shard whose
@@ -50,7 +59,7 @@ def main() -> None:
             continue
         rows = np.arange(s, e)
         imgs = read_enc(args.dataset_root, args.camera, eps[rows], ts[rows], 256)
-        grid = enc.encode_grid(imgs).astype(np.float16).reshape(len(rows), 1280, 256).transpose(0, 2, 1)  # [r,256,1280]
+        grid = encode(imgs)  # [r,256,1280] fp16
         np.save(out, grid)
         print(f"saved {out.name} [{s}:{e}] {grid.shape}", flush=True)
     print(f"DONE range [{args.lo}:{hi}] on {args.device}", flush=True)
