@@ -122,12 +122,13 @@ def main() -> None:
         Ex = torch.from_numpy(extra); Md = torch.from_numpy(med); Y = torch.from_numpy(y)
         for s in range(args.steps):
             bi = ti[np.random.randint(0, len(ti), args.bs)]
-            g = torch.from_numpy(store.gather(bi).astype(np.float32)).to(dev)
-            lg, pr = model(g, Ex[bi].to(dev))
-            per = F.cross_entropy(lg, Y[bi].to(dev), reduction="none")   # H4: CVaR-CE (mean+variance)
-            k = max(1, int(0.1 * len(per)))
-            ce = 0.5 * per.mean() + 0.5 * torch.topk(per, k).values.mean()
-            loss = ce + 5.0 * (1 - (pr * Md[bi].to(dev)).sum(-1)).mean()
+            g = torch.from_numpy(store.gather(bi)).to(dev)              # fp16 grid; autocast handles compute
+            with torch.autocast("cuda", dtype=torch.bfloat16):         # bf16 mixed precision (H20 ~4x faster)
+                lg, pr = model(g.float(), Ex[bi].to(dev))
+                per = F.cross_entropy(lg, Y[bi].to(dev), reduction="none")   # H4: CVaR-CE (mean+variance)
+                k = max(1, int(0.1 * len(per)))
+                ce = 0.5 * per.mean() + 0.5 * torch.topk(per, k).values.mean()
+                loss = ce + 5.0 * (1 - (pr * Md[bi].to(dev)).sum(-1)).mean()
             opt.zero_grad(); loss.backward(); opt.step(); sch.step()
             if s % 500 == 0:
                 print(f"seed{args.init_seed} step {s} loss {loss.item():.3f}", flush=True)
@@ -149,9 +150,10 @@ def main() -> None:
         with torch.no_grad():
             for s in range(0, len(vi), 512):
                 b = vi[s:s + 512]
-                g = torch.from_numpy(store.gather(b).astype(np.float32)).to(dev)
-                lg, pr = m(g, Ex[b].to(dev))
-                pp.append(F.softmax(lg, -1).cpu().numpy()); gg.append(pr.cpu().numpy())
+                g = torch.from_numpy(store.gather(b)).to(dev)
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    lg, pr = m(g.float(), Ex[b].to(dev))
+                pp.append(F.softmax(lg.float(), -1).cpu().numpy()); gg.append(F.normalize(pr.float(), dim=-1).cpu().numpy())
         pp = np.concatenate(pp); gg = np.concatenate(gg)
         probs = pp if probs is None else probs + pp
         protos = gg if protos is None else protos + gg
