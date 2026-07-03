@@ -126,7 +126,7 @@ def main() -> None:
     print("building (latent, frame) pairs ...", flush=True)
     lat, tgt = build_pairs_enc(args.dataset_root, args.camera, encode_pooled, args.n, args.res)
     X = torch.from_numpy(lat); Y = torch.from_numpy(tgt.astype(np.float32) / 127.5 - 1).permute(0, 3, 1, 2).contiguous()
-    ntr = len(X) - 512
+    ntr = max(1, len(X) - min(512, len(X) // 5))
     print(f"{len(X)} pairs", flush=True)
 
     net = UNet(1280, args.base).to(dev)
