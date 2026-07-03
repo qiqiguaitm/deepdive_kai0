@@ -72,13 +72,24 @@ class DINOv3HGated(nn.Module):
             pp.requires_grad_(False)
         self.device, self.dtype = device, dtype
 
-    @torch.no_grad()
-    def forward(self, px):
+    def _forward(self, px):
         x = self.embeddings(px)
         pos = self.rope_embeddings(px)
         for L in self.layer:
             x = L(x, pos)
         return self.norm(x)
+
+    @torch.no_grad()
+    def forward(self, px):
+        return self._forward(px)
+
+    def encode_pooled_tensor(self, x01):
+        """Differentiable pooled encode. x01: (B,3,H,W) in [0,1]. Returns (B,1280) pooled."""
+        import torch.nn.functional as _F
+        if x01.shape[-1] != 256:
+            x01 = _F.interpolate(x01, size=(256, 256), mode="bilinear", align_corners=False)
+        x = ((x01.to(self.dtype) - self.mean.to(self.dtype)) / self.std.to(self.dtype))
+        return self._forward(x)[:, self.n_prefix:].mean(1).float()
 
     @torch.no_grad()
     def encode_grid(self, imgs, bs: int = 64) -> np.ndarray:
