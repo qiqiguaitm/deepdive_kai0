@@ -1,23 +1,22 @@
 #!/usr/bin/env python
-"""把两套 CRAVE 标签写成两个 AE 训练数据集(替换 stage_progress_gt 列)。
+"""把两套 CRAVE 标签写成两个 AE 训练数据集(kai0_base + stage_progress_gt 列)。
 
-基于 advantage_q5(已含 stage_progress_gt 列 + 完整 meta),symlink meta/+videos/,
-data/ parquet 逐 ep 把 stage_progress_gt 覆盖为 CRAVE 标签(native-fps)。
-缺 CRAVE 标签的 ep 回退保留原(人工)列。
+**统一以 kai0_base 为底**(干净、不带旧 AE 输出列),symlink meta/+videos/,
+data/ parquet 逐 ep 加 stage_progress_gt = CRAVE 标签(native-fps)。
+(已验证 advantage_q5 与 kai0_base 帧逐位一致,故标签对齐正确。)
 输出:kai0/data/Task_A/self_built/crave_stage_{A,B}/
 Run: /home/tim/miniconda3/envs/srpo/bin/python crave/experiments/write_crave_stage_datasets.py
 """
 from __future__ import annotations
 
 import os
-import shutil
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 REPO = Path(os.environ.get("REPO", "/home/tim/workspace/deepdive_kai0"))
-SRC = REPO / "kai0/data/Task_A/self_built/advantage_q5"
+SRC = REPO / "kai0/data/Task_A/kai0_base"
 LAB = REPO / "temp/crave_ae_labels"
 OUT = REPO / "kai0/data/Task_A/self_built"
 CSQ = 1000
@@ -51,7 +50,8 @@ def main():
                     xi = np.linspace(0, 1, len(df)); xa = np.linspace(0, 1, len(v))
                     df["stage_progress_gt"] = np.interp(xi, xa, v).astype(np.float32); n_mismatch += 1
             else:
-                n_fb += 1                                  # 无 CRAVE 标签 → 保留原(人工)
+                df["stage_progress_gt"] = np.linspace(0, 1, len(df)).astype(np.float32)  # 无标签 → 线性兜底(全量已覆盖, 不触发)
+                n_fb += 1
             outp = dst / "data" / p.parent.name / p.name
             outp.parent.mkdir(parents=True, exist_ok=True)
             df.to_parquet(outp)
