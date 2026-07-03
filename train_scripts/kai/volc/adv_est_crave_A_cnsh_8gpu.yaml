@@ -72,7 +72,7 @@ Entrypoint: |
   [ -f "$TRAIN/norm_stats.json" ]     || { echo "FATAL: norm_stats missing $TRAIN" >&2; exit 13; }
   python -c "import pyarrow.parquet as pq,glob,sys; f=sorted(glob.glob('$TRAIN/data/chunk-000/*.parquet'))[0]; cols=[c.name for c in pq.read_schema(f)]; sys.exit(0 if 'stage_progress_gt' in cols else 13)" || { echo "FATAL: stage_progress_gt missing" >&2; exit 13; }
   # 视频软链能解析出真实 mp4 (crave/videos→kai0_advantage/videos→kai0_base)
-  V=$(find -L "$TRAIN/videos/chunk-000/observation.images.top_head" -name '*.mp4' 2>/dev/null | head -1)
+  V=$(find -L "$TRAIN/videos/chunk-000/observation.images.top_head" -name '*.mp4' -print -quit 2>/dev/null)
   [ -n "$V" ] && [ -e "$V" ] || { echo "FATAL: crave video symlink 断链 (videos→kai0_base 失效?)" >&2; exit 13; }
   [ -f "$INIT/model.safetensors" ] || { echo "FATAL: pi05_base pytorch init missing $INIT" >&2; exit 13; }
   echo "[$(date)] preflight OK (crave_stage_A + stage_progress_gt + norm + video resolve + pi05_base)"
