@@ -88,13 +88,30 @@
 | pooled(主线) | **0.336** | 0.831 | 0.062 | 低 |
 | patch-grid | 0.292（↓,故主线否决分类头） | **0.856** | **0.027** | 全量缓存 ~130GB |
 
-## 5.4 推荐:混合方案(pooled 分类头 + patch-grid 子目标/解码)
+## 5.4 当前:并行支持三种解码方案(暂不收紧)
 
-- **milestone-ID 分类头**:保持 **pooled**(top1 0.336 > patch 0.292,便宜)。
-- **subgoal 表示 + 可视化解码**:用 **patch-grid**(cos 0.856 略优,解码 L1 0.027 远优,且 LaWM 对齐)。
-- 即把 patch-grid 解码作为解码器**第 ③ 选项**(最锐、空间分辨),补进 [best_decoder_delivery](best_decoder_delivery_20260703.md) 的 flow-fixed / dec_v2 之上;代价是 patch 特征需即时编码(单帧无 130GB 问题,仅全量缓存才有)。
+按需保留三种解码方案,后续需要时再收紧:
 
-**待办(可选,GPU 工作)**:① 在 kai0_base 测试集 ep 上渲 patch-decode vs flow-fixed vs dec_v2 三方对照,确认 patch 视觉最锐;② 把 patch-grid 预测接主线 milestone 视频。
+| 方案 | 输入 | 特性 | ckpt |
+|---|---|---|---|
+| **pooled → flow fixed-noise** | pooled 1280 | 外观最锐(folds/纹理),但空间会漂 | `dec_best.pt`+seed=0 |
+| **pooled → dec_v2 (L1)** | pooled 1280 | 稳、糊、确定性兜底 | `dec_v2.pt` |
+| **patch-grid decode** | patch-grid 16×16×1280 | **空间保真**(臂/衣/夹子位置对),LaWM 对齐 | `patch_decoder/patch_dec.pt` |
+
+milestone-ID 分类头仍建议保持 pooled(top1 0.336 > patch 0.292);patch 特征即时编码即可(单帧无 130GB 问题,仅全量缓存才有)。
+
+### 三方实测(kai0_base 留出测试集 ep8,self-recon,`make_decoder_compare3_vis.py`)
+
+| 解码器 | 像素 L1(↓保真) | 锐度 | 视觉(见 `assets/decoder_compare3_kai0base_testep8.{png,mp4}`) |
+|---|---|---|---|
+| **patch-grid** | **0.028** | 429 | **空间最保真**:机械臂/衣物/导轨橙夹位置都对 |
+| pooled→flow fixed | 0.097 | **638** | 外观最锐(纹理/褶皱),但空间布局漂(pooled 丢空间) |
+| pooled→dec_v2 | 0.059 | 450 | 最糊最稳 |
+| *real* | — | *1327* | — |
+
+**要点**:pooling 丢掉空间信息 → flow/dec_v2 只能靠 pooled 向量,空间会漂/糊;**patch-grid 保留 16×16 空间 token → 知道"东西在哪"**,像素 L1 最低(0.028)、空间最保真。flow 的高锐度是合成纹理(不像素对齐,L1 反高 0.097)。**三者各有所长,按用途选**:要空间保真→patch;要外观锐利→flow;要绝对稳/省→dec_v2。
+
+**可选后续**:把 patch-grid 预测(`predict_deploy_patch.py`,deploy grid-cos 0.653)接主线 milestone 视频,做预测态(非 self-recon)三方对照。
 
 ## 6. 产物索引
 - LaWM 对齐:`scripts/align_lawm_forecast.py` → `outputs/lawm_align/summary.json`;`scripts/lawm_adjacent_baseline.py`
