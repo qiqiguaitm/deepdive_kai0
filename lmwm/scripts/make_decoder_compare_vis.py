@@ -30,6 +30,7 @@ from make_episode_native_video import label  # noqa: E402
 
 def main() -> None:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--video", default="", help="specific episode mp4; overrides --root glob (use for held-out test ep)")
     ap.add_argument("--root", default="kai0/data/Task_A/vis_base/v4/2026-04-23-v4")
     ap.add_argument("--camera", default="observation.images.top_head")
     ap.add_argument("--graph_npz", default="lmwm/data/recurrence_graphs/kai0base_dinov3h/recurrence_graph_v2.npz")
@@ -59,9 +60,13 @@ def main() -> None:
     dec_fx, R2, tag = load_any_decoder(args.flow, dev)   # flow branch defaults to seed=0 (fixed-noise)
     print(f"decoders: dec_v2 (L1) vs {Path(args.flow).stem} [{tag}]", flush=True)
 
-    vids = (sorted(glob.glob(str(Path(args.root) / f"videos/chunk-*/{args.camera}/episode_*.mp4")))
-            or sorted(glob.glob(str(Path(args.root) / f"*/videos/chunk-*/{args.camera}/episode_*.mp4"))))
-    vid = vids[0]; print(f"episode: {vid}", flush=True)
+    if args.video:
+        vid = args.video
+    else:
+        vids = (sorted(glob.glob(str(Path(args.root) / f"videos/chunk-*/{args.camera}/episode_*.mp4")))
+                or sorted(glob.glob(str(Path(args.root) / f"*/videos/chunk-*/{args.camera}/episode_*.mp4"))))
+        vid = vids[0]
+    print(f"episode: {vid}", flush=True)
     cap = cv2.VideoCapture(vid); frames = []
     while len(frames) < args.max_frames:
         okf, im = cap.read()
