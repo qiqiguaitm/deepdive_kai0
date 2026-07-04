@@ -8,7 +8,7 @@ and the value/advantage curves below.
 
 Run (from repo root, local GPU):
   CUDA_VISIBLE_DEVICES=0 kai0/.venv/bin/python train_scripts/kai/data/viz_ae_value_episode.py \
-      --src kai0/data/Task_A/vis_base/v3/2026-04-30-v3 --ep 11 \
+      --src kai0/data/Task_A/vis_base/v3/2026-05-05-v3 --ep 11 \
       --ckpt kai0/checkpoints/ADVANTAGE_TORCH_VIS_AWBC/adv_est_vis_v1/100000 \
       --config ADVANTAGE_TORCH_VIS_AWBC
 """
@@ -30,7 +30,7 @@ CAMS = ("top_head", "hand_left", "hand_right")
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--src", required=True, help="lerobot dataset dir (e.g. .../vis_base/v3/2026-04-30-v3)")
+    ap.add_argument("--src", required=True, help="lerobot dataset dir (e.g. .../vis_base/v3/2026-05-05-v3)")
     ap.add_argument("--ep", type=int, required=True)
     ap.add_argument("--ckpt", required=True, help="AE ckpt step dir (…/adv_est_vis_v1/100000)")
     ap.add_argument("--config", default="ADVANTAGE_TORCH_VIS_AWBC")

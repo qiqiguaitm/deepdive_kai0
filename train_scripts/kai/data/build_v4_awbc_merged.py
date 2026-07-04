@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Merge vis_base/v4 (13 dates) + vis_dagger/v4 (12 dates) → A_v4_base_dagger. action≠state (gripper-from-master). orig: vis_base/v3 (≤2026-05-18, 12 dates) + vis_dagger/v3 (8 dates) → one lerobot dataset
-`self_built/vis_awbc_merged` for the vis-native AWBC pipeline (stage-label → AE → value → AWBC).
+"""Merge vis_base/v4 (13 dates) + vis_dagger/v4 (12 dates) → A_v4_base_dagger.
 
 - Front-trimmed v3 sources (depth already dropped). Contiguous renumber episode_index 0..N-1.
 - Videos symlinked to source realpath (no re-encode). Single chunk-000, chunks_size=max(1000,N).
@@ -9,7 +8,20 @@
   task_index get added by the LATER pipeline stages: infer_dagger → eval.py → discretize_advantage).
 - Computes norm_stats.json (action_dim=32, pi05).
 
-Usage: kai0/.venv/bin/python train_scripts/kai/data/build_vis_awbc_merged.py [--dry-run] [--no-norm]
+Gripper force-relabel (dims 6,13), default ON (--gripper-snap-thresh, --no-gripper-snap):
+  The BASE dates (≤2026-05-18) carry gripper action==state EXACTLY (verified allclose on
+  base/v4/2026-04-24, 05-08) — v2→v4 only rescaled the RANGE (make_v4_gripper_remap: action
+  reuses the STATE affine), so it never made gripper action≠state. A position-controlled
+  gripper commanded to its measured cloth-width position has ~0 position error → ~0 holding
+  force → drops the cloth. The DAGGER dates already carry real gripper-from-master action,
+  which is bimodal: gripping → action pushed to ~0 (measured: 97-99% of grip frames <5mm),
+  open → action≈state. We reproduce that on the whole merge by snapping gripper ACTION < T → 0
+  (T=8mm default; new-data transition sits at 5-15mm, above the 5mm deploy close-snap). Result:
+  a uniform action≠state gripper convention (grip = command past closure → force), near-idempotent
+  on the dagger dates whose grip commands are already ~0. Source v4 parquet is NOT modified.
+
+Usage: kai0/.venv/bin/python train_scripts/kai/data/build_v4_awbc_merged.py [--dry-run] [--no-norm]
+       [--gripper-snap-thresh 0.008] [--no-gripper-snap]
 """
 from __future__ import annotations
 import argparse, json, os, shutil, sys
@@ -32,9 +44,27 @@ FPS = 30
 PROMPT = "Flatten and fold the cloth."
 CHUNK = 0
 # base v3 dates ≤ 2026-05-18 (12), then dagger v3 dates (8) — date order within each group
-BASE_DATES = ["2026-04-23-v4","2026-04-24-v4","2026-04-25-v4","2026-04-28-v4","2026-04-29-v4","2026-04-30-v4","2026-05-06-v4","2026-05-07-v4","2026-05-08-v4","2026-05-09-v4","2026-05-10-v4","2026-05-18-v4","2026-06-04-v4"]
+BASE_DATES = ["2026-04-23-v4","2026-04-24-v4","2026-04-25-v4","2026-04-28-v4","2026-04-29-v4","2026-05-05-v4","2026-05-06-v4","2026-05-07-v4","2026-05-08-v4","2026-05-09-v4","2026-05-10-v4","2026-05-18-v4","2026-06-04-v4"]
 DAGGER_DATES = ["2026-05-29-v4","2026-06-01-v4","2026-06-02-v4","2026-06-03-v4","2026-06-04-v4","2026-06-05-v4","2026-06-08-v4","2026-06-09-v4","2026-06-10-v4","2026-06-16-v4","2026-06-17-v4","2026-06-23-v4"]
 KEEP_COLS = ["observation.state", "action", "timestamp", "frame_index", "episode_index", "index", "task_index"]
+GRIP_DIMS = [6, 13]  # dual-arm gripper action dims
+
+
+def snap_gripper_force(df: pd.DataFrame, thresh: float) -> int:
+    """In-place: gripper ACTION < thresh → 0 (command past closure → holding force).
+    Leaves the open side (action ≥ thresh) and all arm dims untouched. Returns #frames
+    changed. No-op columns / missing action → 0."""
+    if thresh <= 0 or "action" not in df.columns:
+        return 0
+    a = np.stack(df["action"].to_numpy()).astype(np.float32)  # [T, D]
+    g = a[:, GRIP_DIMS]
+    m = g < thresh
+    n = int(m.sum())
+    if n:
+        g[m] = 0.0
+        a[:, GRIP_DIMS] = g
+        df["action"] = list(a)
+    return n
 
 
 def list_eps():
@@ -66,7 +96,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--no-norm", action="store_true")
+    ap.add_argument("--gripper-snap-thresh", type=float, default=0.008,
+                    help="gripper ACTION < thresh (m) → 0 (force-relabel); 0 disables")
+    ap.add_argument("--no-gripper-snap", action="store_true",
+                    help="disable the gripper force-relabel (keep raw action, incl. base action==state)")
     a = ap.parse_args()
+    grip_thresh = 0.0 if a.no_gripper_snap else a.gripper_snap_thresh
 
     items = list_eps()
     nb = sum(1 for x in items if x[2] == "base"); nd = sum(1 for x in items if x[2] == "dagger")
@@ -79,11 +114,14 @@ def main():
     (OUT / "data" / f"chunk-{CHUNK:03d}").mkdir(parents=True)
     (OUT / "meta").mkdir()
 
+    print(f"gripper force-snap: {'OFF' if grip_thresh <= 0 else f'action<{grip_thresh*1000:.0f}mm → 0'}", flush=True)
     eps_meta, stats_out = [], []
     total_frames = 0
+    grip_changed = 0
     for new_ep, (sd, src_ep, grp) in enumerate(items):
         df = pd.read_parquet(sd / "data" / f"chunk-{CHUNK:03d}" / f"episode_{src_ep:06d}.parquet")
         df = df[[c for c in KEEP_COLS if c in df.columns]].copy()  # drop intervention/extra → uniform schema
+        grip_changed += snap_gripper_force(df, grip_thresh)
         n = len(df)
         df["episode_index"] = np.int64(new_ep)
         df["index"] = np.arange(total_frames, total_frames + n, dtype=np.int64)
@@ -126,6 +164,10 @@ def main():
             f.write(json.dumps(st) + "\n")
     (OUT / "meta" / "tasks.jsonl").write_text(json.dumps({"task_index": 0, "task": PROMPT}) + "\n")
     print(f"  merged {len(items)} ep / {total_frames} frames -> {OUT}", flush=True)
+    if grip_thresh > 0:
+        gt = total_frames * len(GRIP_DIMS)
+        print(f"  gripper force-snap: {grip_changed}/{gt} grip-action values → 0 "
+              f"({100*grip_changed/max(gt,1):.1f}%)", flush=True)
 
     if not a.no_norm:
         from norm_stats_from_dataset import compute_norm_stats

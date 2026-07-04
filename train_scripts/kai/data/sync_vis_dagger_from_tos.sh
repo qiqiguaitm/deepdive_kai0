@@ -39,6 +39,17 @@ flock -n 9 || { echo "[$(ts)] previous run still active, skip" >>"$LOG"; exit 0;
 [ -f "$LOG" ] && [ "$(stat -c%s "$LOG" 2>/dev/null || echo 0)" -gt 5242880 ] && mv "$LOG" "$LOG.old"
 [ -x "$TOSUTIL" ] || { echo "[$(ts)] ERROR: tosutil missing at $TOSUTIL" >>"$LOG"; exit 1; }
 
+# 护栏: 清理扁平 <date> 残留 + tosutil cp -r 嵌套自重复 vN/<date>/<date>
+#       (再拷贝已存在的日期目录时 cp -r 会把源再嵌一层; 见 2026-07-04 gf0 vis_base 6-18/26/28)。
+for fd in "$DST_ROOT"/2026-*-v*; do
+  [ -d "$fd" ] || continue
+  echo "[$(ts)] WARN 清理 vis_dagger 根扁平残留: $(basename "$fd")" >>"$LOG"; rm -rf "$fd"
+done
+for nd in "$DST_ROOT"/v*/2026-*-v*/2026-*-v*; do
+  [ -d "$nd" ] || continue
+  echo "[$(ts)] WARN 清理嵌套自重复: ${nd#$DST_ROOT/}" >>"$LOG"; rm -rf "$nd"
+done
+
 # ---- 自动发现 TOS dagger/ 下所有版本目录 (v2 v3 v4 ...) ----
 versions=$("$TOSUTIL" ls -d "$SRC/" 2>/dev/null | grep -oE '/dagger/v[0-9]+(\.[0-9]+)?/' | grep -oE 'v[0-9]+(\.[0-9]+)?' | sort -u)
 if [ -z "$versions" ]; then echo "[$(ts)] ERROR: TOS dagger/ 下未发现版本目录 (cred/network?)" >>"$LOG"; exit 1; fi
