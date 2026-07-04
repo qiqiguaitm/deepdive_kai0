@@ -1,0 +1,149 @@
+#!/usr/bin/env python
+"""Optimize the patch-grid subgoal predictor for VLA (û_T). Builds BOTH horizons the user wants:
+  --mode nearfuture  : target = grid H steps ahead in the 3Hz index (LaWM-style, dynamics-aware)
+  --mode milestone   : target = next-stage medoid grid (semantic milestone+1)
+
+For each, trains forward-from-current (the mechanism the pooled path won with; the old deploy CNN
+skipped it): inverse(g_t,g_f)->code (teacher); forward(g_t,code)->g_f; predm(g_t)->code (DEPLOY, no
+future peek). Reports oracle-cos (true code), DEPLOY-cos (predm code), persistence-cos, per code_dim.
+
+Beats the unconditional CNN baseline (milestone deploy grid-cos 0.653). One (mode,code_dim) per GPU
+for parallel sweep across gf3 8 + local 2.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "crave/src"))
+from train_lawm_patch import load_index, read_imgs, InverseEnc, ForwardDec  # noqa: E402
+from crave.encoders import load_encoder  # noqa: E402
+
+
+class PredM(nn.Module):
+    """current grid -> code (deploy predictor, no future peek). Same conv trunk as InverseEnc but
+    single-grid input."""
+    def __init__(self, din, code_dim, hid=256):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(din, hid, 3, 2, 1), nn.GroupNorm(8, hid), nn.GELU(),   # 16->8
+            nn.Conv2d(hid, hid, 3, 2, 1), nn.GroupNorm(8, hid), nn.GELU(),   # 8->4
+        )
+        self.head = nn.Linear(hid, code_dim); self.ln = nn.LayerNorm(code_dim)
+
+    def forward(self, gt):
+        return self.ln(self.head(self.conv(gt).mean((2, 3))))
+
+
+def build_pairs(E, FR, Fn, proto, mode, horizon, val_eps, seed):
+    """Return train/val lists of (cur_gidx, future_gidx)."""
+    rng = np.random.default_rng(seed)
+    tr, va = [], []
+    for ep in np.unique(E):
+        loc = np.where(E == ep)[0]; order = loc[np.argsort(FR[loc])]
+        tgt = va if ep in val_eps else tr
+        if mode == "nearfuture":
+            for i in range(len(order) - horizon):
+                tgt.append((int(order[i]), int(order[i + horizon])))
+        else:  # milestone: (cur-stage last frame, next-stage medoid)
+            seq = (Fn[order] @ proto.T).argmax(1)
+            ch = np.where(np.diff(seq) != 0)[0] + 1
+            st = np.concatenate([[0], ch]); en = np.concatenate([ch, [len(seq)]])
+            reps = []
+            for s, e in zip(st, en):
+                m = int(seq[s]); sub = order[s:e]; med = sub[(Fn[sub] @ proto[m]).argmax()]
+                reps.append((int(order[e - 1]), int(med)))
+            for i in range(len(reps) - 1):
+                tgt.append((reps[i][0], reps[i + 1][1]))
+    rng.shuffle(tr); rng.shuffle(va)
+    return tr, va
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--mode", choices=["nearfuture", "milestone"], required=True)
+    ap.add_argument("--horizon", type=int, default=5, help="nearfuture: steps ahead in 3Hz index (5≈1.7s)")
+    ap.add_argument("--code_dim", type=int, default=64)
+    ap.add_argument("--feature_dir", default="temp/crave_full_dinov3h", type=Path)
+    ap.add_argument("--dataset_root", default="kai0/data/Task_A/kai0_base", type=Path)
+    ap.add_argument("--camera", default="observation.images.top_head")
+    ap.add_argument("--n_train", type=int, default=12000)
+    ap.add_argument("--n_val", type=int, default=1200)
+    ap.add_argument("--steps", type=int, default=8000)
+    ap.add_argument("--out", default="", help="json out path; default derived from mode/horizon/code_dim")
+    ap.add_argument("--seed", type=int, default=2026)
+    ap.add_argument("--device", default="cuda")
+    args = ap.parse_args()
+    dev = args.device
+    tag = f"{args.mode}{'_h'+str(args.horizon) if args.mode=='nearfuture' else ''}_cd{args.code_dim}"
+    out = Path(args.out) if args.out else Path(f"lmwm/outputs/subgoal_opt/{tag}.json")
+
+    E, FR, Fn = load_index(args.feature_dir)
+    proto = np.load("lmwm/data/recurrence_graphs/kai0base_dinov3h/recurrence_graph.npz")["prototype_table"].astype(np.float32)
+    rng = np.random.default_rng(args.seed); eps = np.unique(E); rng.shuffle(eps)
+    val_eps = set(eps[:max(1, int(round(len(eps) * 0.2)))].tolist())
+
+    tr, va = build_pairs(E, FR, Fn, proto, args.mode, args.horizon, val_eps, args.seed)
+    tr = tr[:args.n_train]; va = va[:args.n_val]
+    uniq = sorted(set([g for p in tr + va for g in p])); u2k = {g: k for k, g in enumerate(uniq)}
+    print(f"[{tag}] {len(tr)} train + {len(va)} val pairs, {len(uniq)} unique frames", flush=True)
+
+    enc_imgs, _ = read_imgs(args.dataset_root, args.camera, E, FR, np.array(uniq), 256, 128)
+    enc = load_encoder("dinov3-h", device=dev)
+    grids = enc.encode_grid(enc_imgs).astype(np.float32); din = grids.shape[1]
+    gmu, gsd = grids.mean(), grids.std() + 1e-6
+    GZ = torch.from_numpy(((grids - gmu) / gsd).astype(np.float32))
+
+    tra = torch.from_numpy(np.array([u2k[c] for c, _ in tr])); trb = torch.from_numpy(np.array([u2k[n] for _, n in tr]))
+    vaa = np.array([u2k[c] for c, _ in va]); vab = np.array([u2k[n] for _, n in va])
+
+    inv = InverseEnc(din, args.code_dim).to(dev); fwd = ForwardDec(din, args.code_dim).to(dev)
+    predm = PredM(din, args.code_dim).to(dev)
+    o1 = torch.optim.AdamW(list(inv.parameters()) + list(fwd.parameters()), lr=2e-4, weight_decay=1e-5)
+    o2 = torch.optim.AdamW(predm.parameters(), lr=2e-4, weight_decay=1e-5)
+    print(f"[{tag}] training inverse/forward + deploy predm ...", flush=True)
+    for step in range(args.steps):
+        sel = torch.randint(0, len(tra), (32,))
+        gt = GZ[tra[sel]].to(dev); gf = GZ[trb[sel]].to(dev)
+        code = inv(gt, gf); rec = fwd(gt, code)
+        l1 = F.smooth_l1_loss(rec, gf, beta=1.0)
+        o1.zero_grad(); l1.backward(); o1.step()
+        # deploy predictor: predict the (detached) teacher code from current only
+        rec2 = fwd(gt, predm(gt)); l2 = F.smooth_l1_loss(rec2, gf, beta=1.0)
+        o2.zero_grad(); l2.backward(); o2.step()
+    inv.eval(); fwd.eval(); predm.eval()
+
+    def cos(a, b): return (a * b).sum(1) / (np.linalg.norm(a, axis=1) * np.linalg.norm(b, axis=1) + 1e-8)
+    co, cd_, cp = [], [], []
+    with torch.no_grad():
+        for s in range(0, len(vaa), 256):
+            gt = GZ[vaa[s:s + 256]].to(dev); gf = GZ[vab[s:s + 256]].to(dev)
+            oracle = fwd(gt, inv(gt, gf)); deploy = fwd(gt, predm(gt))
+            f = lambda x: (x.cpu().numpy() * gsd + gmu).reshape(len(x), -1)
+            gtr = f(gf)
+            co.append(cos(f(oracle), gtr)); cd_.append(cos(f(deploy), gtr)); cp.append(cos(f(gt), gtr))
+    res = {"mode": args.mode, "horizon": args.horizon if args.mode == "nearfuture" else None,
+           "code_dim": args.code_dim, "n_train": len(tr), "n_val": len(va),
+           "oracle_grid_cos": round(float(np.concatenate(co).mean()), 4),
+           "deploy_grid_cos": round(float(np.concatenate(cd_).mean()), 4),
+           "persistence_grid_cos": round(float(np.concatenate(cp).mean()), 4),
+           "baseline_uncond_cnn_deploy": 0.653}
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(res, indent=2), encoding="utf-8")
+    torch.save({"inv": inv.state_dict(), "fwd": fwd.state_dict(), "predm": predm.state_dict(),
+                "code_dim": args.code_dim, "din": din, "gmu": float(gmu), "gsd": float(gsd),
+                "mode": args.mode, "horizon": args.horizon}, out.with_suffix(".pt"))
+    print(json.dumps(res, indent=2), flush=True)
+
+
+if __name__ == "__main__":
+    main()
