@@ -30,7 +30,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--predictor", default="lmwm/outputs/subgoal_opt/milestone_cd128.pt")
-    ap.add_argument("--mode", choices=["milestone", "nearfuture"], default="milestone")
+    ap.add_argument("--mode", choices=["milestone", "milestone_value", "nearfuture"], default="milestone")
     ap.add_argument("--horizon", type=int, default=3, help="nearfuture: fixed steps ahead in the 3Hz index")
     ap.add_argument("--graph", default="lmwm/data/recurrence_graphs/kai0base_dinov3h/recurrence_graph.npz")
     ap.add_argument("--feature_dir", default="temp/crave_full_dinov3h", type=Path)
@@ -45,7 +45,7 @@ def main():
     args = ap.parse_args()
     dev = args.device; args.out.mkdir(parents=True, exist_ok=True)
 
-    proto = np.load(args.graph)["prototype_table"].astype(np.float32)
+    _g = np.load(args.graph); proto = _g["prototype_table"].astype(np.float32); pord = _g["pord"].astype(np.float32)
     protoL = proto / (np.linalg.norm(proto, axis=1, keepdims=True) + 1e-8)
     E, FR, Fn = load_index(args.feature_dir)
     ck = torch.load(args.predictor, map_location="cpu", weights_only=False)
@@ -73,6 +73,15 @@ def main():
         seg_of = np.zeros(len(seq), int)
         for i, (s, e2) in enumerate(zip(st, en)):
             seg_of[s:e2] = i
+        seg_m = [int(seq[s]) for s in st]                                    # milestone per segment
+        lib = {}
+        for i, m in enumerate(seg_m):
+            lib.setdefault(m, (float(pord[m]), seg_med[i]))
+        libsorted = sorted(lib.values())
+        seg_vnext = []
+        for m in seg_m:
+            v = float(pord[m]); nxt = [med for (val, med) in libsorted if val > v + 1e-6]
+            seg_vnext.append(nxt[0] if nxt else -1)
         enc_imgs, _ = read_imgs(args.dataset_root, args.camera, E, FR, fi, 256, 128)
         G = enc.encode_grid(enc_imgs).astype(np.float32)                     # (n,1280,16,16)
         Gz = torch.from_numpy(((G - gmu) / gsd).astype(np.float32))
@@ -92,6 +101,10 @@ def main():
                 if ni >= len(seg_med):
                     continue
                 tgt = seg_med[ni]
+            elif args.mode == "milestone_value":
+                tgt = seg_vnext[seg_of[j]]
+                if tgt < 0:
+                    continue
             else:                                                # nearfuture: fixed horizon h steps ahead
                 tgt = j + args.horizon
                 if tgt >= len(fi):
