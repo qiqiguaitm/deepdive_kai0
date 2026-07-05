@@ -59,6 +59,8 @@
   td.num,th.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
   td .term{color:var(--text);font-weight:600}
   td code{font-family:var(--mono);font-size:12.5px;color:var(--blue)}
+  td.arch{font-family:var(--mono);font-size:11.5px;color:var(--text2);line-height:1.55;min-width:380px}
+  td.arch b{color:var(--accent3);font-weight:600} td.arch em{color:var(--text3);font-style:normal}
   .pos{color:var(--green)} .amb{color:var(--yellow)}
 
   .diagram{background:var(--bg3);border:1px solid var(--border);border-radius:14px;padding:18px 8px}
@@ -174,14 +176,32 @@
     </div>
 
     <div class="scroll" style="margin-top:16px"><table>
-      <thead><tr><th>组件</th><th>输入</th><th>输出</th><th class="num">参数</th></tr></thead>
+      <thead><tr><th>组件</th><th>输入 → 输出</th><th>内部结构(层)</th><th class="num">参数</th></tr></thead>
       <tbody>
-        <tr><td class="term">DINOv3-H 编码器</td><td><code>256×256×3</code> RGB</td><td><code>16×16×1280</code> patch grid</td><td class="num">~840M 冻结</td></tr>
-        <tr><td class="term">inverse(teacher)</td><td>2× <code>16×16×1280</code></td><td>转移码 z <code>64/128</code></td><td class="num">6.5M</td></tr>
-        <tr><td class="term">predm(deploy)</td><td><code>16×16×1280</code></td><td>预测码 ẑ <code>64/128</code></td><td class="num">3.6M</td></tr>
-        <tr><td class="term">VAE 头</td><td>code <code>128</code></td><td>(mu, logvar) <code>2×128</code></td><td class="num">~33K</td></tr>
-        <tr><td class="term">forward</td><td><code>16×16×1280</code> + code</td><td><code>16×16×1280</code></td><td class="num">17M</td></tr>
-        <tr><td class="term">解码器(仅可视化)</td><td><code>16×16×1280</code></td><td><code>128×128×3</code></td><td class="num">5M</td></tr>
+        <tr><td class="term">DINOv3-H 编码器<br><em style="color:var(--text3)">(冻结)</em></td>
+          <td><code>256²×3</code> → <code>16×16×1280</code></td>
+          <td class="arch">patch-embed <b>Conv2d(3→1280, 16×16, s16)</b> + [1 CLS + 4 register token]<br>→ <b>32×</b> Block { LN · RoPE-MHSA(<b>20 头</b>, head=64) · LayerScale ‖ LN · <b>SwiGLU MLP</b>(1280→5120→1280, silu) · LayerScale }<br>→ 末层 LN;取 256 个 patch token(跳过前缀)</td>
+          <td class="num">~840M</td></tr>
+        <tr><td class="term">inverse<br><em style="color:var(--text3)">(teacher)</em></td>
+          <td>2×<code>16×16×1280</code> → z <code>64/128</code></td>
+          <td class="arch">cat 两图(2560 ch)<br>→ <b>Conv2d(2560→256, 3×3, s2)</b>·GN(8)·GELU → <b>Conv2d(256→256, 3×3, s2)</b>·GN·GELU <em>(16→8→4)</em><br>→ mean-pool → <b>Linear(256→cd)</b>·LayerNorm</td>
+          <td class="num">6.5M</td></tr>
+        <tr><td class="term">predm<br><em style="color:var(--text3)">(deploy)</em></td>
+          <td><code>16×16×1280</code> → ẑ <code>64/128</code></td>
+          <td class="arch">同 inverse 但单帧输入:<b>Conv2d(1280→256, 3×3, s2)</b>·GN·GELU → <b>Conv2d(256→256, 3×3, s2)</b>·GN·GELU → mean-pool → <b>Linear(256→cd)</b>·LN</td>
+          <td class="num">3.6M</td></tr>
+        <tr><td class="term">VAE 头</td>
+          <td>code <code>128</code> → (mu,logvar) <code>2×128</code></td>
+          <td class="arch"><b>Linear(128→256)</b> → 切成 (mu, logvar)<br>reparam <b>z = mu + ε·exp(½·logvar)</b>, ε~N(0,1)</td>
+          <td class="num">~33K</td></tr>
+        <tr><td class="term">forward</td>
+          <td>(<code>16×16×1280</code>)+code → <code>16×16×1280</code></td>
+          <td class="arch">code 广播成图后拼接 → proj <b>Conv2d(1280+cd→512, 3×3)</b><br>→ <b>2×</b> { GN·GELU·<b>Conv2d(512→512, 3×3)</b> }·GN·GELU<br>→ out <b>Conv2d(512→1280, 3×3)</b> <em>(全程 16×16,空间基底=当前 grid)</em></td>
+          <td class="num">17M</td></tr>
+        <tr><td class="term">解码器 big+GDL<br><em style="color:var(--text3)">(仅可视化)</em></td>
+          <td><code>16×16×1280</code> → <code>128×128×3</code></td>
+          <td class="arch">head <b>Conv2d(1280→512, 1×1)</b>·BN·ReLU<br>→ <b>3×</b> up { <b>ConvT2d(4×4, s2)</b>·BN·ReLU }: 512→384→192→96 <em>(16→32→64→128)</em><br>→ <b>Conv2d(96→96, 3×3)</b>·BN·ReLU → out <b>Conv2d(96→3, 3×3)</b>·Tanh</td>
+          <td class="num">5M</td></tr>
       </tbody>
     </table></div>
   </section>
