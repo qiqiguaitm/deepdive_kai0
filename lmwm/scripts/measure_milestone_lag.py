@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "crave/src"))
 from train_lawm_patch import load_index, read_imgs, ForwardDec  # noqa: E402
 from optimize_subgoal import PredM  # noqa: E402
 from crave.encoders import load_encoder  # noqa: E402
+from crave.utils import viterbi_forward  # noqa: E402
 import matplotlib  # noqa: E402
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
@@ -30,7 +31,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--predictor", default="lmwm/outputs/subgoal_opt/milestone_cd128.pt")
-    ap.add_argument("--mode", choices=["milestone", "milestone_value", "nearfuture"], default="milestone")
+    ap.add_argument("--mode", choices=["milestone", "milestone_value", "milestone_viterbi", "nearfuture"], default="milestone")
     ap.add_argument("--horizon", type=int, default=3, help="nearfuture: fixed steps ahead in the 3Hz index")
     ap.add_argument("--graph", default="lmwm/data/recurrence_graphs/kai0base_dinov3h/recurrence_graph.npz")
     ap.add_argument("--feature_dir", default="temp/crave_full_dinov3h", type=Path)
@@ -82,6 +83,15 @@ def main():
         for m in seg_m:
             v = float(pord[m]); nxt = [med for (val, med) in libsorted if val > v + 1e-6]
             seg_vnext.append(nxt[0] if nxt else -1)
+        # Viterbi-monotone segments (milestone_viterbi target)
+        emit_v = np.linalg.norm(Fq[:, None] - protoL[None], axis=2)
+        ms_v = viterbi_forward(emit_v, pord, up=3.0, down=25.0, hard_start=True)
+        chv = np.where(np.diff(ms_v) != 0)[0] + 1
+        stv = np.concatenate([[0], chv]); env = np.concatenate([chv, [len(ms_v)]])
+        vseg_med = [s + int((Fq[s:e2] @ protoL[int(ms_v[s])]).argmax()) for s, e2 in zip(stv, env)]
+        vseg_of = np.zeros(len(ms_v), int)
+        for i, (s, e2) in enumerate(zip(stv, env)):
+            vseg_of[s:e2] = i
         enc_imgs, _ = read_imgs(args.dataset_root, args.camera, E, FR, fi, 256, 128)
         G = enc.encode_grid(enc_imgs).astype(np.float32)                     # (n,1280,16,16)
         Gz = torch.from_numpy(((G - gmu) / gsd).astype(np.float32))
@@ -105,6 +115,11 @@ def main():
                 tgt = seg_vnext[seg_of[j]]
                 if tgt < 0:
                     continue
+            elif args.mode == "milestone_viterbi":
+                ni = vseg_of[j] + 1
+                if ni >= len(vseg_med):
+                    continue
+                tgt = vseg_med[ni]
             else:                                                # nearfuture: fixed horizon h steps ahead
                 tgt = j + args.horizon
                 if tgt >= len(fi):
