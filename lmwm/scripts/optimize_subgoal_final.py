@@ -64,7 +64,8 @@ def read_frames(dataset_root, cs, need):
         by.setdefault((cam, ep), []).append(fr)
     out = {}
     for (cam, ep), frs in by.items():
-        cap = cv2.VideoCapture(str(dataset_root / f"videos/chunk-{ep // cs:03d}/{cam}/episode_{ep:06d}.mp4"))
+        camdir = cam if cam.startswith("observation") else f"observation.images.{cam}"
+        cap = cv2.VideoCapture(str(dataset_root / f"videos/chunk-{ep // cs:03d}/{camdir}/episode_{ep:06d}.mp4"))
         n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 10 ** 9
         for fr in set(frs):
             cap.set(cv2.CAP_PROP_POS_FRAMES, min(max(fr, 0), n - 1)); ok, im = cap.read()
