@@ -82,11 +82,14 @@ def main() -> None:
     ap.add_argument("--fps", type=int, default=10)
     ap.add_argument("--cell", type=int, default=256)
     ap.add_argument("--out", default="lmwm/outputs/milestone_predict_episode.mp4")
+    ap.add_argument("--viterbi", action="store_true", help="V3.1: Viterbi-monotone stage assignment for the m+1 target")
     ap.add_argument("--device", default="cuda")
     args = ap.parse_args()
     dev = args.device
 
-    proto = np.load("lmwm/data/recurrence_graphs/kai0base_dinov3h/recurrence_graph.npz")["prototype_table"].astype(np.float32)
+    _rg = np.load("lmwm/data/recurrence_graphs/kai0base_dinov3h/recurrence_graph.npz")
+    proto = _rg["prototype_table"].astype(np.float32); pord = _rg["pord"].astype(np.float32)
+    protoL = proto / (np.linalg.norm(proto, axis=1, keepdims=True) + 1e-8)
     enc = load_encoder("dinov3-h", device=dev)
 
     if args.raw_video:
@@ -108,12 +111,17 @@ def main() -> None:
         grids = enc.encode_grid(enc_imgs).astype(np.float32); din = grids.shape[1]
         Fn_ep = Fn[order]
 
-    seq = (Fn_ep @ proto.T).argmax(1)
+    if args.viterbi:
+        from crave.utils import viterbi_forward
+        emit = np.linalg.norm(Fn_ep[:, None] - protoL[None], axis=2)
+        seq = viterbi_forward(emit, pord, up=3.0, down=25.0, hard_start=True)
+    else:
+        seq = (Fn_ep @ proto.T).argmax(1)
     ch = np.where(np.diff(seq) != 0)[0] + 1
     st = np.concatenate([[0], ch]); en = np.concatenate([ch, [len(seq)]])
     seg_med, seg_stage = [], []
     for s, e in zip(st, en):
-        m = int(seq[s]); seg_med.append(s + int((Fn_ep[s:e] @ proto[m]).argmax())); seg_stage.append(m)
+        m = int(seq[s]); seg_med.append(s + int((Fn_ep[s:e] @ protoL[m]).argmax())); seg_stage.append(m)
     seg_of = np.zeros(len(seq), int)
     for i, (s, e) in enumerate(zip(st, en)):
         seg_of[s:e] = i
