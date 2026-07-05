@@ -66,6 +66,23 @@ LaWM 侧数字**来自官方仓库实测**(`lmwm/vendor/LaWAM`,clone 自 `github
 4. LaWM **无 milestone/语义信号**;我们额外注入语义大目标。
 5. horizon:LaWM 单 1.6s(物理秒,可移植);我们 near-future 帧步未校准 + milestone 事件。
 
+## 4b. 【定论 2026-07-05】三杠杆实测 + LaWM 官方复现
+
+**官方 LaWM 230M LAM 在我们数据上实测**(`eval_lawm_lam.py`,ViT-B/16 层-2 空间):kai0 oracle **0.770**/lift +0.143;vis_base 0.849/+0.084 —— **没碾压我们的小模型**。
+
+**三杠杆对 deploy 的贡献**(milestone,确定性基线 deploy 0.720,oracle 天花板 0.789):
+| 杠杆 | deploy 增益 | 结论 |
+|---|---|---|
+| 容量 (transformer 24M→260M) | +0.008 oracle / **+0.00 deploy** | 不是杠杆(我们数据规模下 260M 过配)|
+| 多模态 VAE(mu, kl≤1e-3) | +0.007 | 小 |
+| 多模态 VAE(best-of-8, kl=1e-1) | **+0.020**(oracle 降到 0.758)| Δ(best−mu) 随 kl 单调增长 0.0006→0.0079 → **未来确弱多模态** |
+
+**裁决**:oracle→deploy 的 ~0.07 gap = **~0.02 多模态可回收 + ~0.05 真实"从当前预测未来"信息损失**。堆容量无用,堆多模态只回收一小部分。**gap 大部分是硬的。**
+
+**决策**:VLA 潜在动作头 = **VAE(kl≈1e-2 甜点**:deploy 0.730/best8 0.734,oracle 0.779),对齐 LaWM。⚠️ **两版留存**:当前小数据版 + 后续数据扩量版,数据上量后重跑对比(容量/多模态的结论可能随数据规模翻转)。
+
+**攻 0.05 信息损失的方向 = 感知端补信息**(非 LMWM 内部):**多视角(top_head+hand_left+hand_right)+ 时序上下文** → `optimize_subgoal_final.py`(进行中)。
+
 ## 5. 两个待验证杠杆
 
 - **LAM 容量阶梯**(CNN→conv-attn→transformer × 尺寸档):oracle 0.79 是**容量**还是**任务**天花板?gf3 扫 milestone/near-future 两路(`--arch`,进行中)。
