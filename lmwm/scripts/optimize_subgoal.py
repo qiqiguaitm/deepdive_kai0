@@ -44,15 +44,18 @@ class PredM(nn.Module):
         return self.ln(self.head(self.conv(gt).mean((2, 3))))
 
 
-def build_pairs(E, FR, Fn, proto, mode, horizon, val_eps, seed, pord=None):
+def build_pairs(E, FR, Fn, proto, mode, horizon, val_eps, seed, pord=None, delta=0.15):
     """Return train/val lists of (cur_gidx, target_gidx). Target term per mode:
-      nearfuture      - fixed-horizon frame (frame h steps ahead).
+      nearfuture      - fixed-TIME-horizon frame (frame h steps ahead).
       milestone       - V1 "temporal-next milestone": medoid of the NEXT stage in temporal frame order.
       milestone_value - V2 "progress-next milestone": medoid of the episode-library milestone with the
-                        smallest CRAVE value strictly greater than the current stage's value (monotone
-                        in progress; never regresses). Needs pord (per-prototype CRAVE value).
+                        smallest CRAVE value > current stage's value. (⚠️ medoid temporally incoherent.)
+      progress_delta  - V3 "fixed-progress-increment": the frame whose CRAVE continuous progress (global,
+                        cross-episode-consistent Viterbi value) first reaches p_current + delta. Monotone
+                        in progress -> temporally forward; same delta = same task-progress across episodes.
     """
     rng = np.random.default_rng(seed)
+    protoL = proto / (np.linalg.norm(proto, axis=1, keepdims=True) + 1e-8)
     tr, va = [], []
     for ep in np.unique(E):
         loc = np.where(E == ep)[0]; order = loc[np.argsort(FR[loc])]
@@ -60,6 +63,17 @@ def build_pairs(E, FR, Fn, proto, mode, horizon, val_eps, seed, pord=None):
         if mode == "nearfuture":
             for i in range(len(order) - horizon):
                 tgt.append((int(order[i]), int(order[i + horizon])))
+            continue
+        if mode == "progress_delta":                                     # V3: CRAVE continuous progress + delta
+            from crave.utils import viterbi_forward, smooth_monotone, med
+            Fq = Fn[order]
+            emit = np.linalg.norm(Fq[:, None] - protoL[None], axis=2)     # (n, M) dist to milestones
+            ms = viterbi_forward(emit, pord, up=3.0, down=25.0, hard_start=True)
+            value = smooth_monotone(med(pord[ms], 5), fps=3.0)           # per-frame global progress (monotone)
+            for i in range(len(order)):
+                jj = int(np.searchsorted(value, value[i] + delta))
+                if i < jj < len(order):
+                    tgt.append((int(order[i]), int(order[jj])))
             continue
         # milestone / milestone_value share the SAME stage segmentation + medoids; only target differs
         seq = (Fn[order] @ proto.T).argmax(1)
@@ -88,8 +102,9 @@ def build_pairs(E, FR, Fn, proto, mode, horizon, val_eps, seed, pord=None):
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", choices=["nearfuture", "milestone", "milestone_value"], required=True)
+    ap.add_argument("--mode", choices=["nearfuture", "milestone", "milestone_value", "progress_delta"], required=True)
     ap.add_argument("--horizon", type=int, default=5, help="nearfuture: steps ahead in 3Hz index (5≈1.7s)")
+    ap.add_argument("--progress_delta", type=float, default=0.15, help="progress_delta: CRAVE-progress increment for target")
     ap.add_argument("--code_dim", type=int, default=64)
     ap.add_argument("--arch", choices=["cnn", "convattn", "transformer"], default="cnn")
     ap.add_argument("--width", type=int, default=512)
@@ -117,7 +132,7 @@ def main() -> None:
     rng = np.random.default_rng(args.seed); eps = np.unique(E); rng.shuffle(eps)
     val_eps = set(eps[:max(1, int(round(len(eps) * 0.2)))].tolist())
 
-    tr, va = build_pairs(E, FR, Fn, proto, args.mode, args.horizon, val_eps, args.seed, pord=pord)
+    tr, va = build_pairs(E, FR, Fn, proto, args.mode, args.horizon, val_eps, args.seed, pord=pord, delta=args.progress_delta)
     tr = tr[:args.n_train]; va = va[:args.n_val]
     uniq = sorted(set([g for p in tr + va for g in p])); u2k = {g: k for k, g in enumerate(uniq)}
     print(f"[{tag}] {len(tr)} train + {len(va)} val pairs, {len(uniq)} unique frames", flush=True)
