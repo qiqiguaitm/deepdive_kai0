@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LMWM 最终报告 · Milestone Prediction</title>
+<style>
+  :root{
+    --paper:#eef2f6; --surface:#ffffff; --ink:#101a24; --body:#33434f; --muted:#6a7b88;
+    --line:#d5dee6; --line-soft:#e4ebf1;
+    --accent:#0c7b86; --accent-soft:#0c7b8618; --amber:#a8630c; --good:#1c855a; --bad:#b1442f;
+    --shadow:0 1px 2px #10202e0d, 0 6px 20px #10202e0a;
+    --sans:"Inter var",system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code",Menlo,"Noto Sans Mono CJK SC",monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --paper:#0c141b; --surface:#131e28; --ink:#e8eef4; --body:#bac7d2; --muted:#8194a1;
+      --line:#243441; --line-soft:#1b2833; --accent:#39bcc8; --accent-soft:#39bcc81f;
+      --amber:#e0983f; --good:#3fb587; --bad:#e0715a; --shadow:0 1px 2px #0006, 0 8px 26px #0004; }
+  }
+  :root[data-theme="light"]{ --paper:#eef2f6; --surface:#ffffff; --ink:#101a24; --body:#33434f; --muted:#6a7b88;
+    --line:#d5dee6; --line-soft:#e4ebf1; --accent:#0c7b86; --accent-soft:#0c7b8618; --amber:#a8630c; --good:#1c855a; --bad:#b1442f; --shadow:0 1px 2px #10202e0d, 0 6px 20px #10202e0a; }
+  :root[data-theme="dark"]{ --paper:#0c141b; --surface:#131e28; --ink:#e8eef4; --body:#bac7d2; --muted:#8194a1;
+    --line:#243441; --line-soft:#1b2833; --accent:#39bcc8; --accent-soft:#39bcc81f; --amber:#e0983f; --good:#3fb587; --bad:#e0715a; --shadow:0 1px 2px #0006, 0 8px 26px #0004; }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--body);font-family:var(--sans);line-height:1.62;
+    -webkit-font-smoothing:antialiased;font-feature-settings:"cv02","cv03","ss01";}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 24px}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+
+  header.top{border-bottom:1px solid var(--line);background:linear-gradient(180deg,var(--accent-soft),transparent);}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);}
+  h1{font-size:clamp(30px,5vw,46px);line-height:1.05;letter-spacing:-.02em;color:var(--ink);margin:.35em 0 .2em;
+    text-wrap:balance;font-weight:760;}
+  .lede{font-size:18px;color:var(--muted);max-width:64ch;margin:.2em 0 0}
+  header.top .wrap{padding-top:46px;padding-bottom:34px}
+  .meta{display:flex;flex-wrap:wrap;gap:8px 10px;margin-top:22px;font-family:var(--mono);font-size:12.5px}
+  .tag{border:1px solid var(--line);border-radius:999px;padding:4px 11px;color:var(--muted);background:var(--surface)}
+  .tag b{color:var(--ink);font-weight:600}
+
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:34px 0 8px}
+  @media(max-width:720px){.tiles{grid-template-columns:repeat(2,1fr)}}
+  .tile{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 16px 14px;box-shadow:var(--shadow)}
+  .tile .k{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  .tile .v{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:30px;font-weight:600;color:var(--ink);margin-top:4px;letter-spacing:-.01em}
+  .tile .v small{font-size:15px;color:var(--muted);font-weight:500}
+  .tile .n{font-size:12.5px;color:var(--muted);margin-top:3px}
+  .tile.hl{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),var(--shadow)} .tile.hl .v{color:var(--accent)}
+
+  figure.hero{margin:30px 0 6px;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:var(--shadow)}
+  figure.hero img{display:block;width:100%;height:auto}
+  figure.hero figcaption{padding:11px 16px;font-size:13px;color:var(--muted);border-top:1px solid var(--line-soft)}
+  figure.hero figcaption b{color:var(--ink);font-weight:600}
+
+  section{padding:38px 0;border-top:1px solid var(--line-soft)}
+  .snum{font-family:var(--mono);font-size:13px;color:var(--accent);letter-spacing:.04em}
+  h2{font-size:24px;color:var(--ink);margin:.15em 0 .1em;letter-spacing:-.015em;font-weight:700;text-wrap:balance}
+  h2 + .sub{color:var(--muted);margin:.1em 0 1.1em;max-width:70ch}
+  p{max-width:72ch} .prose b{color:var(--ink)}
+
+  .scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:var(--shadow)}
+  table{border-collapse:collapse;width:100%;font-size:14px;min-width:520px}
+  th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line-soft);vertical-align:top}
+  thead th{font-family:var(--mono);font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);
+    background:var(--paper);position:sticky;top:0;white-space:nowrap}
+  tbody tr:last-child td{border-bottom:none}
+  td.num,th.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+  td .term{color:var(--ink);font-weight:600}
+  tr.final{background:var(--accent-soft)} tr.final td:first-child{box-shadow:inset 3px 0 var(--accent)}
+  .pos{color:var(--good)} .neg{color:var(--bad)} .amb{color:var(--amber)}
+  .chk{color:var(--good);font-weight:700} .x{color:var(--bad);font-weight:700}
+
+  pre.pipe{font-family:var(--mono);font-size:12.6px;line-height:1.7;color:var(--body);background:var(--surface);
+    border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:12px;padding:18px 20px;overflow-x:auto;box-shadow:var(--shadow)}
+  pre.pipe b{color:var(--ink)} pre.pipe .c{color:var(--accent)} pre.pipe .m{color:var(--muted)}
+
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:6px}
+  @media(max-width:720px){.cards{grid-template-columns:1fr}}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:16px 17px;box-shadow:var(--shadow)}
+  .card h3{margin:0 0 6px;font-size:15px;color:var(--ink);font-weight:660}
+  .card p{margin:0;font-size:13.5px;color:var(--muted);max-width:none}
+  .card .verdict{font-family:var(--mono);font-size:12px;margin-top:9px;color:var(--bad)}
+
+  .keybox{background:var(--accent-soft);border:1px solid var(--accent);border-radius:14px;padding:18px 20px;margin-top:8px}
+  .keybox p{margin:0;color:var(--ink);max-width:none;font-size:15.5px}
+  footer{border-top:1px solid var(--line);padding:26px 0 48px;color:var(--muted);font-size:13px}
+  footer code{font-family:var(--mono);font-size:12px;color:var(--body)}
+  .glyph{font-family:var(--mono);color:var(--muted)}
+</style>
+</head>
+<body>
+
+
+<header class="top"><div class="wrap">
+  <div class="eyebrow">LMWM · 冻结世界模型子目标</div>
+  <h1>Milestone 预测器 — 最终报告</h1>
+  <p class="lede">面向 kai0 π0.5 VLA 的 forward-from-current 子目标预测:从"优化 LMWM"到重构 CRAVE 数据集目标的系统性结论。</p>
+  <div class="meta">
+    <span class="tag">最终模型 <b>V3.1 + VAE(kl 1e-2)</b></span>
+    <span class="tag">编码器 <b>DINOv3-H ViT-H+ (冻结)</b></span>
+    <span class="tag">世界模型 <b>~27M CNN</b></span>
+    <span class="tag">对照 <b>LaWM · arXiv 2606.15768</b></span>
+    <span class="tag">2026-07-05</span>
+  </div>
+</div></header>
+
+<div class="wrap">
+
+  <div class="tiles">
+    <div class="tile hl"><div class="k">deploy grid-cos</div><div class="v">0.700</div><div class="n">实战保真(best-of-8 0.705)</div></div>
+    <div class="tile"><div class="k">oracle 天花板</div><div class="v">0.774</div><div class="n">已知真答案的上限</div></div>
+    <div class="tile"><div class="k">欠射 ratio</div><div class="v">0.34</div><div class="n">模型达成目标 horizon 的比例</div></div>
+    <div class="tile"><div class="k">预测 lag</div><div class="v">0.83<small>s</small></div><div class="n">敢预测多远(V1 仅 0.28s)</div></div>
+  </div>
+
+  <figure class="hero">
+    <img alt="四栏对比:当前帧 | 预测 milestone+1 解码 | 真实 milestone+1 编解码 | 真实 milestone+1 帧" src="assets/hero.jpg">
+    <figcaption><b>kai0 留出集(未训练)</b> · 四栏 = 当前帧 │ <b>预测</b> m+1→解码 │ 真实 m+1 编→解码 │ 真实 m+1 帧。预测(第2栏)= 衣物更展开/更平,与真实"进度前进"的下一 milestone 吻合。</figcaption>
+  </figure>
+
+  <section>
+    <div class="snum">01 / 指标</div>
+    <h2>各指标是什么、表明什么</h2>
+    <p class="sub">我们预测"未来某 milestone 的 DINOv3 特征网格"。这些指标从不同角度衡量预测质量 —— 按本科生级直白解释。</p>
+    <div class="scroll"><table>
+      <thead><tr><th>指标</th><th>直白定义</th><th>作用 / 表明什么</th></tr></thead>
+      <tbody>
+        <tr><td class="term">grid-cos</td><td>预测特征图 与 真实目标图 的余弦相似度(1=一样)</td><td>核心保真度,越高越准</td></tr>
+        <tr><td class="term">oracle</td><td>用"作弊码"(偷看真未来算出的转移码)重建的 cos</td><td><b>天花板</b>:知道真答案能做多好 = 模型表达上限</td></tr>
+        <tr><td class="term">deploy</td><td>只看当前帧、用预测码重建的 cos</td><td><b>实战值</b>:真部署(没未来)能做多好 ← 最关心</td></tr>
+        <tr><td class="term">persistence</td><td>把"当前帧"当预测(不动)的 cos</td><td><b>白给基线</b>:啥也不预测得多少分</td></tr>
+        <tr><td class="term">lift</td><td>= deploy − persistence</td><td><b>净技巧</b>:扣掉"目标本来就近"的便宜</td></tr>
+        <tr><td class="term">model lag</td><td>预测图匹配到最像的真帧,那帧晚几秒</td><td>模型"敢预测多远"</td></tr>
+        <tr><td class="term">ratio</td><td>= model lag / dataset lag(目标本身跨度)</td><td>&lt;1 = <span class="amb">欠射</span>(不敢预测那么远,退回当前)</td></tr>
+        <tr><td class="term">best-of-8</td><td>VAE 采 8 个预测取最像的 cos</td><td>未来<b>多不多模态</b>(远超均值=多分支)</td></tr>
+        <tr><td class="term">corr(value,time)</td><td>CRAVE 进度值 与 归一化时间 的相关</td><td>进度标签质量(0.94=很可靠)</td></tr>
+        <tr><td class="term">monotonicity</td><td>序列中非递减的比例</td><td>进度单调不倒退(0.98)</td></tr>
+      </tbody>
+    </table></div>
+    <div class="keybox" style="margin-top:16px"><p><b>一句话记忆:</b> oracle=上限,deploy=实战,persistence=白给,lift=真本事,ratio=敢多远,best-of-8=多模态。</p></div>
+  </section>
+
+  <section>
+    <div class="snum">02 / 对照</div>
+    <h2>与 LaWM 的对比</h2>
+    <p class="sub">LaWM 官方 checkpoint 在<b>我们数据</b>上实测(vendored <span class="glyph">RLinf/LaWAM</span>)。⚠️ 编码器空间不同(ViT-B 768 vs ViT-H+ 1280)+ 目标定义不同 → 绝对数不能硬比,趋势可比。</p>
+    <div class="scroll" style="margin-bottom:14px"><table>
+      <thead><tr><th>平均未来预测</th><th class="num">LaWM</th><th class="num">我们 V3.1+VAE</th></tr></thead>
+      <tbody>
+        <tr><td>目标 horizon</td><td class="num">固定 1.6s</td><td class="num">进度前进一个 milestone(~2.4s)</td></tr>
+        <tr><td>oracle grid-cos(我们数据)</td><td class="num">0.770</td><td class="num">0.774</td></tr>
+        <tr><td>deploy grid-cos</td><td class="num">需策略预测码</td><td class="num">0.700</td></tr>
+        <tr><td>lift over persistence</td><td class="num">+0.143</td><td class="num">+0.135</td></tr>
+      </tbody>
+    </table></div>
+    <div class="scroll"><table>
+      <thead><tr><th>其他维度</th><th class="num">LaWM</th><th class="num">我们</th></tr></thead>
+      <tbody>
+        <tr><td>世界模型参数</td><td class="num">230M transformer</td><td class="num">~27M CNN(轻 8×)</td></tr>
+        <tr><td>冻结编码器</td><td class="num">ViT-B ~86M</td><td class="num">ViT-H+ ~840M(强 10×)</td></tr>
+        <tr><td>horizon 类型</td><td class="num">只有固定时间</td><td class="num">时间 / 事件 / <b>进度(新)</b></td></tr>
+        <tr><td>下游成功率 SR(extrinsic)</td><td class="num pos">LIBERO 98.6% 等</td><td class="num neg">未测 · 最大缺口</td></tr>
+        <tr><td>跨数据集泛化</td><td class="num">定性(3000h 数据)</td><td class="num">定量(vis_base 0.68 零微调)</td></tr>
+      </tbody>
+    </table></div>
+    <p class="prose" style="margin-top:14px"><b>要点:</b> 同数据上 LaWM 230M transformer <b>没有碾压</b>我们 27M CNN(lift 相当)。<b>最诚实的差距</b>是 LaWM 有真机/benchmark 成功率,我们只有 intrinsic 预测指标 —— 接 VLA 测 SR 是必补实验。</p>
+  </section>
+
+  <section>
+    <div class="snum">03 / 架构</div>
+    <h2>最终网络结构</h2>
+    <p class="sub">冻结世界模型,全 stop-grad 后作子目标/条件源喂 π0.5 action expert。</p>
+<pre class="pipe">256²RGB 帧
+  <span class="c">└▶ [冻结 DINOv3-H · ViT-H+/16 · ~840M]</span>  →  16×16×1280 patch grid  <span class="m">(纯torch standalone, cosine 0.9999)</span>
+
+预测器 <b>forward-from-current</b>  (~27M CNN + VAE 头 kl≈1e-2)
+  inverse(g_t, g_target)  →  转移码 z    <span class="m">teacher · 训练用 · 6.5M</span>
+  predm(g_t)              →  预测码 ẑ    <span class="m">deploy · 3.6M · +VAE(mu/logvar)</span>
+  forward(g_t, code)      →  <b>ĝ_target</b>  <span class="m">17M · 空间基底=当前 grid</span>
+
+目标构建 = <b>V3.1</b>
+  CRAVE 37 milestone + <b>Viterbi 单调分配</b> → 每 stage 干净 medoid
+  目标 = 进度前进的下一 milestone  <span class="m">(时间前向 + 进度单调 + 跨集一致)</span>
+
+解码器 make_decoder("big")+GDL  <span class="m">5M · 仅可视化, 不喂 VLA</span>
+
+<span class="c">▶ 注入 π0.5:</span> obs_grid + û_T + 转移码 ẑ  →  action expert  <span class="m">(KI 梯度隔离 + 蒸馏 ‖ẑ−z‖²)</span></pre>
+  </section>
+
+  <section>
+    <div class="snum">04 / 演进</div>
+    <h2>目标构建方式:V1 → V3.1 + VAE</h2>
+    <p class="sub">同一预测器架构,只改"预测目标怎么定"。这是本轮最大的杠杆 —— 用户洞见:用 CRAVE 全局 progress 保证跨 episode 一致。</p>
+    <div class="scroll"><table>
+      <thead><tr><th>版本</th><th>目标定义</th><th class="num">deploy</th><th class="num">lift</th><th class="num">ratio</th><th class="num">时间前向</th><th class="num">跨集一致</th><th class="num">单调</th></tr></thead>
+      <tbody>
+        <tr><td class="term">V1 temporal-next</td><td>时序下一段 medoid</td><td class="num">0.726</td><td class="num">0.108</td><td class="num">0.29</td><td class="num amb">欠射</td><td class="num x">✗</td><td class="num x">✗</td></tr>
+        <tr><td class="term">V2 progress-argmax</td><td>value 更高 milestone(raw)</td><td class="num">0.594</td><td class="num">0.136</td><td class="num neg">错乱</td><td class="num x">✗</td><td class="num chk">✓</td><td class="num chk">✓</td></tr>
+        <tr><td class="term">V3 progress-Δ</td><td>连续进度 + Δ(远, ~6s)</td><td class="num">0.62</td><td class="num pos">0.20</td><td class="num">—</td><td class="num chk">✓</td><td class="num chk">✓</td><td class="num chk">✓</td></tr>
+        <tr><td class="term">V3.1 milestone-viterbi</td><td>Viterbi 进度下一段</td><td class="num">0.694</td><td class="num">0.128</td><td class="num">0.347</td><td class="num chk">✓</td><td class="num chk">✓</td><td class="num chk">✓</td></tr>
+        <tr class="final"><td class="term">V3.1 + VAE ★</td><td>同上 + VAE(kl1e-2)头</td><td class="num">0.700</td><td class="num">0.135</td><td class="num">0.34</td><td class="num chk">✓</td><td class="num chk">✓</td><td class="num chk">✓</td></tr>
+      </tbody>
+    </table></div>
+    <p class="prose" style="margin-top:14px"><b>V3.1 = 最佳数据集构建</b>:用 CRAVE Viterbi 单调分配,唯一同时满足"时间前向 + 跨集一致 + 进度单调 + 干净标准 medoid"。模型欠射从 V1 的 0.29 改善到 0.35(预测 lag 0.28s → 0.83s,<b>敢 commit 3× 远</b>)。V2 的失败(时间错乱、负滞后)正是因为 raw argmax 分配不单调。</p>
+  </section>
+
+  <section>
+    <div class="snum">05 / 结论</div>
+    <h2>三大天花板 · 一个关键杠杆</h2>
+    <p class="sub">oracle→deploy 的差距试遍了三条路,都只小幅改善 —— 差距大部分是"从当前预测未来"的硬信息损失。</p>
+    <div class="cards">
+      <div class="card"><h3>容量 / Transformer</h3><p>24M→260M transformer:oracle +0.008,deploy 持平。我们数据规模下 260M 过配。</p><div class="verdict">→ 不是杠杆</div></div>
+      <div class="card"><h3>多模态 / VAE</h3><p>best-of-8 随 kl 增长,证实未来弱多模态;但最多回收 +0.02(kl 1e-1)。</p><div class="verdict">→ 小幅</div></div>
+      <div class="card"><h3>感知端 / 多视角+时序</h3><p>top_head + 双手腕 + 时序上下文:milestone+1 只 +0.002~0.006。</p><div class="verdict">→ 几乎无用</div></div>
+    </div>
+    <div class="keybox" style="margin-top:18px"><p><b>关键杠杆 = 数据集目标构建。</b> 不是网络内部,而是"预测目标怎么定"。V3.1(CRAVE 进度单调 milestone)让模型敢 commit、跨集一致 —— 这才是真正撬动 deploy 的地方。oracle→deploy 剩余的 ~0.05 是信息论下限,要更准需从根本数据/传感器补。</p></div>
+  </section>
+
+</div>
+
+<footer><div class="wrap">
+  产物 · <code>lmwm/docs/FINAL_REPORT.md</code> · <code>optimize_subgoal.py</code>(--mode milestone_viterbi, --code_head vae) · <code>measure_milestone_lag.py</code>(欠射诊断) · <code>crave_dataset_effect.py</code> · <code>eval_lawm_lam.py</code>(官方 LaWM 评测) · <code>render_milestone_predict_video.py</code>(--viterbi)
+</div></footer>
+
+</body>
+</html>
