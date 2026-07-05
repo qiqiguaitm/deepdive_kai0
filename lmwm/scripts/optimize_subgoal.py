@@ -76,6 +76,8 @@ def main() -> None:
     ap.add_argument("--arch", choices=["cnn", "convattn", "transformer"], default="cnn")
     ap.add_argument("--width", type=int, default=512)
     ap.add_argument("--depth", type=int, default=8)
+    ap.add_argument("--code_head", choices=["deterministic", "vae"], default="deterministic")
+    ap.add_argument("--kl_weight", type=float, default=1e-3)
     ap.add_argument("--feature_dir", default="temp/crave_full_dinov3h", type=Path)
     ap.add_argument("--dataset_root", default="kai0/data/Task_A/kai0_base", type=Path)
     ap.add_argument("--camera", default="observation.images.top_head")
@@ -87,7 +89,7 @@ def main() -> None:
     ap.add_argument("--device", default="cuda")
     args = ap.parse_args()
     dev = args.device
-    szt = f"_{args.arch}" + (f"_w{args.width}d{args.depth}" if args.arch != "cnn" else "")
+    szt = f"_{args.arch}" + (f"_w{args.width}d{args.depth}" if args.arch != "cnn" else "") + ("_vae" if args.code_head == "vae" else "")
     tag = f"{args.mode}{'_h'+str(args.horizon) if args.mode=='nearfuture' else ''}_cd{args.code_dim}{szt}"
     out = Path(args.out) if args.out else Path(f"lmwm/outputs/subgoal_opt/{tag}.json")
 
@@ -110,48 +112,83 @@ def main() -> None:
     tra = torch.from_numpy(np.array([u2k[c] for c, _ in tr])); trb = torch.from_numpy(np.array([u2k[n] for _, n in tr]))
     vaa = np.array([u2k[c] for c, _ in va]); vab = np.array([u2k[n] for _, n in va])
 
+    import torch.nn as nn
     from lam_arch import build_lam, nparams
     inv, fwd, predm = build_lam(args.arch, din, args.code_dim, args.width, args.depth)
     inv, fwd, predm = inv.to(dev), fwd.to(dev), predm.to(dev)
-    n_params = nparams(inv) + nparams(fwd) + nparams(predm); n_deploy = nparams(predm) + nparams(fwd)
-    print(f"[{tag}] arch={args.arch} params total={n_params/1e6:.1f}M deploy(predm+fwd)={n_deploy/1e6:.1f}M", flush=True)
-    o1 = torch.optim.AdamW(list(inv.parameters()) + list(fwd.parameters()), lr=2e-4, weight_decay=1e-5)
-    o2 = torch.optim.AdamW(predm.parameters(), lr=2e-4, weight_decay=1e-5)
-    print(f"[{tag}] training inverse/forward + deploy predm ...", flush=True)
+    vae = args.code_head == "vae"; cd = args.code_dim
+    vae_inv = nn.Linear(cd, 2 * cd).to(dev) if vae else None      # code -> (mu, logvar) VAE heads (LaWM-style)
+    vae_pm = nn.Linear(cd, 2 * cd).to(dev) if vae else None
+
+    def reparam(head, h, sample):
+        mu, lv = head(h).chunk(2, -1); lv = lv.clamp(-8, 8)
+        z = mu + torch.randn_like(mu) * (0.5 * lv).exp() if sample else mu
+        kl = -0.5 * (1 + lv - mu.pow(2) - lv.exp()).mean()
+        return z, mu, lv, kl
+
+    xtra = (nparams(vae_inv) + nparams(vae_pm)) if vae else 0
+    n_params = nparams(inv) + nparams(fwd) + nparams(predm) + xtra
+    n_deploy = nparams(predm) + nparams(fwd) + (nparams(vae_pm) if vae else 0)
+    print(f"[{tag}] arch={args.arch} head={args.code_head} params total={n_params/1e6:.1f}M deploy={n_deploy/1e6:.1f}M", flush=True)
+    p1 = list(inv.parameters()) + list(fwd.parameters()) + (list(vae_inv.parameters()) if vae else [])
+    p2 = list(predm.parameters()) + (list(vae_pm.parameters()) if vae else [])
+    o1 = torch.optim.AdamW(p1, lr=2e-4, weight_decay=1e-5)
+    o2 = torch.optim.AdamW(p2, lr=2e-4, weight_decay=1e-5)
+    print(f"[{tag}] training ...", flush=True)
     for step in range(args.steps):
         sel = torch.randint(0, len(tra), (32,))
         gt = GZ[tra[sel]].to(dev); gf = GZ[trb[sel]].to(dev)
-        code = inv(gt, gf); rec = fwd(gt, code)
-        l1 = F.smooth_l1_loss(rec, gf, beta=1.0)
+        if vae:
+            z, _, _, kl = reparam(vae_inv, inv(gt, gf), True)
+            l1 = F.smooth_l1_loss(fwd(gt, z), gf, beta=1.0) + args.kl_weight * kl
+        else:
+            l1 = F.smooth_l1_loss(fwd(gt, inv(gt, gf)), gf, beta=1.0)
         o1.zero_grad(); l1.backward(); o1.step()
-        # deploy predictor: predict the (detached) teacher code from current only
-        rec2 = fwd(gt, predm(gt)); l2 = F.smooth_l1_loss(rec2, gf, beta=1.0)
+        if vae:
+            zp, _, _, klp = reparam(vae_pm, predm(gt), True)
+            l2 = F.smooth_l1_loss(fwd(gt, zp), gf, beta=1.0) + args.kl_weight * klp
+        else:
+            l2 = F.smooth_l1_loss(fwd(gt, predm(gt)), gf, beta=1.0)
         o2.zero_grad(); l2.backward(); o2.step()
-    inv.eval(); fwd.eval(); predm.eval()
+    for m in [inv, fwd, predm] + ([vae_inv, vae_pm] if vae else []):
+        m.eval()
 
     def cos(a, b): return (a * b).sum(1) / (np.linalg.norm(a, axis=1) * np.linalg.norm(b, axis=1) + 1e-8)
-    co, cd_, cp = [], [], []
+    f = lambda x: (x.detach().cpu().numpy() * gsd + gmu).reshape(len(x), -1)
+    co, cd_, cp, cbest = [], [], [], []
     with torch.no_grad():
         for s in range(0, len(vaa), 256):
-            gt = GZ[vaa[s:s + 256]].to(dev); gf = GZ[vab[s:s + 256]].to(dev)
-            oracle = fwd(gt, inv(gt, gf)); deploy = fwd(gt, predm(gt))
-            f = lambda x: (x.cpu().numpy() * gsd + gmu).reshape(len(x), -1)
-            gtr = f(gf)
+            gt = GZ[vaa[s:s + 256]].to(dev); gf = GZ[vab[s:s + 256]].to(dev); gtr = f(gf)
+            if vae:
+                _, mu_i, _, _ = reparam(vae_inv, inv(gt, gf), False); oracle = fwd(gt, mu_i)
+                _, mu_p, lv_p, _ = reparam(vae_pm, predm(gt), False); deploy = fwd(gt, mu_p)
+                best = None
+                for _ in range(8):                                # best-of-8 posterior samples = multimodal coverage
+                    ck = cos(f(fwd(gt, mu_p + torch.randn_like(mu_p) * (0.5 * lv_p).exp())), gtr)
+                    best = ck if best is None else np.maximum(best, ck)
+                cbest.append(best)
+            else:
+                oracle = fwd(gt, inv(gt, gf)); deploy = fwd(gt, predm(gt))
             co.append(cos(f(oracle), gtr)); cd_.append(cos(f(deploy), gtr)); cp.append(cos(f(gt), gtr))
     res = {"mode": args.mode, "horizon": args.horizon if args.mode == "nearfuture" else None,
            "code_dim": args.code_dim, "arch": args.arch, "width": args.width, "depth": args.depth,
+           "code_head": args.code_head, "kl_weight": args.kl_weight,
            "params_M": round(n_params / 1e6, 1), "deploy_params_M": round(n_deploy / 1e6, 1),
            "n_train": len(tr), "n_val": len(va),
            "oracle_grid_cos": round(float(np.concatenate(co).mean()), 4),
            "deploy_grid_cos": round(float(np.concatenate(cd_).mean()), 4),
+           "deploy_bestof8_cos": round(float(np.concatenate(cbest).mean()), 4) if vae else None,
            "persistence_grid_cos": round(float(np.concatenate(cp).mean()), 4),
            "baseline_uncond_cnn_deploy": 0.653}
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(res, indent=2), encoding="utf-8")
-    torch.save({"inv": inv.state_dict(), "fwd": fwd.state_dict(), "predm": predm.state_dict(),
-                "code_dim": args.code_dim, "din": din, "gmu": float(gmu), "gsd": float(gsd),
-                "mode": args.mode, "horizon": args.horizon,
-                "arch": args.arch, "width": args.width, "depth": args.depth}, out.with_suffix(".pt"))
+    ckd = {"inv": inv.state_dict(), "fwd": fwd.state_dict(), "predm": predm.state_dict(),
+           "code_dim": args.code_dim, "din": din, "gmu": float(gmu), "gsd": float(gsd),
+           "mode": args.mode, "horizon": args.horizon, "arch": args.arch, "width": args.width,
+           "depth": args.depth, "code_head": args.code_head}
+    if vae:
+        ckd["vae_inv"] = vae_inv.state_dict(); ckd["vae_pm"] = vae_pm.state_dict()
+    torch.save(ckd, out.with_suffix(".pt"))
     print(json.dumps(res, indent=2), flush=True)
 
 
