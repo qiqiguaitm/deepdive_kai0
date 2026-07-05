@@ -161,8 +161,10 @@ class DINOv3ViTStandalone(nn.Module):
         self.eval()
 
     @torch.no_grad()
-    def forward(self, px):
+    def forward(self, px, return_all_hidden=False):
         x = self.embeddings(px); pos = self.rope_embeddings(px)
+        hs = [x]                                       # HF-style: hidden_states[0] = embeddings
         for L in self.layer:
-            x = L(x, pos)
-        return self.norm(x)
+            x = L(x, pos); hs.append(x)                # hidden_states[i] = block i-1 output (pre-final-norm)
+        last = self.norm(x)
+        return (last, hs) if return_all_hidden else last
