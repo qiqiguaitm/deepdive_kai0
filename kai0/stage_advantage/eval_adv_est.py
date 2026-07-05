@@ -38,9 +38,13 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, "/vePFS/tim/workspace/lerobot")
 
-CKPT_BASE = ROOT / "checkpoints/ADVANTAGE_TORCH_KAI0_FLATTEN_FOLD/adv_est_v1"
-CONFIG_NAME = "ADVANTAGE_TORCH_KAI0_FLATTEN_FOLD"
-CHUNKS_SIZE = 1000
+# CKPT_BASE / CONFIG_NAME overridable via env for other AE variants (e.g. CRAVE_A/B).
+# Defaults preserve original adv_est_v1 behavior.
+CKPT_BASE = ROOT / os.environ.get(
+    "ADV_EST_CKPT_REL", "checkpoints/ADVANTAGE_TORCH_KAI0_FLATTEN_FOLD/adv_est_v1"
+)
+CONFIG_NAME = os.environ.get("ADV_EST_CONFIG", "ADVANTAGE_TORCH_KAI0_FLATTEN_FOLD")
+CHUNKS_SIZE = int(os.environ.get("ADV_EST_CHUNKS_SIZE", "1000"))
 FRAME_INTERVAL = 10
 RELATIVE_INTERVAL = 50
 
@@ -69,24 +73,19 @@ def video_paths(ep_idx: int) -> tuple:
 
 def load_episode_meta() -> pd.DataFrame:
     """Load per-episode metadata. GT columns are optional."""
+    import pyarrow.parquet as _pq
     files = sorted(DATA_ROOT.glob("data/**/*.parquet"))
     records = []
     for f in files:
-        sample = pd.read_parquet(f, columns=["episode_index"])
-        has_gt = "stage_progress_gt" in pd.read_parquet(f).columns
-        if has_gt:
-            df = pd.read_parquet(f, columns=["episode_index", "frame_index",
-                                              "progress_gt", "stage_progress_gt"])
-            ep = df.groupby("episode_index").agg(
-                n_frames=("frame_index", "count"),
-                max_progress=("progress_gt", "max"),
-                max_stage_progress=("stage_progress_gt", "max"),
-            ).reset_index()
-        else:
-            df = pd.read_parquet(f, columns=["episode_index", "frame_index"])
-            ep = df.groupby("episode_index").agg(
-                n_frames=("frame_index", "count"),
-            ).reset_index()
+        present = set(_pq.read_schema(f).names)  # GT cols vary by dataset (progress_gt optional)
+        cols = ["episode_index", "frame_index"]
+        aggs = {"n_frames": ("frame_index", "count")}
+        if "progress_gt" in present:
+            cols.append("progress_gt"); aggs["max_progress"] = ("progress_gt", "max")
+        if "stage_progress_gt" in present:
+            cols.append("stage_progress_gt"); aggs["max_stage_progress"] = ("stage_progress_gt", "max")
+        df = pd.read_parquet(f, columns=cols)
+        ep = df.groupby("episode_index").agg(**aggs).reset_index()
         records.append(ep)
     return pd.concat(records).reset_index(drop=True)
 
