@@ -129,10 +129,32 @@ SuSIE(2310.10639 子目标图)、VPP(2412.14803 预测 latent)、LAPA(2410.11758
 
 **决策点 A 定案:走 VLA(SigLIP)同空间。** 忠实塔(pt_224.npz 纯 torch 移植 So400m/14)deploy 0.716 **> DINOv3-H 0.694**,lift 0.117 vs 0.128 基本平手 → **同空间预测几乎零质量损失**,换来 KV 原生融合 + 部署砍掉第二编码器。代理(0.684)低估了忠实塔(0.755),幸好做了 E2。→ DINOv3-H+CRAVE 降级为**离线 label 工厂**,在线预测活在 π0.5 SigLIP 空间。
 
-### 6.4 进行中
-- **E1**(`train_stage1_identity.py`):分布式 Stage-1 的 top-N 身份命中率(重做 B 的正确口径)。
-- **E4**:SigLIP res=384 消融。
-- **E2**(gf3,待拍板):忠实 SigLIP 塔转换 + 重测 oracle。
+### 6.4 E1 分布式 Stage-1(`train_stage1_identity.py`,DINOv3 空间诊断)
+classifier top1 0.51→top3 0.79(**+0.29 best-of-3**)vs best-of-8-on-code +0.02;proto-reg(回归)塌到 0.35。
+→ **best-of-N 放身份轴回收 29 点,放 code 轴只 2 点;Stage-1 必须多峰头(回归会塌)。**
+
+### 6.5 两模型 PoC + gf3 8 卡 sweep(`train_twomodel_poc.py`,pi0.5 SigLIP 空间)
+Stage-1 MDN(K 分量)+ Stage-2 确定性 grounding。K∈{1,2,4,8} × {V3.1,V2},gf3 8 卡一轮。
+
+**身份 top-N 命中(多峰体现轴):**
+| | K=1 | K=2 | K=4 | K=8 |
+|---|---|---|---|---|
+| V3.1 t1/t3/t5 | .277/.377/.382 | .271/.398/.403 | .273/.427/.435 | .264/.448/.454 |
+| V2 t1/t3/t5 | .137/.215/.218 | .126/.255/.268 | .130/.269/.282 | .129/.276/.286 |
+
+grid: deploy V3.1 ~0.71(≈E2 0.716)/V2 ~0.66;best-of-8 增益 V3.1 .005→.010 / V2 .008→.022。
+
+**结论**:①**MDN 多峰随 K 单调涨身份 top3/top5**(V3.1 .377→.448),top1 不变=每加分量多覆盖一条分支,端到端实锤;②**grid-cos 对身份多峰不敏感**(跨 K 平)→ 错的头指标;③**V3.1 完胜 V2**(top1 .277 vs .137);④实用 K≈4;绝对 top1 ~.27=帧条件 ~2.5 分支的真上限,残余不确定性真实。
+
+---
+
+## 7. 总结论(全轮 C/E1/E2/E4/PoC/sweep)
+1. **milestone+1 多峰在"身份"层**(哪个 milestone),外观给定身份后近单峰。
+2. **Stage-1 必须多峰(MDN),回收随 K 单调**;best-of-N 放身份轴、不放 grid/code。
+3. **grid-cos 是不敏感错指标**;正确头指标 = 身份 top-N(+ 下游 SR)。⚠️ 见 FINAL_REPORT 更正。
+4. **目标空间 = pi0.5 SigLIP 同空间**(E2 deploy 0.716≈DINOv3-H),DINOv3-H+CRAVE 降为离线 label 工厂。
+5. **主候选 = V3.1**(真任务分叉、身份最可分)。
+6. 残余上限:帧条件 ~2.5 分支 / 身份 top1 ~.27 = 从单帧预测下一 milestone 的真实难度,须靠更多上下文或下游接受多峰子目标。
 
 ---
 

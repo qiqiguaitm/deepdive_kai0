@@ -97,6 +97,8 @@
 
 **三大天花板(实测)**:①容量(transformer)无用;②多模态(VAE best-of-8)只回收 +0.02;③感知端(多视角+时序)只 +0.005。oracle→deploy 的 gap 大部分是**"从当前预测未来"的真实信息损失**,是硬的。
 
+> ⚠️ **更正(2026-07,见 `RESEARCH_DIRECTION_milestone_universal_fusion_2026-07.md`)**:上面 ②"多模态只回收 +0.02"**测错了轴**。best-of-8-on-code / grid-cos 对**身份多峰不敏感**;真正的多峰在"下一个是哪个 milestone"(身份),帧条件后仍 ~2.5 分支。换成 MDN 多峰 Stage-1 + 身份 top-N 指标后,best-of-N 随 K 单调回收(E1 best-of-3 **+0.29**;gf3 sweep V3.1 top3 .377→.448)。故"多模态天花板低"结论作废——**是 grid-cos 掩盖了它**。正确头指标 = 身份 top-N + 下游 SR,不是 grid-cos。
+
 ---
 
 ## 5. 产物索引
