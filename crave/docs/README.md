@@ -11,6 +11,7 @@
 |---|---|
 | **[CRAVE_overview](CRAVE_overview.md)** | **总体介绍(入口)** — 方法、架构、效果、代码结构、未来方向。先读这个。 |
 | **[CRAVE_positioning_and_roadmap](CRAVE_positioning_and_roadmap.md)** | 定位 / 场景 / roadmap:前沿地图 + vs SOTA + 工作项 A/B/C/D + 分阶段安排 |
+| **[related_work_map](related_work_map.md)** | **三轴谱系图(价值 / 世界模型 / 中间表示)**:~15 篇归位(VIP/LIV/RECAP/χ0/SARM2/SVM/STEAM/SRPO/Fast-WAM/LaWAM/RT-Traj/RT-Aff…)+ CRAVE 护城河 + 跨轴空位(CRAVE×LaWM×RT-Traj)。投稿 positioning 一页图。 |
 
 ### 核心方法
 
@@ -42,6 +43,7 @@
 |---|---|
 | **[STATUS](STATUS.md)** | 单页 TODO:已收口 / 已否决 / 未做可做 |
 | **[decoder_benchmark](decoder_benchmark.md)** | 🏆 解码器统一基准(最优解码方案):检索(最近真实帧)语义保真+锐度双赢 cos0.84/940;合成保真封顶 ~0.47 |
+| **[milestone_concept_and_universal_next](milestone_concept_and_universal_next.md)** | 🧭 概念再审视:recurrence 是频率代理非本质;更合理 milestone=瓶颈+变点+不可逆;普适 milestone+1=离散功能化 latent world model |
 | **[greedy_vs_maxprod_aliasing](greedy_vs_maxprod_aliasing.md)** | 🔬 诊断:成功数据下 greedy≠max-product(43% 一致)= milestone 混叠指纹;rollout 的 "milestone +1" 贴合 greedy |
 | **[em_hmm_negative_result](em_hmm_negative_result.md)** | ❌ 已否决:EM-HMM 统一概率框架(hmm-cluster collapsed in 768D) |
 | **[archive/](archive/)** | 历史归档:探索记录索引 · 网站大纲 · 连续 value 路线 |
