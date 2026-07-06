@@ -104,8 +104,10 @@ def main():
     imgs, _ = read_imgs(args.dataset_root, args.camera, E, FR, np.array(uniq), 224, 128)
     enc = SiglipBigVision(npz, device=dev)
     grids = enc.encode_grid(imgs, bs=32); din = grids.shape[1]
-    gmu, gsd = grids.mean(), grids.std() + 1e-6
-    GZ = torch.from_numpy(((grids - gmu) / gsd).astype(np.float32)); gist = GZ.mean((2, 3))
+    gmu, gsd = float(grids.mean()), float(grids.std() + 1e-6)
+    GZnp = ((grids - gmu) / gsd).astype(np.float32); del grids
+    gist = torch.from_numpy(GZnp.mean((2, 3)))                             # fp32 pooled (small)
+    GZ = torch.from_numpy(GZnp).half(); del GZnp                          # fp16 CPU grids (halve RAM vs fp32)
     tra = np.array([u2k[p[0]] for p in tr]); trb = np.array([u2k[p[1]] for p in tr]); trn = np.array([p[3] for p in tr])
     vaa = np.array([u2k[p[0]] for p in va]); vab = np.array([u2k[p[1]] for p in va]); vbn = np.array([p[3] for p in va])
 
@@ -118,7 +120,7 @@ def main():
     o2 = torch.optim.AdamW(predm.parameters(), lr=2e-4, weight_decay=1e-5)
     for step in range(args.steps):
         sel = torch.randint(0, len(tra), (64,))
-        Gc = GZ[tra[sel]].to(dev); Gf = GZ[trb[sel]].to(dev); gc = gist[tra[sel]].to(dev)
+        Gc = GZ[tra[sel]].float().to(dev); Gf = GZ[trb[sel]].float().to(dev); gc = gist[tra[sel]].to(dev)
         nm = torch.from_numpy(trn[sel.numpy()]).long().to(dev)
         if inv is not None:                                                # teacher path
             z = inv(Gc, Gf); gh = fwd(Gc, z)
@@ -148,7 +150,7 @@ def main():
     co, cd_, cb, cp = [], [], [], []; idhit = {1: 0, 3: 0, 5: 0}
     with torch.no_grad():
         for s in range(0, len(vaa), 128):
-            Gc = GZ[vaa[s:s + 128]].to(dev); Gf = GZ[vab[s:s + 128]].to(dev); gc = gist[vaa[s:s + 128]].to(dev)
+            Gc = GZ[vaa[s:s + 128]].float().to(dev); Gf = GZ[vab[s:s + 128]].float().to(dev); gc = gist[vaa[s:s + 128]].to(dev)
             gtr = f(Gf); zdep = predm.deploy_mean(gc)
             if inv is not None:
                 co.append(cn(f(fwd(Gc, inv(Gc, Gf))), gtr))
@@ -160,7 +162,7 @@ def main():
         # identity top-N: rank milestones by cos(deploy predicted pooled gist, SigLIP proto)
         idpred = []
         for s in range(0, len(vaa), 128):
-            Gc = GZ[vaa[s:s + 128]].to(dev); gc = gist[vaa[s:s + 128]].to(dev)
+            Gc = GZ[vaa[s:s + 128]].float().to(dev); gc = gist[vaa[s:s + 128]].to(dev)
             gh = fwd(Gc, predm.deploy_mean(gc)).mean((2, 3)).cpu().numpy()  # predicted pooled gist
             idpred.append(gh)
         idpred = np.concatenate(idpred); idpred /= (np.linalg.norm(idpred, axis=1, keepdims=True) + 1e-8)

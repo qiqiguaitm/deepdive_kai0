@@ -53,7 +53,12 @@ def main():
     tm = torch.load(args.tm_ckpt, map_location="cpu", weights_only=False)
     din, cd, gmu, gsd = tm["din"], tm["code_dim"], tm["gmu"], tm["gsd"]
     predm = PredMDN(din, cd, tm["K"]).to(dev); predm.load_state_dict(tm["predm"]); predm.eval()
-    fwd = ForwardAdaLN(din, cd).to(dev); fwd.load_state_dict(tm["fwd"]); fwd.eval()
+    if tm.get("fwd_arch") == "concat":                                     # ablation concat variant
+        from train_lawm_patch import ForwardDec
+        fwd = ForwardDec(din, cd).to(dev)
+    else:
+        fwd = ForwardAdaLN(din, cd).to(dev)
+    fwd.load_state_dict(tm["fwd"]); fwd.eval()
     enc = SiglipBigVision(npz, device=dev)
     print(f"two-model V2 K={tm['K']}; measuring lag over {args.n_eps} eps", flush=True)
 
