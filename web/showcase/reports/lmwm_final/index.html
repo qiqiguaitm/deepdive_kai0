@@ -208,6 +208,92 @@
   </section>
 
   <section>
+    <div class="snum">01B / 新架构(2026-07 定案)</div>
+    <h2>两模型:身份(MDN)+ 落地 · π0.5 SigLIP 空间</h2>
+    <p class="sub">深调研后重构:①多峰在<b>"下一个是哪个 milestone"(身份)</b>而非外观 → Stage-1 用 <b>MDN 多峰分布</b>(回归会塌);②目标空间换成 <b>π0.5 自己的 SigLIP</b>(实测 deploy 0.716 ≥ DINOv3-H 0.694,融合零损失),DINOv3-H+CRAVE 降为<b>离线 label 工厂</b>;③判据从 grid-cos 换成<b>身份 top-N</b>(grid-cos 对身份多峰不敏感)。</p>
+
+    <div class="diagram">
+      <svg viewBox="0 0 1000 470" role="img" aria-label="两模型新架构数据流图">
+        <style>
+          .n2bx{fill:#0f002e;stroke:#3730a3;stroke-width:1.5}
+          .n2fz{fill:#2a1065;stroke:#7c3aed;stroke-width:1.8}
+          .n2ac{fill:#1a0b3e;stroke:#a78bfa;stroke-width:2}
+          .n2of{fill:rgba(124,58,237,.05);stroke:#3730a3;stroke-width:1.3;stroke-dasharray:5 4}
+          .n2t{fill:#e8eaf6;font:600 13px sans-serif;text-anchor:middle}
+          .n2s{fill:#8892c8;font:10.5px monospace;text-anchor:middle}
+          .n2ar{stroke:#a78bfa;stroke-width:1.8;fill:none}
+          .n2ard{stroke:#5a5e8c;stroke-width:1.5;fill:none;stroke-dasharray:5 4}
+          .n2lb{fill:#818cf8;font:10px monospace;text-anchor:middle}
+        </style>
+        <!-- offline label factory -->
+        <rect class="n2of" x="285" y="12" width="430" height="50" rx="10"/>
+        <text class="n2t" x="500" y="32">离线 label 工厂 · DINOv3-H(840M)+ CRAVE Viterbi</text>
+        <text class="n2s" x="500" y="50">定义 milestone+1 目标帧 · 不上线</text>
+        <path class="n2ard" d="M500,62 L500,120" marker-end="url(#ahd)"/>
+        <text class="n2lb" x="560" y="92">训练目标</text>
+
+        <!-- row 1: encode + identity -->
+        <rect class="n2bx" x="18" y="150" width="104" height="62" rx="9"/>
+        <text class="n2t" x="70" y="176">当前帧</text><text class="n2s" x="70" y="196">224²×3</text>
+        <rect class="n2fz" x="150" y="150" width="150" height="62" rx="9"/>
+        <text class="n2t" x="225" y="176">π0.5 SigLIP 塔</text><text class="n2s" x="225" y="196">冻结 · 与策略共享</text>
+        <rect class="n2bx" x="330" y="150" width="104" height="62" rx="9"/>
+        <text class="n2t" x="382" y="176">grid G_t</text><text class="n2s" x="382" y="196">16×16×1152</text>
+        <rect class="n2bx" x="462" y="150" width="96" height="62" rx="9"/>
+        <text class="n2t" x="510" y="176">gist g_t</text><text class="n2s" x="510" y="196">pool 1152</text>
+        <rect class="n2ac" x="588" y="150" width="204" height="62" rx="9"/>
+        <text class="n2t" x="690" y="176">Stage-1 · MDN(K≈4)</text><text class="n2s" x="690" y="196">身份分布 · 多峰 → 采样 ẑ</text>
+
+        <!-- row 2: grounding + inject -->
+        <rect class="n2ac" x="330" y="330" width="210" height="62" rx="9"/>
+        <text class="n2t" x="435" y="356">Stage-2 · grounding</text><text class="n2s" x="435" y="376">(G_t, ẑ) → 下一 grid · 确定性</text>
+        <rect class="n2bx" x="566" y="330" width="110" height="62" rx="9"/>
+        <text class="n2t" x="621" y="356">子目标 Ĝ</text><text class="n2s" x="621" y="376">16×16×1152</text>
+        <rect class="n2fz" x="704" y="330" width="188" height="62" rx="9"/>
+        <text class="n2t" x="798" y="352">π0.5 action expert</text><text class="n2s" x="798" y="372">注入 · KI · RoPE 偏移</text>
+
+        <!-- arrows row1 -->
+        <path class="n2ar" d="M122,181 L150,181" marker-end="url(#ah)"/>
+        <path class="n2ar" d="M300,181 L330,181" marker-end="url(#ah)"/>
+        <path class="n2ar" d="M434,181 L462,181" marker-end="url(#ah)"/>
+        <path class="n2ar" d="M558,181 L588,181" marker-end="url(#ah)"/>
+        <!-- G_t -> Stage-2 (spatial basis) -->
+        <path class="n2ar" d="M360,212 C360,300 380,300 400,330" marker-end="url(#ah)"/>
+        <text class="n2lb" x="300" y="290">当前 grid(空间基底)</text>
+        <!-- MDN -> z_hat -> Stage-2 -->
+        <path class="n2ar" d="M690,212 C690,300 560,300 500,330" marker-end="url(#ah)"/>
+        <text class="n2lb" x="640" y="300">ẑ 采样 · best-of-N</text>
+        <!-- Stage-2 -> Ghat -> expert -->
+        <path class="n2ar" d="M540,361 L566,361" marker-end="url(#ah)"/>
+        <path class="n2ar" d="M676,361 L704,361" marker-end="url(#ah)"/>
+      </svg>
+      <div class="legend">
+        <span><i style="background:#2a1065;border:1px solid #7c3aed"></i>冻结 · 共享(π0.5 塔/expert)</span>
+        <span><i style="background:#1a0b3e;border:1px solid #a78bfa"></i>可训练(Stage-1/2)</span>
+        <span><i style="background:transparent;border:1px dashed #3730a3"></i>离线 · 只出监督目标</span>
+      </div>
+    </div>
+
+    <div class="scroll"><table>
+      <thead><tr><th>维度</th><th>旧结构</th><th>新结构</th></tr></thead>
+      <tbody>
+        <tr><td class="term">编码器</td><td>DINOv3-H 840M(在线)</td><td class="pos">π0.5 SigLIP(同空间 · 复用 KV)</td></tr>
+        <tr><td class="term">预测</td><td>单段 predm→forward,VAE 挂 code</td><td class="pos">两段:MDN 身份 + 确定性 grounding</td></tr>
+        <tr><td class="term">多峰放哪</td><td>code(VAE)→ 无用(+0.02)</td><td class="pos">身份(MDN)→ 随 K 单调,top3 .377→.448</td></tr>
+        <tr><td class="term">判据</td><td>grid-cos</td><td class="pos">身份 top-N + 下游 SR(grid-cos 弃用)</td></tr>
+        <tr><td class="term">DINOv3+CRAVE</td><td>在线目标空间</td><td>离线 label 工厂</td></tr>
+      </tbody>
+    </table></div>
+
+    <figure>
+      <video src="assets/twomodel_ep8.mp4" muted autoplay loop playsinline></video>
+      <figcaption><b>新架构 · ep8 渲染</b> · 四栏 = 当前帧 │ <b>预测 m+1</b>(Stage-1 MDN → Stage-2 → SigLIP 解码)│ 真实 m+1 编→解码 │ 真实 m+1 帧。SigLIP 解码略糊(对比训练特征丢高频),但衣物/夹爪/折叠态/落点忠实,可视化能力在新空间保留。</figcaption>
+    </figure>
+
+    <div class="keybox"><p><b>一句话</b>:旧结构把多峰放错地方(code)、用错指标(grid-cos)、背错编码器(DINOv3-H);新结构把多峰归到身份(MDN)、指标换成身份命中、编码器换成 π0.5 自己的 —— 每步都有实验数支撑。</p></div>
+  </section>
+
+  <section>
     <div class="snum">02 / 效果</div>
     <h2>泛化验证</h2>
     <p class="sub">最终模型在 <b>未训练的 kai0 留出集</b> 与 <b>vis_base 跨数据集</b> 上预测 milestone+1。四栏 = 当前 │ 预测 m+1 解码 │ 真实 m+1 编解码 │ 真实 m+1 帧(都过同一解码器 → 差异纯是预测质量)。</p>
