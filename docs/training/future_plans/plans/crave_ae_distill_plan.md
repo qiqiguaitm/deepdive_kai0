@@ -87,6 +87,12 @@ L_rank = E_{i,j} max(0, m_ij − (g_φ(s_i)−g_φ(s_j))·sign(y_i−y_j))
 
 **⚠️ 天花板提醒(洞察 C)**:per-frame g_φ(冻结/放开都)是**帧的确定性函数** → 视觉相同、相位不同的帧**消不了歧**(和 cluster 一样)。真消歧需时序上下文。**可选路径项**:rank g_φ 拟合 **Viterbi 校正值**(Method B,带路径消歧的序)而非原始进度 → 既拿连续可微、又拿路径消歧。留作 Phase 2b。
 
+### 🔧 冻结档骨架已搭好(D1 一过即可训)
+`crave/experiments/train_gphi_ranking.py`(冻结档:直接吃缓存 DINOv3-H 特征 = frozen backbone,只训 head;~1 分钟/40ep)。已实跑验证:
+- **sanity 锚成立**:g_φ match CRAVE-viterbi 曲线,held-out **per-ep corr 均值 0.94**、val 逐对 ranking acc **0.91** → 损失/采样正确(图 `visualization/ae_distill/gphi_viterbi_sanity.png`)。
+- **发现(修正你 doc §5 的"ranking 隐式平滑"说法)**:frozen per-frame head **只跟特征一样抖**(mono ~0.55),**ranking 只约束序、不约束平滑**。→ 已加 **TV 时序平滑项**(同 ep 相邻帧 `(Δg)²`,不回归 Δy 免重现平台 A≡0,`--smooth` 旋钮);**usable advantage 还需**:调大 λ_s 或**读出时 median/EMA 平滑 g_φ**(= CRAVE 做法)。这条直接进 Phase-2 待办。
+- 待接:D1 选出胜出标签(`--label anchor|viterbi`)、放开档(解冻+DINO-anchor)、变点加权、读 advantage。
+
 ---
 
 ## ⭐ 决策点 D2(Phase 2 后)
