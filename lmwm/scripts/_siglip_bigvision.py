@@ -39,9 +39,15 @@ class SiglipBigVision:
         self.device = device
 
     @torch.no_grad()
-    def _forward(self, px):                                                    # px (N,3,224,224) in [-1,1]
-        x = F.conv2d(px, self.patch_w, self.patch_b, stride=14)                # (N,1152,16,16)
-        x = x.flatten(2).transpose(1, 2) + self.pos                            # (N,256,1152)
+    def _forward(self, px):                                                    # px (N,3,H,W) in [-1,1]
+        x = F.conv2d(px, self.patch_w, self.patch_b, stride=14)                # (N,1152,P,P)
+        P = x.shape[-1]
+        pos = self.pos                                                         # (1,256,1152) = 16x16
+        if P != 16:                                                            # interpolate pos-emb for non-224 res
+            p0 = pos.reshape(1, 16, 16, D).permute(0, 3, 1, 2)                 # (1,D,16,16)
+            p0 = F.interpolate(p0, size=(P, P), mode="bicubic", align_corners=False)
+            pos = p0.permute(0, 2, 3, 1).reshape(1, P * P, D)
+        x = x.flatten(2).transpose(1, 2) + pos                                 # (N,P*P,1152)
         for l in range(NL):
             h = F.layer_norm(x, (D,), self.ln0_s[l], self.ln0_b[l], EPS)
             q = torch.einsum("nld,dhk->nlhk", h, self.qk[l]) + self.qb[l]

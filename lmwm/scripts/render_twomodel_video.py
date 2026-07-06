@@ -45,6 +45,7 @@ def main():
     ap.add_argument("--dataset_root", default="kai0/data/Task_A/kai0_base", type=Path)
     ap.add_argument("--camera", default="observation.images.top_head")
     ap.add_argument("--cell", type=int, default=256)
+    ap.add_argument("--clamp_k", type=float, default=0.0, help="clamp pred grid to real dist mean±k*sd (0=off); kills off-manifold black saturation")
     ap.add_argument("--fps", type=int, default=10)
     ap.add_argument("--out", default="lmwm/outputs/twomodel_milestone_ep8.mp4")
     ap.add_argument("--pi05_npz", default="")
@@ -94,18 +95,32 @@ def main():
         fwd = ForwardDec(din, cd).to(dev); fwd.load_state_dict(tm["fwd"]); fwd.eval()
         deploy_code = mdn.deploy_mean
     dc = torch.load(args.dec_ckpt, map_location="cpu", weights_only=False)
-    dec = GridDecoder(dc["din"], dc["res"]).to(dev); dec.load_state_dict(dc["model"]); dec.eval()
-    print(f"loaded two-model K={tm['K']} + SigLIP decoder (val_L1={dc.get('val_L1')})", flush=True)
+    if "dec" in dc:                                                         # make_decoder (big/xl), per-channel mu/sd
+        from crave.decoding.decoder import make_decoder
+        dec = make_decoder(dc["din"], dc["dec"]).to(dev); dec.load_state_dict(dc["model"]); dec.eval()
+        dmu = torch.from_numpy(np.asarray(dc["mu"])).float().to(dev)
+        dsd = torch.from_numpy(np.asarray(dc["sd"])).float().to(dev); dec_norm = "chan"
+    else:                                                                   # GridDecoder on raw grids
+        dec = GridDecoder(dc["din"], dc["res"]).to(dev); dec.load_state_dict(dc["model"]); dec.eval()
+        dec_norm = "raw"
+    print(f"loaded two-model K={tm['K']} + decoder {dc.get('dec','grid')}@{dc['res']} (val_L1={dc.get('val_L1')})", flush=True)
 
     Gn = torch.from_numpy(((Graw - gmu) / gsd).astype(np.float32)).to(dev)   # normalized for two-model
     gist = Gn.mean((2, 3))
-
-    def decode_raw(graw_t):                                                  # (B,1152,16,16) raw -> (B,H,W,3) u8
-        with torch.no_grad():
-            o = dec(graw_t.to(dev)).cpu().numpy()
-        return np.clip((o.transpose(0, 2, 3, 1) + 1) * 127.5, 0, 255).astype(np.uint8)
-
     T = len(order); C = args.cell
+
+    def decode_raw(graw_t, clamp=False):                                    # (B,1152,P,P) raw -> (B,C,C,3) u8
+        with torch.no_grad():
+            g = graw_t.to(dev)
+            g = (g - dmu) / dsd if dec_norm == "chan" else g
+            if clamp and args.clamp_k > 0:                                  # project off-manifold patches back to real range
+                g = g.clamp(-args.clamp_k, args.clamp_k)
+            o = dec(g).cpu().numpy()
+        im = np.clip((o.transpose(0, 2, 3, 1) + 1) * 127.5, 0, 255).astype(np.uint8)
+        if im.shape[1] != C:
+            im = np.stack([cv2.resize(x, (C, C)) for x in im])
+        return im
+
     vw = cv2.VideoWriter(str(REPO / args.out), cv2.VideoWriter_fourcc(*"mp4v"), args.fps, (C * 4, C + 24))
     with torch.no_grad():
         for s in range(0, T, 64):
@@ -113,7 +128,7 @@ def main():
             zt = deploy_code(gist[sl])                                       # Stage-1 deploy identity (v1 gist / v2 code)
             Ghat_n = fwd(Gn[sl], zt)                                         # Stage-2 grounding (normalized)
             Ghat_raw = Ghat_n * float(gsd) + float(gmu)
-            pred = decode_raw(Ghat_raw)                                      # predicted m+1 decoded
+            pred = decode_raw(Ghat_raw, clamp=True)                          # predicted m+1 decoded (clamped to real range)
             real_dec = decode_raw(torch.from_numpy(Graw[tgt_of[sl]]))        # real m+1 (encode target->decode)
             for k, t in enumerate(range(sl.start, sl.stop)):
                 row = np.concatenate([disp[t], pred[k], real_dec[k], disp[tgt_of[t]]], axis=1)[:, :, ::-1]
