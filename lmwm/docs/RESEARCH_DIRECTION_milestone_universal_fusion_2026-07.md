@@ -148,7 +148,23 @@ grid: deploy V3.1 ~0.71(≈E2 0.716)/V2 ~0.66;best-of-8 增益 V3.1 .005→.010 
 
 ---
 
-## 7. 总结论(全轮 C/E1/E2/E4/PoC/sweep)
+## 6.6 预测器演进 v1→v2→v3,**定档 v2**(lag/平滑诊断)
+grid-cos 掩盖了一个部署级问题:预测时间滞后。逐版实测(120/60 eps):
+| | v1 concat | **v2 teacher+lift** | v3 +manifoldD |
+|---|---|---|---|
+| 欠射 ratio(model/dataset lag) | 0.293 | **0.987** | 0.022 |
+| 往前 lag>0 | 23% | **63%** | 2.7% |
+| 相邻帧预测平滑 cos(真实帧 0.67) | — | **0.937** | 0.774 |
+| deploy grid-cos | 0.708 | 0.704 | 0.572 |
+
+- **v1**(直接 MDN-over-gist + concat,code=1152 无瓶颈):Stage-2 抄当前 grid → **77% 预测塌回持久**(lag≤0),ratio 0.29。
+- **v2**(LaWM inverse-**teacher** → 紧凑码 128 → **AdaLN** forward → MDN-over-code → **lift** 反持久):塌缩修好,ratio 0.29→**0.99**,且**确定性 deploy 逐帧极平滑(0.937 > 真实帧)= 满足"连续帧 milestone+1 一致、不跳变"**。**定档。**
+- **v3**(v2 + 特征判别器把输出拉回流形):**证伪** —— "看起来真实"最省解=当前帧 → lag **再塌到 0.02**。→ 别在模型层对抗 off-manifold。
+
+**v2 遗留(不影响定档)**:① off-manifold 的 blob 是**纯可视化伪影**(decoder 只在真实 grid 上训),非 VLA 问题,可单独域适配 decoder;② 32% 负 lag 主要是 **CRAVE 复现**(同 milestone 早先出现)导致的匹配伪影,用只往前搜的 lag 口径可剔。
+脚本:`train_twomodel_v2.py`(定档)、`measure_twomodel_v2_lag.py`(lag+平滑)。
+
+## 7. 总结论(全轮 C/E1/E2/E4/PoC/sweep/lag)
 1. **milestone+1 多峰在"身份"层**(哪个 milestone),外观给定身份后近单峰。
 2. **Stage-1 必须多峰(MDN),回收随 K 单调**;best-of-N 放身份轴、不放 grid/code。
 3. **grid-cos 是不敏感错指标**;正确头指标 = 身份 top-N(+ 下游 SR)。⚠️ 见 FINAL_REPORT 更正。

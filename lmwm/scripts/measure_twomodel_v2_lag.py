@@ -58,7 +58,7 @@ def main():
     print(f"two-model V2 K={tm['K']}; measuring lag over {args.n_eps} eps", flush=True)
 
     rng = np.random.default_rng(args.seed); eps = np.unique(E); rng.shuffle(eps); eps = eps[:args.n_eps]
-    ds_lags, md_lags = [], []
+    ds_lags, md_lags, pred_smooth, real_smooth = [], [], [], []
     for ei, e in enumerate(eps):
         fi = np.where(E == e)[0]; fi = fi[np.argsort(FR[fi])]
         if len(fi) < 12:
@@ -80,6 +80,9 @@ def main():
                                    for b in range(0, len(fi), 128)])
         Gf = G.reshape(len(fi), -1); Gf /= (np.linalg.norm(Gf, axis=1, keepdims=True) + 1e-8)
         Pf = pred.reshape(len(fi), -1); Pf /= (np.linalg.norm(Pf, axis=1, keepdims=True) + 1e-8)
+        if len(Pf) > 1:                                                       # temporal smoothness of the prediction
+            pred_smooth.extend((Pf[:-1] * Pf[1:]).sum(1).tolist())           # adjacent-frame pred cos (high=smooth)
+            real_smooth.extend((Gf[:-1] * Gf[1:]).sum(1).tolist())           # baseline: adjacent real-frame cos
         sims = Pf @ Gf.T
         for j in range(len(fi)):
             ni = vseg_of[j] + 1
@@ -102,6 +105,8 @@ def main():
            "frac_lag_zero_or_back(<=0)": round(float((md <= 0).mean()), 3),
            "frac_lag_forward(>0)": round(float((md > 0).mean()), 3),
            "undershoot_ratio_mean": round(float(md.mean() / (ds.mean() + 1e-9)), 3),
+           "pred_smoothness_adj_cos": round(float(np.mean(pred_smooth)), 4),   # high = temporally smooth (no jumping)
+           "real_frame_smoothness_adj_cos": round(float(np.mean(real_smooth)), 4),  # reference
            "old_dinov3_ref": {"model_lag_s": 0.845, "dataset_lag_s": 2.43, "ratio": 0.347}}
     (REPO / "lmwm/outputs/twomodel_v2_lag.json").write_text(json.dumps(res, indent=2))
     print(json.dumps(res, indent=2), flush=True)
