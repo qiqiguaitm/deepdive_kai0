@@ -242,6 +242,33 @@
         <tr><td class="term">corr(value,time)</td><td>CRAVE 进度 与 时间 的相关</td><td>进度标签质量(0.94=很可靠)</td></tr>
       </tbody>
     </table></div>
+
+    <h3 style="font-size:19px;margin:30px 0 6px;color:var(--text)">实测对比 · LaWM vs 我们 V3.1+VAE</h3>
+    <p class="sub" style="margin-top:4px">同一批 kai0 数据上的实际数值。⚠️ 编码器空间不同(ViT-B 768 vs ViT-H+ 1280)+ 目标定义不同 → 绝对数不硬比,<b>唯一严格同口径可比的是 lift(净技巧)</b>。</p>
+    <div class="scroll"><table>
+      <thead><tr><th>指标</th><th class="num">LaWM(官方 ckpt)</th><th class="num">我们 V3.1+VAE</th><th>可比性 / 口径</th></tr></thead>
+      <tbody>
+        <tr><td class="term">oracle grid-cos</td><td class="num">0.770</td><td class="num">0.774</td><td>天花板;编码器空间不同,趋势可比</td></tr>
+        <tr><td class="term">persistence(白给基线)</td><td class="num">0.627</td><td class="num">0.639</td><td>= oracle − lift(目标本来离当前多近)</td></tr>
+        <tr><td class="term">lift(oracle − persistence)</td><td class="num">+0.143</td><td class="num">+0.135</td><td class="pos"><b>唯一同口径可比 → 基本相当</b></td></tr>
+        <tr><td class="term">deploy grid-cos</td><td class="num amb">—<sup>1</sup></td><td class="num">0.700</td><td>只看当前帧的实战值</td></tr>
+        <tr><td class="term">deploy 净增益(deploy − persist)</td><td class="num amb">—<sup>1</sup></td><td class="num">+0.061</td><td>实战比"不动"多赚多少</td></tr>
+        <tr><td class="term">best-of-8(多模态覆盖)</td><td class="num amb">—<sup>2</sup></td><td class="num">0.705</td><td>VAE 采 8 取最像</td></tr>
+        <tr><td class="term">目标 horizon / dataset lag</td><td class="num">固定 1.6s</td><td class="num">~2.43s(进度目标)</td><td>目标定义不同</td></tr>
+        <tr><td class="term">model lag / 欠射 ratio</td><td class="num amb">—<sup>3</sup></td><td class="num">0.845s / 0.347</td><td>敢预测多远</td></tr>
+        <tr><td class="term">corr(value, time)</td><td class="num amb">N/A<sup>4</sup></td><td class="num">0.94</td><td>CRAVE 进度标签质量</td></tr>
+        <tr><td class="term">progress 单调 / 负滞后率</td><td class="num amb">N/A<sup>4</sup></td><td class="num">100% / 0%</td><td>Viterbi 单调保证</td></tr>
+        <tr><td class="term">世界模型参数</td><td class="num">数百 M Transformer</td><td class="num">~27M CNN(轻 ~10×)</td><td>结构规模</td></tr>
+        <tr><td class="term">下游 SR(extrinsic)</td><td class="num pos">LIBERO 98.6% 等</td><td class="num amb">待测(下一步)</td><td>唯一未覆盖的短板</td></tr>
+      </tbody>
+    </table></div>
+    <p class="sub" style="margin-top:10px;font-size:13px;color:var(--text3)">
+      <sup>1</sup> LaWM 的 LAM 内<b>不产出预测码</b>——部署时"从现在猜码"甩给下游 VLA 策略,故 deploy 类指标在 LAM 上测不到(其 lift 用 oracle 真码算)。
+      <sup>2</sup> 未在 LaWM ckpt 上做 best-of-8 采样评测。
+      <sup>3</sup> LaWM horizon 固定 1.6s、无 milestone 目标,不存在"欠射"这一量。
+      <sup>4</sup> CRAVE 进度标签为我们特有;LaWM 无进度/事件标签。
+    </p>
+    <div class="keybox" style="margin-top:16px"><p><b>一句话读表:</b>唯一严格同口径的 <b>lift(净技巧)+0.135 vs +0.143 基本打平</b>——数百 M 的 Transformer-DiT 在我们数据上没占到便宜;而 deploy/欠射/进度单调/跨集一致等是我们能测、LaWM 结构上给不出的量。反过来,<b>下游 SR</b> 是 LaWM 有、我们唯一还没补的短板。</p></div>
   </section>
 
   <section>
