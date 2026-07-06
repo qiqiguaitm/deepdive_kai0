@@ -2252,6 +2252,37 @@ _CONFIGS = [
         inline_eval_every=4,
     ),
 
+    # Mode B(回折过渡 20-35s 冻结)根因排查 E1 — 去 DCT 重训 (pi05_v4_awbc_modeB_freeze_diagnosis_plan §1 E1).
+    # 唯一变量 = 关 use_dct_loss (DCT 头号嫌疑: 两冻结 ckpt 唯一共有且直接压逃逸动作). 数据/LR/步数/batch
+    # 与 pi05_v4_awbc_dct_freshft 逐字段相同. init = E1b 洁净隔离: 用非-DCT 的 pi05_v4_awbc/49999/params
+    # (全链路零 DCT, DCT 归因最干净) 而非 freshft 的 pi05_v4_awbc_dct/49999. 判据=真机回折过渡是否还冻>5s.
+    TrainConfig(
+        name="pi05_v4_awbc_freshft_nodct",
+        model=pi0_config.Pi0Config(pi05=True),   # 关 DCT (vs freshft 的 use_dct_loss=True) — 唯一变量
+        data=LerobotAgilexDataConfig(
+            repo_id="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/A_v4_freshdagger_ft",
+            default_prompt=None,
+            base_config=DataConfig(prompt_from_task=True),
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_v4_awbc/pi05_v4_awbc/49999/params"  # E1b: 非-DCT twin
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1e-5, decay_steps=30_000, decay_lr=1e-6,
+        ),
+        ema_decay=0.9999,
+        num_train_steps=30_000,
+        keep_period=2_000,
+        save_interval=2_000,
+        num_workers=16,
+        batch_size=128,
+        fsdp_devices=8,
+        inline_eval_val_root="/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/self_built/vis_v2_merged_val",
+        inline_eval_n_frames=200,
+        inline_eval_every=4,
+    ),
+
     # AWBC v4 × from-PaliGemma-base (pi05_v4_awbc_from_paligemma_plan.md §3/§7): 同 pi05_v4_awbc 的全 v4
     # labeled 数据 (A_v4_base_dagger, AE adv_est_v1 打标 + discretize top-30%), 但 init 从 PaliGemma VLM base
     # 冷启动 (action expert 随机) + 冷启动 LR (warmup3k/peak3e-5/decay100k/end3e-6) + 100k step.
