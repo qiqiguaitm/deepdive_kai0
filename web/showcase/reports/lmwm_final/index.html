@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LMWM 报告 · Milestone Prediction</title>
+<title>LMWM: Latent Milestone World Model</title>
 <style>
   :root{
     --bg:#020010; --bg2:#05001a; --bg3:#0a0024; --bg4:#0f002e;
@@ -48,6 +48,8 @@
   .snum{font-family:var(--mono);font-size:13px;color:var(--accent3);letter-spacing:.04em}
   h2{font-size:25px;color:var(--text);margin:.15em 0 .1em;letter-spacing:-.015em;font-weight:720;text-wrap:balance}
   h2+.sub{color:var(--text2);margin:.1em 0 1.1em;max-width:74ch}
+  h3{font-size:19px;margin:30px 0 6px;color:var(--text);font-weight:680}
+  h3 .h3n{font-family:var(--mono);font-size:14px;color:var(--accent3);margin-right:8px}
   p{max-width:74ch} .prose b{color:var(--text)}
 
   .scroll{overflow-x:auto;border:1px solid var(--border);border-radius:12px;background:var(--bg3)}
@@ -59,20 +61,23 @@
   td.num,th.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
   td .term{color:var(--text);font-weight:600}
   td code{font-family:var(--mono);font-size:12.5px;color:var(--blue)}
-  td.arch{font-family:var(--mono);font-size:11.5px;color:var(--text2);line-height:1.55;min-width:380px}
-  td.arch b{color:var(--accent3);font-weight:600} td.arch em{color:var(--text3);font-style:normal}
-  .pos{color:var(--green)} .amb{color:var(--yellow)}
+  .pos{color:var(--green)} .amb{color:var(--yellow)} .neg{color:var(--red)}
 
   .diagram{background:var(--bg3);border:1px solid var(--border);border-radius:14px;padding:18px 8px}
   .diagram svg{display:block;width:100%;height:auto}
   .legend{display:flex;flex-wrap:wrap;gap:16px;justify-content:center;font-family:var(--mono);font-size:12px;color:var(--text2);padding:8px 12px 2px}
   .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+  .ref{font-size:12px;color:var(--text3);margin-top:6px} .ref a{color:var(--accent3)}
 
   .vids{display:flex;flex-direction:column;gap:18px}
   .vids figure{margin:0}
-  .vids a{color:var(--accent3)}
+  .flag{display:inline-block;font-family:var(--mono);font-size:11px;padding:1px 7px;border-radius:6px;margin-right:7px;vertical-align:1px}
+  .flag.bad{background:rgba(239,68,68,.14);color:#fca5a5;border:1px solid #7f1d1d}
+  .flag.good{background:rgba(34,197,94,.14);color:#86efac;border:1px solid #14532d}
   .keybox{background:rgba(124,58,237,.12);border:1px solid var(--accent2);border-radius:14px;padding:18px 20px;margin-top:16px}
   .keybox p{margin:0;color:var(--text);max-width:none;font-size:15.5px}
+  .badbox{background:rgba(239,68,68,.08);border:1px solid #7f1d1d;border-radius:14px;padding:16px 20px;margin-top:14px}
+  .badbox p{margin:.3em 0;color:var(--text);max-width:none;font-size:14.5px}
   footer{border-top:1px solid var(--border);padding:26px 0 52px;color:var(--text3);font-size:13px}
   footer code{font-family:var(--mono);font-size:12px;color:var(--text2)}
 </style>
@@ -80,13 +85,14 @@
 <body>
 
 <header class="top"><div class="wrap">
-  <div class="eyebrow">LMWM · 冻结世界模型子目标</div>
-  <h1><span class="grad">Milestone 预测器</span> — 版本</h1>
-  <p class="lede">面向 kai0 π0.5 VLA 的 milestone+1 <b>价值层宏观引导</b>:π0.5 SigLIP 同塔 + <b>预测器(Predictor)+ 生成器(Generator)</b> 两模块,目标来自 CRAVE 进度单调 milestone(DINOv3-H+CRAVE 为离线 label 工厂)。</p>
+  <div class="eyebrow">Latent Milestone World Model · for kai0 π0.5 VLA</div>
+  <h1><span class="grad">LMWM</span> — Latent Milestone World Model</h1>
+  <p class="lede">给 VLA 一个 milestone+1 的<b>价值层宏观引导</b>:π0.5 SigLIP 同塔 + <b>预测器(Predictor)+ 生成器(Generator)</b> 两模块。两条硬指标 —— ①解码保真、②预测的 milestone+1 进展价值 &gt; 当前 stage。对照基线 <b>LaWM</b>。</p>
   <div class="meta">
-    <span class="tag">模型 <b>预测器 + 生成器(center_w=0.1)</b></span>
+    <span class="tag">模型 <b>Predictor + Generator(center_w=0.1)</b></span>
     <span class="tag">编码器 <b>π0.5 SigLIP(同塔) · DINOv3-H 离线</b></span>
     <span class="tag">世界模型 <b>~34M CNN</b></span>
+    <span class="tag">baseline <b>LaWM</b></span>
     <span class="tag">2026-07-07</span>
   </div>
 </div></header>
@@ -97,123 +103,117 @@
     <div class="tile hl"><div class="k">deploy grid-cos</div><div class="v">0.728</div><div class="n">实战保真(身份 top3 0.511)</div></div>
     <div class="tile"><div class="k">oracle 天花板</div><div class="v">0.715</div><div class="n">已知真答案的上限</div></div>
     <div class="tile"><div class="k">预测 reach</div><div class="v">1.67<small>s</small></div><div class="n">&gt; LaWM 1.48s(更难目标)</div></div>
-    <div class="tile"><div class="k">跨数据集</div><div class="v">0.56</div><div class="n">vis_base 零微调 cos</div></div>
+    <div class="tile"><div class="k">世界模型参数</div><div class="v">~34<small>M</small></div><div class="n">vs LaWM ~230M(轻 ~10×)</div></div>
   </div>
 
   <figure>
-    <img alt="四栏对比:当前帧 | 预测 m+1 解码 | 真实 m+1 编解码 | 真实 m+1 帧" src="assets/hero.jpg">
-    <figcaption><b>kai0 留出集(未训练)</b> · 四栏 = 当前帧 │ <b>预测</b> m+1→解码 │ 真实 m+1 编→解码 │ 真实 m+1 帧。预测(第2栏)= 衣物更展开/更平,与真实"进度前进"的下一 milestone 吻合。</figcaption>
+    <img alt="LMWM 预测 milestone+1 四栏对比" src="assets/hero_cw01.jpg">
+    <figcaption><b>LMWM(center_w=0.1)预测 milestone+1</b> · 四栏 = 当前帧 │ <b>预测</b> m+1→解码 │ 真实 m+1 编→解码 │ 真实 m+1 帧。预测(第2栏)= 衣物更展开/更平,与真实"进度前进"的下一 milestone 吻合(硬指标①保真)。</figcaption>
   </figure>
 
+  <!-- ============ §01 LaWM baseline ============ -->
   <section>
-    <div class="snum">01 / 起点(v1 & 离线 label 工厂)</div>
-    <h2>DINOv3-H 编码 & 预测目标怎么来的</h2>
-    <p class="sub"><b>本节是起点与离线 label 工厂,最终部署架构见 §01B。</b> 冻结 DINOv3-H 编码器,后接轻量 forward-from-current 预测器(v1,~27M)。<b>预测目标</b> = CRAVE Viterbi 单调分配下"进度前进的下一 milestone"(时间前向、跨 episode 一致、medoid 干净)—— 这套 DINOv3-H + CRAVE 在最终架构里降为<b>离线 label 工厂</b>(只产监督目标、不上线),在线编码换成 π0.5 SigLIP。</p>
+    <div class="snum">01 / baseline</div>
+    <h2>Baseline: LaWM(Latent World Model)</h2>
+    <p class="sub">对照基线。LaWM 用<b>冻结 DINOv3</b> 编码 + 逆向动力学 latent action + AdaLN-DiT 解码,预测<b>固定 ~1.6s 后</b>的未来观测特征,再蒸馏给 VLA(Alternate-DiT action expert)。下面是其官方两阶段流水线图,以及我们认为的<b>两点不合理性</b>。</p>
+
+    <figure>
+      <img src="assets/lawm_ref/lawam_overview.png" alt="LaWM 官方两阶段流水线:Stage-1 latent action world model + Stage-2 VLA 集成">
+      <figcaption><b>LaWM 官方架构图</b>(两阶段):Stage-1 冻结 DINOv3 编码 current/horizon 观测 → 逆向动力学出 latent action → decoder 预测未来观测特征;Stage-2 把 latent 视觉子目标蒸馏进 VLA 的 Alternate-DiT action expert。<span class="ref">图源:LaWM 项目主页 <a href="https://rlinf.github.io/LaWAM/">rlinf.github.io/LaWAM</a>(~230M 参数,LIBERO 98.6% / 187ms)。</span></figcaption>
+    </figure>
+
+    <h3><span class="h3n">1.1</span>编码器与 VLA 脱离</h3>
+    <p>LaWM 的世界模型用<b>独立的 DINOv3 视觉塔</b>,和下游 VLA 策略<b>不共享表征、不复用 KV</b>。世界模型学到的隐空间不是策略消费的空间,融合时存在<b>表征隔阂</b> —— latent subgoal 要跨空间蒸馏才能被 action expert 用上,多一层损耗。</p>
+
+    <h3><span class="h3n">1.2</span>只做纯未来预测,正向作用弱</h3>
+    <p>LaWM 用<b>固定 ~1.6s 后的帧</b>当预测目标,没有"任务进展价值"的约束。而 1.6s 后的那一帧可能包含与进展<b>无关甚至误导</b>的信息(相机抖动、干扰物、回退动作)—— 用它做监督,世界模型可能学到<b>错误引导</b>,子目标未必"朝任务完成方向前进"。</p>
 
     <div class="diagram">
-      <svg viewBox="0 0 1000 430" role="img" aria-label="网络架构数据流图">
+      <svg viewBox="0 0 1000 300" role="img" aria-label="LaWM 两点不合理性示意">
         <defs>
           <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#a78bfa"/></marker>
-          <marker id="ahd" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#5a5e8c"/></marker>
+          <marker id="ahr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#ef4444"/></marker>
+          <marker id="ahg" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#22c55e"/></marker>
         </defs>
         <style>
-          .bx{fill:#0f002e;stroke:#3730a3;stroke-width:1.5}
-          .froz{fill:#2a1065;stroke:#7c3aed;stroke-width:1.8}
-          .grp{fill:rgba(124,58,237,.06);stroke:#3730a3;stroke-width:1.3;stroke-dasharray:4 4}
-          .t{fill:#e8eaf6;font:600 14px sans-serif;text-anchor:middle}
-          .s{fill:#8892c8;font:11px monospace;text-anchor:middle}
-          .dim{fill:#818cf8;font:11px monospace;text-anchor:middle}
-          .ar{stroke:#a78bfa;stroke-width:1.8;fill:none}
-          .ard{stroke:#5a5e8c;stroke-width:1.5;fill:none;stroke-dasharray:5 4}
+          .bt{fill:#e8eaf6;font:600 13px sans-serif;text-anchor:middle}
+          .bs{fill:#8892c8;font:10.5px monospace;text-anchor:middle}
+          .lb{fill:#8892c8;font:11px sans-serif;text-anchor:middle}
+          .bxa{fill:#0f002e;stroke:#3730a3;stroke-width:1.5}
+          .bxb{fill:#2a1065;stroke:#7c3aed;stroke-width:1.6}
         </style>
-        <rect class="bx" x="20" y="180" width="118" height="70" rx="10"/>
-        <text class="t" x="79" y="208">输入帧</text><text class="dim" x="79" y="228">256×256×3</text>
+        <!-- 1.1 decoupling -->
+        <text x="70" y="34" style="fill:#a78bfa;font:600 12px monospace">1.1 编码器脱离</text>
+        <rect class="bxb" x="40" y="48" width="180" height="54" rx="9"/>
+        <text class="bt" x="130" y="70">DINOv3 视觉塔</text><text class="bs" x="130" y="88">世界模型专用</text>
+        <rect class="bxa" x="330" y="48" width="180" height="54" rx="9"/>
+        <text class="bt" x="420" y="70">VLA 策略塔</text><text class="bs" x="420" y="88">自有 · 不共享</text>
+        <line x1="220" y1="75" x2="330" y2="75" stroke="#ef4444" stroke-width="2" stroke-dasharray="6 5"/>
+        <text x="275" y="66" style="fill:#fca5a5;font:16px sans-serif;text-anchor:middle">✕</text>
+        <text x="275" y="122" style="fill:#8892c8;font:10.5px sans-serif;text-anchor:middle">表征不共享 → 跨空间蒸馏,融合有隔阂</text>
 
-        <line class="ar" x1="138" y1="215" x2="182" y2="215" marker-end="url(#ah)"/>
-        <rect class="froz" x="184" y="168" width="156" height="94" rx="10"/>
-        <text class="t" x="262" y="196">DINOv3-H</text><text class="s" x="262" y="214">ViT-H+/16 · 冻结</text><text class="s" x="262" y="232">~840M</text><text class="s" x="262" y="250">纯torch standalone</text>
-
-        <line class="ar" x1="340" y1="215" x2="392" y2="215" marker-end="url(#ah)"/>
-        <text class="dim" x="366" y="205">16×16</text><text class="dim" x="366" y="234">×1280 · g_t</text>
-
-        <rect class="grp" x="394" y="70" width="248" height="300" rx="12"/>
-        <text class="s" x="518" y="90" style="fill:#a78bfa">forward-from-current 预测器 · ~27M</text>
-
-        <rect class="bx" x="412" y="104" width="98" height="54" rx="9"/>
-        <text class="t" x="461" y="128" style="font-size:13px">predm</text><text class="s" x="461" y="146">g_t → ẑ · 3.6M</text>
-        <rect class="bx" x="524" y="104" width="100" height="54" rx="9"/>
-        <text class="t" x="574" y="126" style="font-size:12.5px">VAE 头</text><text class="s" x="574" y="144">(mu, logvar)</text>
-        <line class="ar" x1="510" y1="131" x2="522" y2="131" marker-end="url(#ah)"/>
-
-        <rect class="bx" x="440" y="196" width="160" height="70" rx="9"/>
-        <text class="t" x="520" y="224">forward</text><text class="s" x="520" y="242">(g_t, code) → grid · 17M</text>
-        <line class="ar" x1="461" y1="158" x2="490" y2="194" marker-end="url(#ah)"/>
-
-        <rect class="bx" x="440" y="300" width="160" height="56" rx="9" style="stroke-dasharray:5 4"/>
-        <text class="t" x="520" y="322" style="font-size:13px">inverse (teacher)</text><text class="s" x="520" y="340">(g_t, g_target) → z · 6.5M</text>
-        <line class="ard" x1="520" y1="300" x2="520" y2="268" marker-end="url(#ahd)"/>
-
-        <rect class="bx" x="180" y="320" width="200" height="66" rx="9"/>
-        <text class="t" x="280" y="346" style="font-size:13px">CRAVE 目标构建</text><text class="s" x="280" y="364">Viterbi 单调 → g_target</text>
-        <line class="ard" x1="380" y1="342" x2="438" y2="330" marker-end="url(#ahd)"/>
-
-        <line class="ar" x1="642" y1="231" x2="690" y2="231" marker-end="url(#ah)"/>
-        <text class="dim" x="666" y="221">ĝ_target</text><text class="dim" x="666" y="250">16×16×1280</text>
-
-        <rect class="bx" x="692" y="120" width="150" height="64" rx="10"/>
-        <text class="t" x="767" y="146" style="font-size:13px">解码器 big+GDL</text><text class="s" x="767" y="164">→ 128×128×3 · 可视化</text>
-        <line class="ar" x1="690" y1="215" x2="700" y2="186" marker-end="url(#ah)"/>
-
-        <rect class="bx" x="692" y="250" width="160" height="78" rx="10" style="stroke:#818cf8"/>
-        <text class="t" x="772" y="276">π0.5 action expert</text><text class="s" x="772" y="294">obs_grid + û_T + ẑ</text><text class="s" x="772" y="312">KI + 蒸馏 ‖ẑ−z‖²</text>
-        <line class="ar" x1="690" y1="248" x2="702" y2="270" marker-end="url(#ah)"/>
+        <!-- 1.2 future-only timeline -->
+        <text x="70" y="182" style="fill:#a78bfa;font:600 12px monospace">1.2 纯未来预测(固定 1.6s)</text>
+        <line x1="60" y1="222" x2="900" y2="222" stroke="#3730a3" stroke-width="2"/>
+        <circle cx="120" cy="222" r="7" fill="#a78bfa"/><text class="lb" x="120" y="250">当前帧</text>
+        <line x1="120" y1="222" x2="620" y2="222" stroke="#ef4444" stroke-width="2.5" marker-end="url(#ahr)"/>
+        <text x="370" y="212" style="fill:#fca5a5;font:10.5px monospace;text-anchor:middle">固定 ~1.6s</text>
+        <circle cx="630" cy="222" r="7" fill="#ef4444"/><text class="lb" x="640" y="250" style="fill:#fca5a5">1.6s 后帧</text>
+        <text x="760" y="200" style="fill:#fca5a5;font:10px sans-serif;text-anchor:middle">可能含干扰/回退/抖动</text>
+        <text x="760" y="216" style="fill:#fca5a5;font:10px sans-serif;text-anchor:middle">→ 错误引导</text>
+        <!-- ours contrast -->
+        <line x1="120" y1="270" x2="560" y2="270" stroke="#22c55e" stroke-width="2" stroke-dasharray="2 3" marker-end="url(#ahg)"/>
+        <text x="330" y="285" style="fill:#86efac;font:10px monospace;text-anchor:middle">LMWM:milestone+1 价值单调↑(见 §02)</text>
       </svg>
-      <div class="legend">
-        <span><i style="background:#2a1065;border:1px solid #7c3aed"></i>冻结组件</span>
-        <span><i style="background:#0f002e;border:1px solid #3730a3"></i>训练件(推理用)</span>
-        <span><i style="background:transparent;border:1px dashed #5a5e8c"></i>仅训练(teacher/目标)</span>
-        <span><i style="background:#a78bfa"></i>数据流 + 维度</span>
-      </div>
     </div>
 
-    <div class="scroll" style="margin-top:16px"><table>
-      <thead><tr><th>组件</th><th>输入 → 输出</th><th>内部结构(层)</th><th class="num">参数</th></tr></thead>
-      <tbody>
-        <tr><td class="term">DINOv3-H 编码器<br><em style="color:var(--text3)">(冻结)</em></td>
-          <td><code>256²×3</code> → <code>16×16×1280</code></td>
-          <td class="arch">patch-embed <b>Conv2d(3→1280, 16×16, s16)</b> + [1 CLS + 4 register token]<br>→ <b>32×</b> Block { LN · RoPE-MHSA(<b>20 头</b>, head=64) · LayerScale ‖ LN · <b>SwiGLU MLP</b>(1280→5120→1280, silu) · LayerScale }<br>→ 末层 LN;取 256 个 patch token(跳过前缀)</td>
-          <td class="num">~840M</td></tr>
-        <tr><td class="term">inverse<br><em style="color:var(--text3)">(teacher)</em></td>
-          <td>2×<code>16×16×1280</code> → z <code>64/128</code></td>
-          <td class="arch">cat 两图(2560 ch)<br>→ <b>Conv2d(2560→256, 3×3, s2)</b>·GN(8)·GELU → <b>Conv2d(256→256, 3×3, s2)</b>·GN·GELU <em>(16→8→4)</em><br>→ mean-pool → <b>Linear(256→cd)</b>·LayerNorm</td>
-          <td class="num">6.5M</td></tr>
-        <tr><td class="term">predm<br><em style="color:var(--text3)">(deploy)</em></td>
-          <td><code>16×16×1280</code> → ẑ <code>64/128</code></td>
-          <td class="arch">同 inverse 但单帧输入:<b>Conv2d(1280→256, 3×3, s2)</b>·GN·GELU → <b>Conv2d(256→256, 3×3, s2)</b>·GN·GELU → mean-pool → <b>Linear(256→cd)</b>·LN</td>
-          <td class="num">3.6M</td></tr>
-        <tr><td class="term">VAE 头</td>
-          <td>code <code>128</code> → (mu,logvar) <code>2×128</code></td>
-          <td class="arch"><b>Linear(128→256)</b> → 切成 (mu, logvar)<br>reparam <b>z = mu + ε·exp(½·logvar)</b>, ε~N(0,1)</td>
-          <td class="num">~33K</td></tr>
-        <tr><td class="term">forward</td>
-          <td>(<code>16×16×1280</code>)+code → <code>16×16×1280</code></td>
-          <td class="arch">code 广播成图后拼接 → proj <b>Conv2d(1280+cd→512, 3×3)</b><br>→ <b>2×</b> { GN·GELU·<b>Conv2d(512→512, 3×3)</b> }·GN·GELU<br>→ out <b>Conv2d(512→1280, 3×3)</b> <em>(全程 16×16,空间基底=当前 grid)</em></td>
-          <td class="num">17M</td></tr>
-        <tr><td class="term">解码器 big+GDL<br><em style="color:var(--text3)">(仅可视化)</em></td>
-          <td><code>16×16×1280</code> → <code>128×128×3</code></td>
-          <td class="arch">head <b>Conv2d(1280→512, 1×1)</b>·BN·ReLU<br>→ <b>3×</b> up { <b>ConvT2d(4×4, s2)</b>·BN·ReLU }: 512→384→192→96 <em>(16→32→64→128)</em><br>→ <b>Conv2d(96→96, 3×3)</b>·BN·ReLU → out <b>Conv2d(96→3, 3×3)</b>·Tanh</td>
-          <td class="num">5M</td></tr>
-      </tbody>
-    </table></div>
+    <div class="badbox">
+      <p><span class="flag bad">1.1</span>编码器独立于 VLA → 世界模型隐空间 ≠ 策略消费空间,融合有隔阂。</p>
+      <p><span class="flag bad">1.2</span>只学"1.6s 后长什么样",不保证"朝任务进展前进" → 目标帧的噪声/回退会变成错误引导。</p>
+    </div>
   </section>
 
+  <!-- ============ §02 LMWM architecture ============ -->
   <section>
-    <div class="snum">01B / 最终架构(2026-07 定案)</div>
-    <h2>预测器(Predictor)+ 生成器(Generator) · π0.5 SigLIP 空间</h2>
-    <p class="sub"><b>核心目标</b>:给 VLA 一个 milestone+1 的<b>价值层宏观引导</b> —— 两条硬指标:① 解码后要保真;② 预测的 milestone+1 在<b>进展价值</b>上要大于当前 stage。据此定案两模块:<b>预测器(Predictor)</b>= 回答"下一个价值 milestone 是<b>哪个</b>"(逆向 teacher 压出多峰码 ẑ,MDN K=4 + <b>簇中心 CE 身份锚</b> center_w=0.1);<b>生成器(Generator)</b>= 回答"它在当前场景<b>长什么样</b>"(AdaLN 把码调制到当前 grid 画布上,zero-init gate)。目标空间换成 <b>π0.5 自己的 SigLIP</b>(与策略同塔、复用 KV),DINOv3-H+CRAVE 降为<b>离线 label 工厂</b>。</p>
+    <div class="snum">02 / architecture</div>
+    <h2>LMWM 网络架构 · 两阶段</h2>
+    <p class="sub">针对上面两点,LMWM 分两阶段:<b>2.1 离线构建 milestone 数据集(CRAVE)</b> 给出"价值前向"的监督目标;<b>2.2 在 π0.5 SigLIP 同塔上训练预测器+生成器</b> 消除编码器隔阂。</p>
 
+    <h3><span class="h3n">2.1</span>数据集构建 — CRAVE milestone 数据集(离线 label 工厂)</h3>
+    <p class="sub" style="margin-top:4px">解决 1.2:目标不是"1.6s 后的帧",而是 CRAVE 跨 episode 复现 + Viterbi 单调分配出的 <b>milestone+1</b> —— 保证时间前向、跨集一致、进展价值单调↑。这套 DINOv3-H + CRAVE 只在<b>离线</b>产监督目标,不上线。</p>
     <div class="diagram">
-      <svg viewBox="0 0 1000 470" role="img" aria-label="两模型新架构数据流图">
+      <svg viewBox="0 0 1000 210" role="img" aria-label="CRAVE milestone 数据集构建流水线">
+        <defs><marker id="ah2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#a78bfa"/></marker></defs>
+        <style>
+          .cbx{fill:#0f002e;stroke:#3730a3;stroke-width:1.5}
+          .cfz{fill:#2a1065;stroke:#7c3aed;stroke-width:1.7}
+          .chi{fill:#1e0b4d;stroke:#a78bfa;stroke-width:2}
+          .ct{fill:#e8eaf6;font:600 12.5px sans-serif;text-anchor:middle}
+          .cs{fill:#8892c8;font:9.5px monospace;text-anchor:middle}
+          .car{stroke:#a78bfa;stroke-width:1.7;fill:none}
+        </style>
+        <rect class="cbx" x="20" y="78" width="120" height="56" rx="9"/><text class="ct" x="80" y="102">episode 帧</text><text class="cs" x="80" y="120">30Hz</text>
+        <rect class="cfz" x="176" y="78" width="130" height="56" rx="9"/><text class="ct" x="241" y="100">DINOv3-H</text><text class="cs" x="241" y="118">冻结 · pooled 特征</text>
+        <rect class="cbx" x="342" y="78" width="140" height="56" rx="9"/><text class="ct" x="412" y="100">跨 episode 复现图</text><text class="cs" x="412" y="118">recurrence graph</text>
+        <rect class="cbx" x="518" y="78" width="130" height="56" rx="9"/><text class="ct" x="583" y="100">37 原型 milestone</text><text class="cs" x="583" y="118">prototype table</text>
+        <rect class="cbx" x="684" y="78" width="120" height="56" rx="9"/><text class="ct" x="744" y="100">Viterbi 单调</text><text class="cs" x="744" y="118">进度前向分配</text>
+        <rect class="chi" x="840" y="78" width="140" height="56" rx="9"/><text class="ct" x="910" y="98">milestone+1</text><text class="cs" x="910" y="116">medoid 目标帧</text>
+        <line class="car" x1="140" y1="106" x2="176" y2="106" marker-end="url(#ah2)"/>
+        <line class="car" x1="306" y1="106" x2="342" y2="106" marker-end="url(#ah2)"/>
+        <line class="car" x1="482" y1="106" x2="518" y2="106" marker-end="url(#ah2)"/>
+        <line class="car" x1="648" y1="106" x2="684" y2="106" marker-end="url(#ah2)"/>
+        <line class="car" x1="804" y1="106" x2="840" y2="106" marker-end="url(#ah2)"/>
+        <text x="500" y="30" style="fill:#a78bfa;font:600 12px monospace;text-anchor:middle">离线 label 工厂 —— 只产监督目标,不上线</text>
+        <text x="500" y="176" style="fill:#86efac;font:10.5px sans-serif;text-anchor:middle">✓ 时间前向 ✓ 跨 episode 一致 ✓ 进展价值单调↑(corr(value,time)=0.94)</text>
+      </svg>
+    </div>
+
+    <h3><span class="h3n">2.2</span>模型训练 & 部署 — 预测器 + 生成器(π0.5 SigLIP 同塔)</h3>
+    <p class="sub" style="margin-top:4px">解决 1.1:在线编码换成 <b>π0.5 自己的 SigLIP</b>(与策略同塔、复用 KV,零隔阂)。<b>预测器 Predictor</b> 回答"下一个价值 milestone 是<b>哪个</b>";<b>生成器 Generator</b> 回答"它在当前场景<b>长什么样</b>"。</p>
+    <div class="diagram">
+      <svg viewBox="0 0 1000 470" role="img" aria-label="预测器+生成器数据流">
+        <defs><marker id="ah3" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#a78bfa"/></marker>
+          <marker id="ahd3" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#5a5e8c"/></marker></defs>
         <style>
           .n2bx{fill:#0f002e;stroke:#3730a3;stroke-width:1.5}
           .n2fz{fill:#2a1065;stroke:#7c3aed;stroke-width:1.8}
@@ -225,14 +225,12 @@
           .n2ard{stroke:#5a5e8c;stroke-width:1.5;fill:none;stroke-dasharray:5 4}
           .n2lb{fill:#818cf8;font:10px monospace;text-anchor:middle}
         </style>
-        <!-- offline label factory -->
         <rect class="n2of" x="285" y="12" width="430" height="50" rx="10"/>
-        <text class="n2t" x="500" y="32">离线 label 工厂 · DINOv3-H(840M)+ CRAVE Viterbi</text>
-        <text class="n2s" x="500" y="50">定义 milestone+1 目标帧 · 不上线</text>
-        <path class="n2ard" d="M500,62 L500,120" marker-end="url(#ahd)"/>
+        <text class="n2t" x="500" y="32">离线 label 工厂(§2.1)· DINOv3-H + CRAVE Viterbi</text>
+        <text class="n2s" x="500" y="50">给出 milestone+1 目标帧 · 不上线</text>
+        <path class="n2ard" d="M500,62 L500,120" marker-end="url(#ahd3)"/>
         <text class="n2lb" x="560" y="92">训练目标</text>
 
-        <!-- row 1: encode + identity -->
         <rect class="n2bx" x="18" y="150" width="104" height="62" rx="9"/>
         <text class="n2t" x="70" y="176">当前帧</text><text class="n2s" x="70" y="196">224²×3</text>
         <rect class="n2fz" x="150" y="150" width="150" height="62" rx="9"/>
@@ -244,28 +242,23 @@
         <rect class="n2ac" x="588" y="150" width="204" height="62" rx="9"/>
         <text class="n2t" x="690" y="176">预测器 · MDN(K=4)</text><text class="n2s" x="690" y="196">多峰码 ẑ(128)+ 簇中心 CE 锚</text>
 
-        <!-- row 2: grounding + inject -->
         <rect class="n2ac" x="330" y="330" width="210" height="62" rx="9"/>
         <text class="n2t" x="435" y="356">生成器 · AdaLN(4 块)</text><text class="n2s" x="435" y="376">(G_t 画布, ẑ)→ 下一 grid · zero-gate</text>
         <rect class="n2bx" x="566" y="330" width="110" height="62" rx="9"/>
         <text class="n2t" x="621" y="356">子目标 Ĝ</text><text class="n2s" x="621" y="376">16×16×1152</text>
         <rect class="n2fz" x="704" y="330" width="188" height="62" rx="9"/>
-        <text class="n2t" x="798" y="352">π0.5 action expert</text><text class="n2s" x="798" y="372">注入 · KI · RoPE 偏移</text>
+        <text class="n2t" x="798" y="352">π0.5 action expert</text><text class="n2s" x="798" y="372">注入 · KI · RoPE 偏移(§04)</text>
 
-        <!-- arrows row1 -->
-        <path class="n2ar" d="M122,181 L150,181" marker-end="url(#ah)"/>
-        <path class="n2ar" d="M300,181 L330,181" marker-end="url(#ah)"/>
-        <path class="n2ar" d="M434,181 L462,181" marker-end="url(#ah)"/>
-        <path class="n2ar" d="M558,181 L588,181" marker-end="url(#ah)"/>
-        <!-- G_t -> Stage-2 (spatial basis) -->
-        <path class="n2ar" d="M360,212 C360,300 380,300 400,330" marker-end="url(#ah)"/>
+        <path class="n2ar" d="M122,181 L150,181" marker-end="url(#ah3)"/>
+        <path class="n2ar" d="M300,181 L330,181" marker-end="url(#ah3)"/>
+        <path class="n2ar" d="M434,181 L462,181" marker-end="url(#ah3)"/>
+        <path class="n2ar" d="M558,181 L588,181" marker-end="url(#ah3)"/>
+        <path class="n2ar" d="M360,212 C360,300 380,300 400,330" marker-end="url(#ah3)"/>
         <text class="n2lb" x="300" y="290">当前 grid = 画布</text>
-        <!-- MDN -> z_hat -> Stage-2 -->
-        <path class="n2ar" d="M690,212 C690,300 560,300 500,330" marker-end="url(#ah)"/>
+        <path class="n2ar" d="M690,212 C690,300 560,300 500,330" marker-end="url(#ah3)"/>
         <text class="n2lb" x="640" y="300">ẑ 码(128)· best-of-N</text>
-        <!-- Stage-2 -> Ghat -> expert -->
-        <path class="n2ar" d="M540,361 L566,361" marker-end="url(#ah)"/>
-        <path class="n2ar" d="M676,361 L704,361" marker-end="url(#ah)"/>
+        <path class="n2ar" d="M540,361 L566,361" marker-end="url(#ah3)"/>
+        <path class="n2ar" d="M676,361 L704,361" marker-end="url(#ah3)"/>
       </svg>
       <div class="legend">
         <span><i style="background:#2a1065;border:1px solid #7c3aed"></i>冻结 · 共享(π0.5 塔/expert)</span>
@@ -275,199 +268,131 @@
     </div>
 
     <div class="scroll"><table>
-      <thead><tr><th>模块</th><th>回答什么问题</th><th>训练形态</th><th>部署形态</th></tr></thead>
+      <thead><tr><th>模块</th><th>回答什么</th><th>训练形态</th><th>部署形态</th></tr></thead>
       <tbody>
-        <tr><td class="term">预测器 Predictor</td><td>下一个价值 milestone 是<b>哪个</b>?</td><td>逆向 teacher 看真未来 → 理想码 z(128)+ 簇中心 CE 身份锚</td><td class="pos">MDN(K=4)从当前 gist 猜码 · argmax 分量取均值(确定/平滑)</td></tr>
-        <tr><td class="term">生成器 Generator</td><td>它在当前场景<b>长什么样</b>?</td><td colspan="2" class="pos">AdaLN:当前 grid 当画布,码→ per-block shift/scale/gate(zero-init),只学"变化" · 训练/部署同一形态</td></tr>
+        <tr><td class="term">预测器<br>Predictor</td><td>下一个价值 milestone 是<b>哪个</b>?</td><td>逆向 teacher 看真未来 → 理想码 z(128)+ <b>簇中心 CE 身份锚</b>(强制码带"哪个价值簇")</td><td class="pos">MDN(K=4)从当前 gist 猜码 · argmax 分量取均值(确定、平滑)</td></tr>
+        <tr><td class="term">生成器<br>Generator</td><td>它在当前场景<b>长什么样</b>?</td><td colspan="2" class="pos">AdaLN:当前 grid 当画布,码 → per-block shift/scale/gate(zero-init gate),只学"变化" · 训练/部署同一形态</td></tr>
       </tbody>
     </table></div>
 
-    <div class="scroll" style="margin-top:14px"><table>
-      <thead><tr><th>维度</th><th>旧结构</th><th>最终(center_w=0.1)</th></tr></thead>
-      <tbody>
-        <tr><td class="term">编码器</td><td>DINOv3-H 840M(在线)</td><td class="pos">π0.5 SigLIP(同塔 · 复用 KV)· DINOv3+CRAVE 降为离线 label 工厂</td></tr>
-        <tr><td class="term">预测</td><td>单段 predm→forward,VAE 挂 code</td><td class="pos">预测器(MDN 身份)+ 生成器(AdaLN 落地)</td></tr>
-        <tr><td class="term">多峰放哪</td><td>code(VAE)→ 无用(+0.02)</td><td class="pos">身份(MDN)→ 随 K 单调,id top3 .474→.511</td></tr>
-        <tr><td class="term">价值锚</td><td>无</td><td class="pos">簇中心 CE 锚 center_w=0.1(强制码带"哪个价值簇")</td></tr>
-        <tr><td class="term">保真(硬指标①)</td><td>off-manifold 黑斑</td><td class="pos">簇中心 on-manifold 锚 → 解码干净</td></tr>
-      </tbody>
-    </table></div>
-
+    <p style="margin-top:16px"><b>训练关键 · 簇中心锚强度 center_w</b>:锚太弱 → 预测冲出真实流形(解码黑斑,违反硬指标①);太强 → 过保守、reach 缩短。扫描定案 <b>center_w=0.1</b> 为甜点。</p>
     <figure>
-      <video src="assets/final_cw01_ep8.mp4" muted autoplay loop playsinline></video>
-      <figcaption><b>最终 · center_w=0.1 · ep8 渲染</b> · 四栏 = 当前帧 │ <b>预测器→生成器出的 m+1</b>(SigLIP 解码)│ 真实 m+1 编→解码 │ 真实 m+1 帧。簇中心锚把预测拉回真实流形 → 无黑斑,衣物/夹爪/折叠态/落点忠实(硬指标①保真达标)。SigLIP 解码略糊是对比训练特征的重建天花板,非预测问题(VLA 吃的是特征不是像素)。</figcaption>
+      <img src="assets/center_w_curve.png" alt="center_w 扫描曲线">
+      <figcaption><b>簇中心锚 center_w 扫描</b>({0,0.1,0.25,0.5})。center_w=0.1 时身份(id_t3 .511)、deploy(.728)、reach(1.67s)、平滑(.948)同时见顶;再加大到 0.5 会把 reach 从 1.67 砍到 1.25s。</figcaption>
     </figure>
 
-    <figure>
-      <img src="assets/center_w_curve.png" alt="center_w 扫描曲线" style="width:100%;border-radius:12px">
-      <figcaption><b>簇中心锚强度 center_w 扫描</b>(teacher=center,{0,0.1,0.25,0.5})。center_w=0.1 是甜点:身份(id_t3 .511)、deploy(.728)、reach(1.67s)、平滑(.948)同时见顶;再加大(0.5)会把 reach 从 1.67 砍到 1.25s(过保守)。这解释了早前"LMWM reach 不如 LaWM"的真因 —— 不是预测器弱,是 center_w 定太高。</figcaption>
-    </figure>
-
-    <div class="keybox"><p><b>一句话</b>:预测器 = teacher 逆向压出"去哪个价值 milestone"的多峰码(部署时 MDN 猜);生成器 = forward-AdaLN 把码调制到当前画布上"画出它长什么样"。两条硬指标 —— ①保真靠簇中心 on-manifold 锚,②价值前向靠 Viterbi 单调目标 + 簇中心 CE —— 均达标。</p></div>
-  </section>
-
-  <section>
-    <div class="snum">02 / 效果</div>
-    <h2>泛化验证</h2>
-    <p class="sub">最终模型在 <b>未训练的 kai0 留出集</b> 与 <b>vis_base 跨数据集</b> 上预测 milestone+1。四栏 = 当前 │ 预测 m+1 解码 │ 真实 m+1 编解码 │ 真实 m+1 帧(都过同一解码器 → 差异纯是预测质量)。</p>
+    <h3><span class="h3n">2.3</span>预测渲染效果</h3>
+    <p class="sub" style="margin-top:4px">最终模型(center_w=0.1)预测 milestone+1。四栏 = 当前 │ <b>预测 m+1 解码</b> │ 真实 m+1 编→解码 │ 真实 m+1 帧(中间两栏过<b>同一</b>解码器 → 差异纯是预测质量)。</p>
     <div class="vids">
-      <figure><video controls playsinline preload="metadata">
-          <source src="assets/final_kai0_heldout.mp4?v=3" type="video/mp4">
-          浏览器无法内嵌播放,<a href="assets/final_kai0_heldout.mp4">点此下载视频</a>。
+      <figure><video controls playsinline preload="metadata" muted loop>
+          <source src="assets/final_cw01_ep8.mp4" type="video/mp4">
+          浏览器无法内嵌播放,<a href="assets/final_cw01_ep8.mp4">点此下载视频</a>。
         </video>
-        <figcaption><b>kai0 留出集</b>(未训练) · mean pred cos 0.726。预测与真实进度前向 milestone 高度吻合。</figcaption></figure>
-      <figure><video controls playsinline preload="metadata">
-          <source src="assets/final_visbase.mp4?v=3" type="video/mp4">
-          浏览器无法内嵌播放,<a href="assets/final_visbase.mp4">点此下载视频</a>。
+        <figcaption><b>ep8(域内)</b> · 簇中心锚把预测拉回真实流形 → 无黑斑,衣物/夹爪/折叠态/落点忠实(硬指标①保真达标)。</figcaption></figure>
+      <figure><video controls playsinline preload="metadata" muted loop>
+          <source src="assets/final_heldout_cw01.mp4" type="video/mp4">
+          浏览器无法内嵌播放,<a href="assets/final_heldout_cw01.mp4">点此下载视频</a>。
         </video>
-        <figcaption><b>vis_base 跨数据集</b>(未见) · cos 0.564。构型在特征空间迁移;像素外观有解码器 kai0 域偏(橙→青)。</figcaption></figure>
+        <figcaption><b>ep3000(留出集,未训练)</b> · 未见 episode 上预测与真实进度前向 milestone 高度吻合 —— 泛化到留出数据。<span class="ref">SigLIP 解码略糊是对比训练特征的重建天花板(val_L1≈0.05),非预测问题;VLA 消费的是特征不是像素。跨数据集 vis_base 泛化见 §03.2 定量(cos 0.56),新架构 visbase 渲染为后续补。</span></figcaption></figure>
     </div>
   </section>
 
+  <!-- ============ §03 comparison ============ -->
   <section>
-    <div class="snum">03 / 指标</div>
-    <h2>各指标是什么、表明什么</h2>
-    <p class="sub">从不同角度衡量"预测得准不准" —— 本科生级直白解释。</p>
+    <div class="snum">03 / comparison</div>
+    <h2>对比分析 · LMWM vs LaWM</h2>
+    <p class="sub">从<b>与 VLA 的嵌入程度</b>(3.1)和<b>预测指标/视野</b>(3.2)两个角度对照。</p>
+
+    <h3><span class="h3n">3.1</span>与 VLA 的嵌入程度 & 参数</h3>
+    <p class="sub" style="margin-top:4px">LaWM 用独立 DINOv3 双塔、与策略脱离,latent 需跨空间蒸馏;LMWM 直接长在 π0.5 SigLIP 同塔上、复用 KV,子目标即策略消费空间 —— <b>嵌入更深、隔阂更小</b>,且参数轻 ~10×。</p>
     <div class="scroll"><table>
-      <thead><tr><th>指标</th><th>直白定义</th><th>作用 / 表明什么</th></tr></thead>
+      <thead><tr><th>维度</th><th>LaWM(baseline)</th><th>LMWM(ours)</th></tr></thead>
       <tbody>
-        <tr><td class="term">grid-cos</td><td>预测特征图 与 真实目标图 的余弦相似度</td><td>核心保真度,越高越准</td></tr>
-        <tr><td class="term">oracle</td><td>用"作弊码"(偷看真未来算的码)重建的 cos</td><td><b>天花板</b>:知道真答案能做多好 = 表达上限</td></tr>
-        <tr><td class="term">deploy</td><td>只看当前帧、用预测码重建的 cos</td><td><b>实战值</b>:真部署能做多好 ← 最关心</td></tr>
-        <tr><td class="term">persistence</td><td>把"当前帧"当预测(不动)的 cos</td><td><b>白给基线</b>:啥也不预测得多少分</td></tr>
-        <tr><td class="term">lift</td><td>= deploy − persistence</td><td><b>净技巧</b>:扣掉"目标本来就近"的便宜</td></tr>
-        <tr><td class="term">model lag / ratio</td><td>预测匹配到的真帧晚几秒 / 除以目标跨度</td><td>模型敢预测多远;ratio&lt;1 = <span class="amb">欠射</span></td></tr>
-        <tr><td class="term">best-of-8</td><td>VAE 采 8 个取最像的 cos</td><td>未来<b>多不多模态</b>(远超均值=多分支)</td></tr>
-        <tr><td class="term">corr(value,time)</td><td>CRAVE 进度 与 时间 的相关</td><td>进度标签质量(0.94=很可靠)</td></tr>
+        <tr><td class="term">在线编码器</td><td>独立 DINOv3 ViT-B/16(768)</td><td class="pos">π0.5 SigLIP-So400m(1152)· <b>与策略同塔</b></td></tr>
+        <tr><td class="term">与 VLA 关系</td><td class="amb">脱离 · latent 跨空间蒸馏</td><td class="pos">同塔复用 KV · 子目标即策略空间</td></tr>
+        <tr><td class="term">逆向/预测</td><td>24 层 Perceiver-Transformer</td><td class="pos">预测器:逆向 teacher(2 层 CNN)+ MDN(K=4)</td></tr>
+        <tr><td class="term">码 / 调制</td><td>VAE code 32 · 12 层 AdaLN-DiT</td><td class="pos">码 128 + 簇中心锚 · 生成器 AdaLN(4 块 CNN)</td></tr>
+        <tr><td class="term">码调制方式</td><td>AdaLN-DiT(Transformer)</td><td>AdaLN(CNN · <b>收敛到同款</b>)</td></tr>
+        <tr><td class="term">部署预测码</td><td class="amb">LAM 内无 predm · 甩给策略</td><td class="pos">内置 MDN predm · 世界模型自包含</td></tr>
+        <tr><td class="term">世界模型参数</td><td>~230M Transformer</td><td class="pos">~34M CNN(轻 ~10×)</td></tr>
       </tbody>
     </table></div>
+    <p class="ref">LaWM 结构参照其官方两阶段图(§01,<a href="https://rlinf.github.io/LaWAM/">rlinf.github.io/LaWAM</a>)。两者<b>都收敛到 AdaLN 码调制</b> —— 我们消融里 concat 变体的 lag/平滑掉,自发换成 AdaLN。</p>
 
-    <h3 style="font-size:19px;margin:30px 0 6px;color:var(--text)">实测对比 · LaWM(baseline)vs 我们最终(center_w=0.1)</h3>
-    <p class="sub" style="margin-top:4px">同一批 kai0 数据、<b>同一 lag 协议</b>(预测帧匹配到的真帧比当前晚几秒)实测。⚠️ grid-cos 编码器空间不同(ViT-B 768 vs SigLIP 1152)不硬比;<b>reach(秒)是严格同口径</b> —— 官方 LaWM ckpt 建 deploy-predm 后在<b>我们数据</b>上测出。</p>
+    <h3><span class="h3n">3.2</span>预测指标 / 视野对比</h3>
+    <p class="sub" style="margin-top:4px">同一批 kai0 数据、<b>同一 reach 协议</b>(预测帧匹配到的真帧比当前晚几秒)实测。⚠️ grid-cos 编码器空间不同不硬比;<b>reach(秒)严格同口径</b>(给官方 LaWM ckpt 补 deploy-predm 后在我们数据上测)。</p>
     <div class="scroll"><table>
-      <thead><tr><th>指标</th><th class="num">LaWM(官方 ckpt)</th><th class="num">我们最终(cw=0.1)</th><th>可比性 / 口径</th></tr></thead>
+      <thead><tr><th>指标</th><th class="num">LaWM</th><th class="num">LMWM(cw=0.1)</th><th>谁好 / 口径</th></tr></thead>
       <tbody>
-        <tr><td class="term">reach / model lag(秒)</td><td class="num">1.48s</td><td class="num pos">1.67s</td><td class="pos"><b>严格同口径 → 绝对更远</b></td></tr>
-        <tr><td class="term">目标 horizon(秒)</td><td class="num">固定 1.66s(近未来)</td><td class="num">2.64s(milestone+1)</td><td>我们目标本就更远更难</td></tr>
-        <tr><td class="term">undershoot ratio(reach/目标)</td><td class="num">0.89</td><td class="num amb">0.63</td><td>近未来易打满 → LaWM ratio 天然高</td></tr>
-        <tr><td class="term">前向预测率 frac(&gt;0)</td><td class="num">44.9%</td><td class="num">35.3%(尾更长)</td><td>见分布图:LaWM 中段密,我们近+远双峰</td></tr>
-        <tr><td class="term">负滞后率 frac(&lt;0)</td><td class="num">10.7%</td><td class="num pos">6.5%</td><td class="pos">我们更少"预测倒退"</td></tr>
-        <tr><td class="term">oracle grid-cos</td><td class="num">0.770</td><td class="num">0.715</td><td class="amb">编码器空间不同,不硬比</td></tr>
-        <tr><td class="term">persistence(白给基线)</td><td class="num">0.627</td><td class="num">0.599</td><td>目标离当前多近</td></tr>
-        <tr><td class="term">lift(oracle − persist)</td><td class="num">+0.143</td><td class="num">+0.116</td><td>净技巧;空间不同仅趋势可比</td></tr>
+        <tr><td class="term">reach / model lag(秒)</td><td class="num">1.48</td><td class="num pos">1.67</td><td class="pos"><b>LMWM 好</b> · 严格同口径,绝对更远</td></tr>
+        <tr><td class="term">目标 horizon(秒)</td><td class="num">1.66</td><td class="num">2.64</td><td>LMWM 目标本就更远更难</td></tr>
+        <tr><td class="term">undershoot ratio</td><td class="num">0.89</td><td class="num amb">0.63</td><td class="amb">LaWM 高:近未来易打满(非更强)</td></tr>
+        <tr><td class="term">前向预测率(&gt;0)</td><td class="num">44.9%</td><td class="num">35.3%</td><td>见分布图:LMWM 近+远双峰、尾更长</td></tr>
+        <tr><td class="term">负滞后率(&lt;0)</td><td class="num">10.7%</td><td class="num pos">6.5%</td><td class="pos"><b>LMWM 好</b> · 更少"预测倒退"</td></tr>
+        <tr><td class="term">oracle grid-cos</td><td class="num">0.770</td><td class="num">0.715</td><td class="amb">空间不同,不硬比</td></tr>
+        <tr><td class="term">lift(oracle−persist)</td><td class="num">+0.143</td><td class="num">+0.116</td><td>净技巧;趋势可比</td></tr>
         <tr><td class="term">deploy grid-cos</td><td class="num amb">—<sup>1</sup></td><td class="num pos">0.728</td><td>只看当前帧的实战值</td></tr>
-        <tr><td class="term">身份 top-3(下一 milestone)</td><td class="num amb">N/A<sup>4</sup></td><td class="num">0.511</td><td>价值多峰命中(硬指标②)</td></tr>
-        <tr><td class="term">预测平滑度(相邻帧 cos)</td><td class="num amb">—</td><td class="num pos">0.948</td><td>不抖 → 对 VLA 是稳定信号</td></tr>
-        <tr><td class="term">corr(value, time)</td><td class="num amb">N/A<sup>4</sup></td><td class="num">0.94</td><td>CRAVE 进度标签质量</td></tr>
-        <tr><td class="term">世界模型参数</td><td class="num">数百 M Transformer</td><td class="num">~34M CNN(轻 ~10×)</td><td>结构规模</td></tr>
-        <tr><td class="term">下游 SR(extrinsic)</td><td class="num pos">LIBERO 98.6% 等</td><td class="num amb">待测(下一步)</td><td>唯一未覆盖的短板</td></tr>
+        <tr><td class="term">身份 top-3(下一 milestone)</td><td class="num amb">N/A<sup>2</sup></td><td class="num pos">0.511</td><td class="pos"><b>硬指标②</b> 价值多峰命中</td></tr>
+        <tr><td class="term">预测平滑(相邻帧 cos)</td><td class="num amb">—</td><td class="num pos">0.948</td><td class="pos">不抖 → 对 VLA 是稳定信号</td></tr>
+        <tr><td class="term">进展价值单调</td><td class="num amb">N/A<sup>2</sup></td><td class="num pos">Viterbi 保证</td><td class="pos"><b>硬指标②</b> · LaWM 无此约束</td></tr>
+        <tr><td class="term">跨数据集(vis_base 零微调)</td><td class="num">定性</td><td class="num">0.56 定量</td><td>LMWM 可定量</td></tr>
+        <tr><td class="term">下游 SR(extrinsic)</td><td class="num pos">LIBERO 98.6%</td><td class="num amb">待测(§04)</td><td class="amb"><b>LaWM 好</b> · 我们唯一短板</td></tr>
       </tbody>
     </table></div>
-    <p class="sub" style="margin-top:10px;font-size:13px;color:var(--text3)">
-      <sup>1</sup> LaWM 的 LAM 内<b>不产出预测码</b>——部署时"从现在猜码"甩给下游 VLA;我们给它补了个 deploy-predm 才能测 reach。
-      <sup>4</sup> CRAVE 进度/身份标签为我们特有;LaWM 无进度/事件标签。
-    </p>
-    <div class="keybox" style="margin-top:16px"><p><b>一句话读表:</b>严格同口径的 <b>reach 我们 1.67s &gt; LaWM 1.48s</b> —— 且是在更远(2.64s vs 1.66s)、更难的 milestone 目标上做到的。"LaWM 敢预测更远"的错觉来自它 ratio 高(0.89),那是因为它目标本就近(1.66s)、近未来易打满;论绝对预测距离我们反超。我们唯一还没补的是<b>下游 SR</b>。</p></div>
+    <p class="ref"><sup>1</sup> LaWM 的 LAM 内不产出预测码(部署甩给下游 VLA),我们给它补 deploy-predm 才能测 reach。 <sup>2</sup> CRAVE 进度/身份标签为 LMWM 特有,LaWM 无进度/事件标签。</p>
+
+    <div class="vids" style="margin-top:16px">
+      <figure><img src="assets/lag_distribution.png" alt="LMWM vs LaWM 预测时滞分布">
+        <figcaption><b>预测时滞(reach)分布 · LMWM(cw=0.1)vs LaWM</b>(同协议)。两者中位都在 0(近未来帧最像当前是常态);差异在尾部:LaWM 集中在 0.3–1.6s <b>中段</b>(ratio 0.89 高但目标只 1.66s),LMWM 呈<b>近+远双峰</b>、尾更长 → 均值 reach 1.67 反超 1.48。"LaWM 敢预测更远"是 ratio 错觉。</figcaption></figure>
+      <figure><img src="assets/lawm_ref/libero_latency.png" alt="LaWM LIBERO 延迟-成功率">
+        <figcaption><b>LaWM 下游 SR 参照</b> · LIBERO 98.6% / 187ms(优于 pi0.5、Cosmos-Policy 等)。这是 LMWM 目前<b>唯一未覆盖</b>的 extrinsic 指标,§04 接入 π0.5 后对齐。<span class="ref">图源:<a href="https://rlinf.github.io/LaWAM/">rlinf.github.io/LaWAM</a>。</span></figcaption></figure>
+    </div>
+
+    <div class="keybox"><p><b>一句话读表:</b>LMWM <b>更好</b>的:reach 1.67&gt;1.48s、负滞后 6.5%&lt;10.7%、参数轻 ~10×、与 VLA 嵌入更深、进展价值单调(硬指标②)、跨集可定量。LMWM <b>不足</b>的:undershoot ratio 0.63&lt;0.89(目标远所致,非更弱)、grid-cos 空间不同不硬比、<b>下游 SR 待测</b>(LaWM 已有 98.6%)。</p></div>
   </section>
 
+  <!-- ============ §04 future ============ -->
   <section>
-    <div class="snum">04 / 定位</div>
-    <h2>与 LaWM 对照 &amp; 下一步</h2>
-    <p class="sub">LaWM(jialei02/lawam_lam)官方 checkpoint 建 deploy-predm 后在<b>我们数据</b>上实测。⚠️ grid-cos 编码器空间不同 → 不硬比;<b>reach(秒)同口径可比</b>。两者结构<b>都收敛到 AdaLN 码调制</b>。</p>
-
-    <div class="diagram" style="margin-top:6px">
-      <svg viewBox="0 0 1000 452" role="img" aria-label="LaWM 与我们 LMWM 网络结构逐层对比图">
+    <div class="snum">04 / next</div>
+    <h2>未来计划:LMWM × VLA 融合 → LMVLA / LMWAM</h2>
+    <p class="sub">当前 intrinsic 预测指标已达/超 LaWM 同级,两条硬指标(①保真 ②价值前向)达标。唯一短板是 extrinsic 的下游 SR。下一步把生成器子目标 <b>Ĝ</b> + 预测器码 <b>ẑ</b> 注入 kai0 π0.5 action expert,做效果与指标对比。</p>
+    <div class="diagram">
+      <svg viewBox="0 0 1000 200" role="img" aria-label="LMVLA 融合路线图">
+        <defs><marker id="ah4" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#a78bfa"/></marker></defs>
         <style>
-          .cmp-l{fill:#8892c8;font:12px sans-serif;text-anchor:end}
-          .cmp-h{fill:#e8eaf6;font:700 14px sans-serif;text-anchor:middle}
-          .cmp-tf{fill:#0e1636;stroke:#818cf8;stroke-width:1.6}
-          .cmp-cn{fill:#1a0a3a;stroke:#7c3aed;stroke-width:1.6}
-          .cmp-fz{fill:#2a1065;stroke-width:1.8}
-          .cmp-hi{fill:#1e0b4d;stroke:#a78bfa;stroke-width:2}
-          .cmp-off{fill:#0c0a24;stroke:#5a5e8c;stroke-width:1.4;stroke-dasharray:5 4}
-          .cmp-bt{fill:#e8eaf6;font:600 12.5px sans-serif;text-anchor:middle}
-          .cmp-bs{fill:#9aa2d0;font:10px monospace;text-anchor:middle}
+          .fbx{fill:#1a0b3e;stroke:#a78bfa;stroke-width:2}
+          .ffz{fill:#2a1065;stroke:#7c3aed;stroke-width:1.8}
+          .fhi{fill:#0f2e1a;stroke:#22c55e;stroke-width:1.8}
+          .ft{fill:#e8eaf6;font:600 13px sans-serif;text-anchor:middle}
+          .fs{fill:#8892c8;font:10px monospace;text-anchor:middle}
+          .far{stroke:#a78bfa;stroke-width:1.8;fill:none}
         </style>
-        <text class="cmp-l" x="150" y="32" style="fill:#5a5e8c">结构组件</text>
-        <text class="cmp-h" x="368" y="32" style="fill:#818cf8">LaWM · 官方 ckpt</text>
-        <text class="cmp-h" x="782" y="32" style="fill:#a78bfa">我们 LMWM</text>
-
-        <!-- r1 encoder -->
-        <text class="cmp-l" x="150" y="82">冻结编码器</text>
-        <rect class="cmp-fz" x="170" y="48" width="396" height="60" rx="10" style="stroke:#818cf8"/>
-        <text class="cmp-bt" x="368" y="74">DINOv3 ViT-B/16</text><text class="cmp-bs" x="368" y="92">hidden 768 · 取 layer −2 · 冻结</text>
-        <rect class="cmp-fz" x="584" y="48" width="396" height="60" rx="10" style="stroke:#7c3aed"/>
-        <text class="cmp-bt" x="782" y="74">π0.5 SigLIP-So400m</text><text class="cmp-bs" x="782" y="92">hidden 1152 · 与策略同塔 · 复用 KV(DINOv3-H 离线)</text>
-        <line class="ar" x1="368" y1="108" x2="368" y2="124" marker-end="url(#ah)"/>
-        <line class="ar" x1="782" y1="108" x2="782" y2="124" marker-end="url(#ah)"/>
-
-        <!-- r2 inverse -->
-        <text class="cmp-l" x="150" y="158">预测器(逆向→码)</text>
-        <rect class="cmp-tf" x="170" y="124" width="396" height="60" rx="10"/>
-        <text class="cmp-bt" x="368" y="150">24 层 Perceiver-Transformer</text><text class="cmp-bs" x="368" y="168">1 query 对两帧 cross-attn → 全局码</text>
-        <rect class="cmp-cn" x="584" y="124" width="396" height="60" rx="10"/>
-        <text class="cmp-bt" x="782" y="150">逆向 teacher(2 层 CNN)</text><text class="cmp-bs" x="782" y="168">看真未来 → 压出理想码 z</text>
-        <line class="ar" x1="368" y1="184" x2="368" y2="200" marker-end="url(#ah)"/>
-        <line class="ar" x1="782" y1="184" x2="782" y2="200" marker-end="url(#ah)"/>
-
-        <!-- r3 code -->
-        <text class="cmp-l" x="150" y="234">码瓶颈</text>
-        <rect class="cmp-tf" x="170" y="200" width="396" height="60" rx="10"/>
-        <text class="cmp-bt" x="368" y="226">VAE</text><text class="cmp-bs" x="368" y="244">code_dim 32</text>
-        <rect class="cmp-cn" x="584" y="200" width="396" height="60" rx="10"/>
-        <text class="cmp-bt" x="782" y="226">码 128 + MDN(K=4)</text><text class="cmp-bs" x="782" y="244">身份多峰 + 簇中心 CE 锚(cw=0.1)</text>
-        <line class="ar" x1="368" y1="260" x2="368" y2="276" marker-end="url(#ah)"/>
-        <line class="ar" x1="782" y1="260" x2="782" y2="276" marker-end="url(#ah)"/>
-
-        <!-- r4 decoder / forward -->
-        <text class="cmp-l" x="150" y="310">生成器(码→下一 grid)</text>
-        <rect class="cmp-tf" x="170" y="276" width="396" height="60" rx="10"/>
-        <text class="cmp-bt" x="368" y="302">12 层 AdaLN-DiT Transformer</text><text class="cmp-bs" x="368" y="320">码经 AdaLN 调制 LN(shift/scale/gate)</text>
-        <rect class="cmp-cn" x="584" y="276" width="396" height="60" rx="10"/>
-        <text class="cmp-bt" x="782" y="302">AdaLN 生成器(4 块 · CNN)</text><text class="cmp-bs" x="782" y="320">当前 grid 画布 · zero-gate 只学变化</text>
-
-        <!-- r5 deploy predm -->
-        <text class="cmp-l" x="150" y="386">部署:从现在猜码</text>
-        <rect class="cmp-off" x="170" y="352" width="396" height="60" rx="10"/>
-        <text class="cmp-bt" x="368" y="378" style="fill:#8b90bd">LAM 内无 predm</text><text class="cmp-bs" x="368" y="396" style="fill:#6b70a0">码甩给下游 VLA 策略预测</text>
-        <rect class="cmp-hi" x="584" y="352" width="396" height="60" rx="10"/>
-        <text class="cmp-bt" x="782" y="378">预测器部署:MDN 猜码</text><text class="cmp-bs" x="782" y="396">世界模型自包含(可单测 oracle/deploy/reach)</text>
-
-        <text x="575" y="440" style="fill:#6b70a0;font:10.5px monospace;text-anchor:middle">共享范式:frozen 视觉塔 · 16×16 patch grid · AdaLN 码调制 · 2 帧[当前,未来] · smooth-L1 重建 patch 特征</text>
+        <rect class="fbx" x="30" y="66" width="190" height="66" rx="10"/><text class="ft" x="125" y="92">LMWM 输出</text><text class="fs" x="125" y="112">子目标 Ĝ + 码 ẑ</text>
+        <rect class="ffz" x="300" y="66" width="220" height="66" rx="10"/><text class="ft" x="410" y="90">π0.5 action expert</text><text class="fs" x="410" y="110">注入 · KI + RoPE 偏移 + mask</text>
+        <rect class="fbx" x="600" y="66" width="180" height="66" rx="10"/><text class="ft" x="690" y="92">LMVLA / LMWAM</text><text class="fs" x="690" y="112">融合模型</text>
+        <rect class="fhi" x="836" y="66" width="150" height="66" rx="10"/><text class="ft" x="911" y="90">评测对比</text><text class="fs" x="911" y="110">action-MAE → SR</text>
+        <line class="far" x1="220" y1="99" x2="300" y2="99" marker-end="url(#ah4)"/>
+        <line class="far" x1="520" y1="99" x2="600" y2="99" marker-end="url(#ah4)"/>
+        <line class="far" x1="780" y1="99" x2="836" y2="99" marker-end="url(#ah4)"/>
+        <text x="500" y="34" style="fill:#a78bfa;font:600 12px monospace;text-anchor:middle">Phase 1 融合接线(本地)→ Phase 2 簇微调(集群)→ Phase 3 真机 SR</text>
+        <text x="911" y="160" style="fill:#86efac;font:10px sans-serif;text-anchor:middle">对齐 LaWM LIBERO 98.6%</text>
       </svg>
-      <div class="legend">
-        <span><i style="background:#0e1636;border:1px solid #818cf8"></i>Transformer(LaWM)</span>
-        <span><i style="background:#1a0a3a;border:1px solid #7c3aed"></i>CNN(我们)</span>
-        <span><i style="background:#2a1065;border:1px solid #a78bfa"></i>冻结</span>
-        <span><i style="background:transparent;border:1px dashed #5a5e8c"></i>不在 LAM 内 · 甩给策略</span>
-      </div>
     </div>
-    <p class="sub" style="margin-top:14px"><b>结构上一句话:</b>LaWM = 重型 Transformer/DiT + 全局注意力 + 小码(32d)+ 预测码甩给策略;我们 = 轻型 CNN 的<b>预测器 + 生成器</b> + 当前 grid 画布 + <b>内置预测器自包含</b> + π0.5 同塔编码器。两者<b>都收敛到 AdaLN 码调制</b>(我们消融里 concat→lag/平滑掉,自发换成 AdaLN)。实测:数百 M 的 Transformer-DiT <b>并未碾压</b>我们 ~34M CNN(reach 1.48s vs 1.67s,lift 相当)。</p>
-
-    <figure style="margin-top:6px">
-      <img src="assets/lag_distribution.png" alt="LMWM vs LaWM 预测时滞分布" style="width:100%;border-radius:12px">
-      <figcaption><b>预测时滞(reach)分布 · 我们(cw=0.1)vs LaWM</b> · 同一 lag 协议。两者中位都在 0(近未来帧最像当前是常态);差异在尾部:LaWM 质量集中在 0.3–1.6s <b>中段</b>(ratio 0.89 高但目标只有 1.66s),我们呈<b>近 + 远双峰</b>、尾更长 → 均值 reach 1.67s 反超 1.48s。"LaWM 敢预测更远"是 ratio 错觉,论绝对秒数是我们更远。</figcaption>
-    </figure>
-
     <div class="scroll"><table>
-      <thead><tr><th>维度</th><th class="num">LaWM(baseline)</th><th class="num">我们最终(cw=0.1)</th></tr></thead>
+      <thead><tr><th>阶段</th><th>动作</th><th>裁决指标</th></tr></thead>
       <tbody>
-        <tr><td>reach / model lag(秒 · 同口径)</td><td class="num">1.48s</td><td class="num pos">1.67s</td></tr>
-        <tr><td>oracle grid-cos(空间不同)</td><td class="num">0.770</td><td class="num">0.715</td></tr>
-        <tr><td>lift over persistence</td><td class="num">+0.143</td><td class="num">+0.116</td></tr>
-        <tr><td>码调制方式</td><td class="num">AdaLN-DiT(Transformer)</td><td class="num">AdaLN(CNN · 收敛同款)</td></tr>
-        <tr><td>世界模型参数</td><td class="num">数百 M transformer</td><td class="num">~34M CNN(轻 ~10×)</td></tr>
-        <tr><td>跨数据集泛化</td><td class="num">定性(3000h)</td><td class="num">定量(vis_base 0.56 零微调)</td></tr>
-        <tr><td>下游成功率 SR</td><td class="num pos">LIBERO 98.6% 等</td><td class="num amb">待测 → 接入 π0.5(下一步)</td></tr>
+        <tr><td class="term">Phase 1 · 融合接线</td><td>子目标 Ĝ + 码 ẑ 注入 action expert(KI + RoPE 偏移 + mask 重设计),本地 2 卡短跑</td><td>offline action-MAE(base vs +LMWM vs control)</td></tr>
+        <tr><td class="term">Phase 2 · 簇微调</td><td>集群提交训练(submit-training-job)</td><td>action-MAE 收敛</td></tr>
+        <tr><td class="term">Phase 3 · 真机</td><td>kai0 叠衣真机 rollout</td><td class="pos">SR ↔ 对齐 LaWM 98.6%</td></tr>
       </tbody>
     </table></div>
-    <div class="keybox"><p><b>下一步:接入 π0.5 测下游成功率 SR。</b> 两条硬指标(①解码保真 ②价值前向)+ reach 已达/超 LaWM 同级;唯一未覆盖的是 extrinsic 的真机/benchmark 成功率 —— 把生成器出的子目标 grid Ĝ + 预测器码 ẑ 注入 kai0 π0.5 action expert(KI + RoPE 偏移 + mask),训练后测 action-MAE / SR,即可与 LaWM 的 98.6% 等直接对齐。</p></div>
+    <div class="keybox"><p><b>目标:</b>用 LMVLA/LMWAM 与 LaWM 做同台效果 + 指标对比 —— 既比 intrinsic 预测(已达/超),也补齐 extrinsic 的 action-MAE / SR,验证"价值层宏观引导"对下游策略的真实增益。</p></div>
   </section>
 
 </div>
 
 <footer><div class="wrap">
-  产物 · <code>lmwm/checkpoints/twomodel_final.pt</code>(center_w=0.1) · <code>train_twomodel_v2.py</code>(MilestonePredictor + MilestoneGenerator) · <code>train_ablation.py</code>(收敛消融) · <code>measure_twomodel_v2_lag.py</code> / <code>measure_lawm_lag.py</code>(reach 同口径) · <code>render_twomodel_video.py</code> · docs <code>ABLATION_CONVERGENCE_2026-07.md</code>
+  产物 · <code>lmwm/checkpoints/twomodel_final.pt</code>(center_w=0.1) · <code>train_twomodel_v2.py</code>(MilestonePredictor + MilestoneGenerator) · <code>train_ablation.py</code> · <code>measure_twomodel_v2_lag.py</code> / <code>measure_lawm_lag.py</code>(reach 同口径) · <code>render_twomodel_video.py</code> · baseline: <a href="https://rlinf.github.io/LaWAM/">LaWM (rlinf.github.io/LaWAM)</a>
 </div></footer>
 </body>
 </html>
