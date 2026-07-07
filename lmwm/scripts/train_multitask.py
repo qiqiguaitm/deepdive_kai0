@@ -137,7 +137,9 @@ class IdentityAnchor(nn.Module):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--datasets", default="kai0,coffee")
+    ap.add_argument("--heldout", default="", help="comma tasks EXCLUDED from training, eval-only (open-vocab/LOO test)")
     ap.add_argument("--anchor", default="progress_id", choices=["union_ce", "progress", "progress_id"])
+    ap.add_argument("--teacher", default="inv", choices=["inv", "none"])    # inv=inverse-dynamics teacher+distill; none=direct predictor+generator end-to-end
     ap.add_argument("--center_w", type=float, default=0.1)
     ap.add_argument("--margin", type=float, default=0.05)
     ap.add_argument("--id_dim", type=int, default=64)
@@ -159,16 +161,20 @@ def main():
     rng = np.random.default_rng(args.seed)
     enc = SiglipBigVision(npz, device=dev)
 
+    heldout = [h for h in args.heldout.split(",") if h]
+    all_tasks = [(n, False) for n in datasets] + [(n, True) for n in heldout]
     grids_all, tasks_meta = [], []
     goff = 0; msoff = 0
-    for ti, name in enumerate(datasets):
+    for ti, (name, is_ho) in enumerate(all_tasks):
         cfg = TASKS[name]
         E, FR, Fn = load_index(REPO / cfg["fdir"])
         g = np.load(REPO / cfg["graph"]); proto = g["prototype_table"].astype(np.float32); pord = g["pord"].astype(np.float32)
         protoL = proto / (np.linalg.norm(proto, axis=1, keepdims=True) + 1e-8); M = len(proto)
         eps = np.unique(E); rng.shuffle(eps); val_eps = set(eps[:max(1, int(round(len(eps) * 0.2)))].tolist())
         tr, va = build_pairs_abl(E, FR, Fn, proto, protoL, pord, args.mode, val_eps, args.seed)
-        if len(tr) > args.per_task_cap:
+        if is_ho:
+            tr = []                                                        # heldout: eval-only, never trained
+        elif len(tr) > args.per_task_cap:
             tr = [tr[i] for i in rng.choice(len(tr), args.per_task_cap, replace=False)]
         uniq = sorted(set([p[0] for p in tr + va] + [p[1] for p in tr + va])); u2k = {gi: k for k, gi in enumerate(uniq)}
         ie, _ = read_frames(cfg, E, FR, np.array(uniq), 224, 128)
@@ -183,22 +189,25 @@ def main():
         sp = np.stack([gnp[msid == m].mean(0) if (msid == m).any() else np.zeros(din, np.float32) for m in range(M)])
         spL = sp / (np.linalg.norm(sp, axis=1, keepdims=True) + 1e-8)
         meta = dict(name=name, ti=ti, M=M, msoff=msoff, goff=goff, progn=progn, idtarget=idtarget, idproj=idproj,
-                    pord=pord, spL=spL, din=din,
+                    pord=pord, spL=spL, din=din, is_heldout=is_ho,
                     tr=[(goff + u2k[c], goff + u2k[t], msoff + cm, msoff + nm, cm, nm) for (c, t, cm, nm) in tr],
                     va=[(goff + u2k[c], goff + u2k[t], msoff + cm, msoff + nm, cm, nm) for (c, t, cm, nm) in va])
-        tasks_meta.append(meta); grids_all.append(grids); goff += len(uniq); msoff += M
-        print(f"[{name}] M={M} pairs tr={len(meta['tr'])} va={len(meta['va'])} frames={len(uniq)}", flush=True)
+        tasks_meta.append(meta); grids_all.append(grids); goff += len(uniq)
+        if not is_ho:
+            msoff += M                                                     # global ms ids span TRAINING tasks only
+        print(f"[{name}{' HELDOUT' if is_ho else ''}] M={M} pairs tr={len(meta['tr'])} va={len(meta['va'])} frames={len(uniq)}", flush=True)
 
+    train_metas = [m for m in tasks_meta if not m["is_heldout"]]
     G = np.concatenate(grids_all); din = G.shape[1]; total_M = msoff
     gmu, gsd = float(G.mean()), float(G.std() + 1e-6)                       # SHARED normalization across tasks
     GZ = torch.from_numpy(((G - gmu) / gsd).astype(np.float32)).half(); del G, grids_all
     gist_all = GZ.float().mean((2, 3))
-    idproj = tasks_meta[0]["idproj"]
-    idtarget_g = np.concatenate([m["idtarget"] for m in tasks_meta])        # (total_M, id_dim), global-ms indexed
-    progn_g = np.concatenate([m["progn"] for m in tasks_meta])              # (total_M,), per-task normalized, global-ms indexed
-    TR = [p for m in tasks_meta for p in m["tr"]]; rng.shuffle(TR); TR = np.array(TR)
+    idproj = train_metas[0]["idproj"]
+    idtarget_g = np.concatenate([m["idtarget"] for m in train_metas])       # (total_M, id_dim), TRAINING global-ms
+    progn_g = np.concatenate([m["progn"] for m in train_metas])             # (total_M,), TRAINING global-ms
+    TR = [p for m in train_metas for p in m["tr"]]; rng.shuffle(TR); TR = np.array(TR)
 
-    inv = InverseEnc(din, args.code_dim).to(dev)
+    inv = InverseEnc(din, args.code_dim).to(dev) if args.teacher == "inv" else None
     fwd = MilestoneGenerator(din, args.code_dim).to(dev)
     predm = MilestonePredictor(din, args.code_dim, args.K).to(dev)
     cd = args.code_dim
@@ -208,29 +217,38 @@ def main():
         anchor_head = nn.Linear(cd, 1).to(dev)                             # progress scalar
         idanchor = IdentityAnchor(cd, args.id_dim).to(dev) if args.anchor == "progress_id" else None
     ap_par = list(anchor_head.parameters()) + (list(idanchor.parameters()) if idanchor else [])
-    o1 = torch.optim.AdamW(list(fwd.parameters()) + list(inv.parameters()) + ap_par, lr=2e-4, weight_decay=1e-5)
+    o1 = torch.optim.AdamW(list(fwd.parameters()) + (list(inv.parameters()) if inv else []) + ap_par, lr=2e-4, weight_decay=1e-5)
     o2 = torch.optim.AdamW(predm.parameters(), lr=2e-4, weight_decay=1e-5)
     progn_t = torch.from_numpy(progn_g).to(dev); idt_t = torch.from_numpy(idtarget_g).to(dev)
+
+    def anchor_loss(z, gnm_t, gcm):
+        if args.anchor == "union_ce":
+            return args.center_w * F.cross_entropy(anchor_head(z), gnm_t)
+        ph = anchor_head(z).squeeze(-1).sigmoid()
+        la = F.mse_loss(ph, progn_t[gnm_t]) + torch.relu(progn_t[torch.from_numpy(gcm).long().to(dev)] - ph + args.margin).mean()
+        if idanchor is not None:
+            la = la + idanchor.loss(z, idt_t[gnm_t])
+        return args.center_w * la
 
     for step in range(args.steps):
         sel = torch.randint(0, len(TR), (64,))
         b = TR[sel.numpy()]; ca, cb_, gcm, gnm = b[:, 0], b[:, 1], b[:, 2], b[:, 3]
-        Gc = GZ[ca].float().to(dev); Gf = GZ[cb_].float().to(dev)
-        z = inv(Gc, Gf); gh = fwd(Gc, z)
-        lift = torch.relu(cosr(gh.flatten(1), Gc.flatten(1)) - cosr(gh.flatten(1), Gf.flatten(1))).mean()
-        l1 = F.smooth_l1_loss(gh, Gf) + args.lift_w * lift
-        gnm_t = torch.from_numpy(gnm).long().to(dev)
-        if args.anchor == "union_ce":
-            l1 = l1 + args.center_w * F.cross_entropy(anchor_head(z), gnm_t)
-        else:
-            ph = anchor_head(z).squeeze(-1).sigmoid()
-            pn = progn_t[gnm_t]; pcur = progn_t[torch.from_numpy(gcm).long().to(dev)]
-            l1 = l1 + args.center_w * (F.mse_loss(ph, pn) + torch.relu(pcur - ph + args.margin).mean())
-            if idanchor is not None:
-                l1 = l1 + args.center_w * idanchor.loss(z, idt_t[gnm_t])
-        o1.zero_grad(); l1.backward(); o1.step()
-        l2 = predm.nll(gist_all[ca].to(dev), z.detach()); o2.zero_grad(); l2.backward(); o2.step()
-    fwd.eval(); predm.eval(); inv.eval()
+        Gc = GZ[ca].float().to(dev); Gf = GZ[cb_].float().to(dev); gnm_t = torch.from_numpy(gnm).long().to(dev)
+        if args.teacher == "inv":                                          # inverse-dynamics teacher + distillation
+            z = inv(Gc, Gf); gh = fwd(Gc, z)
+            lift = torch.relu(cosr(gh.flatten(1), Gc.flatten(1)) - cosr(gh.flatten(1), Gf.flatten(1))).mean()
+            l1 = F.smooth_l1_loss(gh, Gf) + args.lift_w * lift + anchor_loss(z, gnm_t, gcm)
+            o1.zero_grad(); l1.backward(); o1.step()
+            l2 = predm.nll(gist_all[ca].to(dev), z.detach()); o2.zero_grad(); l2.backward(); o2.step()
+        else:                                                              # DIRECT: predictor code -> generator, end-to-end (no teacher)
+            z = predm(gist_all[ca].to(dev))[1][:, 0]                       # 1st-component mean (differentiable)
+            gh = fwd(Gc, z)
+            lift = torch.relu(cosr(gh.flatten(1), Gc.flatten(1)) - cosr(gh.flatten(1), Gf.flatten(1))).mean()
+            l1 = F.smooth_l1_loss(gh, Gf) + args.lift_w * lift + anchor_loss(z, gnm_t, gcm)
+            o1.zero_grad(); o2.zero_grad(); l1.backward(); o1.step(); o2.step()
+    fwd.eval(); predm.eval()
+    if inv is not None:
+        inv.eval()
 
     # ---- PER-TASK eval ----
     def cn(a, b): return (a * b).sum(1) / (np.linalg.norm(a, axis=1) * np.linalg.norm(b, axis=1) + 1e-8)
@@ -244,21 +262,27 @@ def main():
             for s in range(0, len(vaa), 128):
                 Gc = GZ[vaa[s:s + 128]].float().to(dev); Gf = GZ[vab[s:s + 128]].float().to(dev)
                 gc = gist_all[vaa[s:s + 128]].to(dev); gtr = f(Gf); zdep = predm.deploy_mean(gc)
-                co.append(cn(f(fwd(Gc, inv(Gc, Gf))), gtr)); cd_.append(cn(f(fwd(Gc, zdep)), gtr)); cp.append(cn(f(Gc), gtr))
+                if inv is not None:
+                    co.append(cn(f(fwd(Gc, inv(Gc, Gf))), gtr))            # oracle only meaningful with teacher
+                cd_.append(cn(f(fwd(Gc, zdep)), gtr)); cp.append(cn(f(Gc), gtr))
                 idpred.append(fwd(Gc, zdep).mean((2, 3)).cpu().numpy())
             idpred = np.concatenate(idpred); idpred /= (np.linalg.norm(idpred, axis=1, keepdims=True) + 1e-8)
             idn = topn_hit(idpred @ spL.T, lnm)
             pms = (idpred @ spL.T).argmax(1)
             vfwd = float((progn[pms] > progn[lcm]).mean())
-            per_task[m["name"]] = {"oracle": round(float(np.concatenate(co).mean()), 4),
+            per_task[m["name"]] = {"oracle": round(float(np.concatenate(co).mean()), 4) if co else None,
                                    "deploy": round(float(np.concatenate(cd_).mean()), 4),
                                    "persistence": round(float(np.concatenate(cp).mean()), 4),
-                                   "identity_topN": idn, "value_forward_frac": round(vfwd, 4), "n_val": len(va)}
-    res = {"tag": args.tag, "datasets": datasets, "anchor": args.anchor, "total_M": total_M,
+                                   "identity_topN": idn, "value_forward_frac": round(vfwd, 4),
+                                   "is_heldout": m["is_heldout"], "n_val": len(va)}
+    tr_v = [v for v in per_task.values() if not v["is_heldout"]]
+    ho_v = [v for v in per_task.values() if v["is_heldout"]]
+    mean = lambda vs, k, sub=None: round(float(np.mean([(v[k][sub] if sub else v[k]) for v in vs])), 4) if vs else None
+    res = {"tag": args.tag, "datasets": datasets, "heldout": heldout, "anchor": args.anchor, "total_M": total_M,
            "center_w": args.center_w, "per_task": per_task,
-           "deploy_mean": round(float(np.mean([v["deploy"] for v in per_task.values()])), 4),
-           "id_top3_mean": round(float(np.mean([v["identity_topN"]["top3"] for v in per_task.values()])), 4),
-           "value_forward_mean": round(float(np.mean([v["value_forward_frac"] for v in per_task.values()])), 4)}
+           "train_deploy_mean": mean(tr_v, "deploy"), "train_id_top3_mean": mean(tr_v, "identity_topN", "top3"),
+           "heldout_deploy_mean": mean(ho_v, "deploy"), "heldout_id_top3_mean": mean(ho_v, "identity_topN", "top3"),
+           "heldout_persist_mean": mean(ho_v, "persistence"), "heldout_vfwd_mean": mean(ho_v, "value_forward_frac")}
     outp = REPO / f"lmwm/outputs/multitask/{args.tag}.json"; outp.parent.mkdir(parents=True, exist_ok=True)
     outp.write_text(json.dumps(res, indent=2))
     print(json.dumps(res, indent=2), flush=True)
