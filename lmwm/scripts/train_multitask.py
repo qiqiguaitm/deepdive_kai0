@@ -147,7 +147,8 @@ def main():
     ap.add_argument("--K", type=int, default=4)
     ap.add_argument("--lift_w", type=float, default=1.0)
     ap.add_argument("--mode", default="seglast")
-    ap.add_argument("--per_task_cap", type=int, default=8000, help="max pairs per task (balance)")
+    ap.add_argument("--per_task_cap", type=int, default=8000, help="max TRAIN pairs per task (balance)")
+    ap.add_argument("--val_cap", type=int, default=4000, help="max VAL pairs per task (RAM/speed; caps unique frames read)")
     ap.add_argument("--steps", type=int, default=9000)
     ap.add_argument("--bestof", type=int, default=8)
     ap.add_argument("--tag", required=True)
@@ -176,6 +177,8 @@ def main():
             tr = []                                                        # heldout: eval-only, never trained
         elif len(tr) > args.per_task_cap:
             tr = [tr[i] for i in rng.choice(len(tr), args.per_task_cap, replace=False)]
+        if len(va) > args.val_cap:                                         # cap val (RAM/speed): fewer unique frames to read
+            va = [va[i] for i in rng.choice(len(va), args.val_cap, replace=False)]
         uniq = sorted(set([p[0] for p in tr + va] + [p[1] for p in tr + va])); u2k = {gi: k for k, gi in enumerate(uniq)}
         ie, _ = read_frames(cfg, E, FR, np.array(uniq), 224, 128)
         grids = enc.encode_grid(ie, bs=32); din = grids.shape[1]
