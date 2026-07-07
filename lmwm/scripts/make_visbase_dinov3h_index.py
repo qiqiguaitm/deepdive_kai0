@@ -36,22 +36,30 @@ def main():
     ap.add_argument("--dataset_root", required=True, type=Path)
     ap.add_argument("--camera", default="observation.images.top_head")
     ap.add_argument("--episode", type=int, default=0)
+    ap.add_argument("--n_episodes", type=int, default=1, help="encode episodes [episode, episode+n_episodes)")
     ap.add_argument("--out_dir", required=True, type=Path)
     ap.add_argument("--fps", type=float, default=30.0)
     ap.add_argument("--device", default="cuda:0")
     args = ap.parse_args()
 
-    T = ep_frame_count(args.dataset_root, args.camera, args.episode)
-    E = np.full(T, args.episode, np.int64); FR = np.arange(T, dtype=np.int64)
-
     enc = load_encoder("dinov3-h", device=args.device)
-    imgs = read_enc(args.dataset_root, args.camera, E, FR, 256)                 # cv2 read + resize 256
-    feat = enc.encode_pooled(imgs).astype(np.float16)                          # (T, 1280) DINOv3-H pooled
-
+    Es, FRs, Ts, feats = [], [], [], []
+    g = 0
+    for ep in range(args.episode, args.episode + args.n_episodes):
+        try:
+            T = ep_frame_count(args.dataset_root, args.camera, ep)
+        except SystemExit:
+            print(f"skip ep{ep} (no video)", flush=True); continue
+        E = np.full(T, ep, np.int64); FR = np.arange(T, dtype=np.int64)
+        imgs = read_enc(args.dataset_root, args.camera, E, FR, 256)             # cv2 read + resize 256
+        feats.append(enc.encode_pooled(imgs).astype(np.float16))               # (T, 1280) DINOv3-H pooled
+        Es.append(E); FRs.append(FR); Ts.append((FR / args.fps).astype(np.float32)); g += T
+    E = np.concatenate(Es); FR = np.concatenate(FRs); Tarr = np.concatenate(Ts); feat = np.concatenate(feats)
+    n = len(E)
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    np.savez(args.out_dir / "index.npz", E=E, FR=FR, T=(FR / args.fps).astype(np.float32), n=np.int64(T))
-    np.savez(args.out_dir / "shard_0.npz", gidx=np.arange(T, dtype=np.int64), feat=feat, valid=np.ones(T, bool))
-    print(f"wrote {args.out_dir}: T={T} feat={feat.shape} dim={feat.shape[1]}", flush=True)
+    np.savez(args.out_dir / "index.npz", E=E, FR=FR, T=Tarr, n=np.int64(n))
+    np.savez(args.out_dir / "shard_0.npz", gidx=np.arange(n, dtype=np.int64), feat=feat, valid=np.ones(n, bool))
+    print(f"wrote {args.out_dir}: n_ep={len(Ts)} n_frames={n} feat={feat.shape}", flush=True)
 
 
 if __name__ == "__main__":
