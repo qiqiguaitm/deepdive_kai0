@@ -1,0 +1,113 @@
+# LMWM world-model ablation (lmwm/scripts/train_ablation.py) — cnbj Robot-North-H20
+#
+#   Runs a STANDALONE python command (NOT the config.py / norm_stats VLA pipeline).
+#   train_ablation.py is single-GPU (uses cuda:0, no torchrun/DDP) → 1 H20 is enough.
+#
+#   NOTE ON RESOURCE: the Robot-North-H20 queue only hands out WHOLE 8-GPU HPC/RDMA nodes
+#   (Flavor ml.hpcpni3ln.45xlarge — see docs/.../gf0_control_plane.md:84). There is no
+#   1-GPU flavor on this queue, so we request the 1-node minimum and PIN the job to a
+#   single H20 via CUDA_VISIBLE_DEVICES=0 (the other 7 sit idle for the run's duration).
+#   If/when a fractional GpuCount is confirmed to work on this queue, replace the
+#   TaskRoleSpecs block with the commented FlexibleResourceClaim variant at the bottom.
+#
+#   CRITICAL: crave/config/paths.py defaults CRAVE_REPO=/vePFS/tim/workspace/deepdive_kai0
+#   which does NOT exist on cnbj/gf3 → we export CRAVE_REPO to the North-E mount below.
+#
+# Submit (from gf0, creds sourced):
+#   source ~/.volc_creds
+#   /vePFS/tim/workspace/deepdive_kai0/kai0/.venv/bin/python \
+#     /vePFS/tim/workspace/deepdive_kai0/train_scripts/kai/volc/submit_yaml.py \
+#     /vePFS/tim/workspace/deepdive_kai0/train_scripts/kai/volc/lmwm_ablation_h20.yaml
+
+TaskName: "lmwm-ablation-h20"
+Description: "LMWM world-model ablation (lmwm/scripts/train_ablation.py), single H20, cnbj Robot-North-H20"
+Tags: []
+
+ImageUrl: "dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1"   # cnbj kai0 standard image (cached → fast deploy)
+ResourceQueueName: "Robot-North-H20"                                 # auto: cn-beijing / cn-beijing-e
+Framework: "PyTorch"
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 1
+    Flavor: "ml.hpcpni3ln.45xlarge"   # 8× H20-SXM5-96GB single node (queue's minimum unit); job pins to 1 GPU
+
+ActiveDeadlineSeconds: 21600   # 6h (train_ablation default 9000 steps, single GPU)
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnbj875793a96d6b"
+    MountPath: "/vePFS-North-E/vis_robot"
+    SubPath: "/vis_robot"          # ⚠️ cnbj IAM: without SubPath=/vis_robot → 403 AccessDenied
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: PYTHONUNBUFFERED
+    Value: "1"
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+  - Name: TOKENIZERS_PARALLELISM
+    Value: "false"
+  - Name: OMP_NUM_THREADS
+    Value: "8"
+
+Entrypoint: |
+  set -uo pipefail
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  REPO=/vePFS-North-E/vis_robot/workspace/deepdive_kai0
+  LOG_DIR=$REPO/logs
+  mkdir -p "$LOG_DIR"
+  LOG="$LOG_DIR/lmwm_ablation_${STAMP}.log"
+  exec >> "$LOG" 2>&1
+  echo "=== LMWM ablation start $(date) (single H20) ==="
+  set -ex
+  nvidia-smi -L
+
+  # crave/config/paths.py REPO override (default /vePFS/tim/... does NOT exist on cnbj)
+  export CRAVE_REPO=$REPO
+  cd "$REPO"
+  PY=$REPO/kai0/.venv/bin/python
+  $PY -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), 'ndev', torch.cuda.device_count())"
+
+  # PRE-FLIGHT: verify all train_ablation.py inputs exist on the North-E FS (single-task kai0_base defaults)
+  FEAT=$REPO/temp/crave_full_dinov3h                                          # --feature_dir (bank: index.npz + shards)
+  RG=$REPO/lmwm/data/recurrence_graphs/kai0base_dinov3h/recurrence_graph.npz  # prototype_table + pord
+  DSROOT=$REPO/kai0/data/Task_A/kai0_base                                     # --dataset_root (video frames)
+  PI05NPZ=/vePFS-North-E/vis_robot/openpi_cache/paligemma_weights/pt_224.npz  # SigLIP (PI05_NPZ_GF3)
+  [ -f "$FEAT/index.npz" ]   || { echo "FATAL: bank index missing $FEAT/index.npz" >&2; exit 13; }
+  [ -f "$RG" ]              || { echo "FATAL: recurrence graph missing $RG" >&2; exit 13; }
+  [ -f "$DSROOT/meta/episodes.jsonl" ] || { echo "FATAL: frames dataset missing $DSROOT" >&2; exit 13; }
+  [ -f "$PI05NPZ" ]        || { echo "FATAL: SigLIP pt_224.npz missing $PI05NPZ" >&2; exit 13; }
+  echo "[$(date)] preflight OK (bank + recurrence graph + frames + SigLIP npz)"
+
+  # Single-GPU run — pin to one H20.
+  # >>> ARGS_PLACEHOLDER <<< main session finalizes --datasets/--anchor/--tag (multi-task flags).
+  # train_ablation.py REQUIRES --tag. Single-task kai0_base example (all defaults resolve on North-E FS):
+  #   --tag lmwm_abl_v1 --anchor progress --teacher center --steps 9000
+  # Replace PLACEHOLDER_EDIT_ME below with the finalized flags before submitting.
+  exec env CUDA_VISIBLE_DEVICES=0 $PY -u lmwm/scripts/train_ablation.py --tag PLACEHOLDER_EDIT_ME
+
+RetryOptions:
+    EnableRetry: false
+    MaxRetryTimes: 0
+
+AccessType: "Public"
+
+# ---------------------------------------------------------------------------
+# OPTIONAL: genuine 1-2 GPU request (only if fractional GpuCount is confirmed
+# allocatable on Robot-North-H20 — the HPC RDMA nodes normally go whole-node).
+# submit_yaml.py maps this to Resource{Type:Flexible, FlexibleResourceClaim{...}}.
+# TODO before use: verify the exact GpuType string the queue expects.
+# TaskRoleSpecs:
+#   - RoleName: "worker"
+#     RoleReplicas: 1
+#     FlexibleResourceClaim:
+#       GpuCount: 1
+#       GpuType: "<VERIFY-H20-SXM5-GpuType-string>"
+#       Cpu: 22
+#       MemoryGiB: 245
+# ---------------------------------------------------------------------------
