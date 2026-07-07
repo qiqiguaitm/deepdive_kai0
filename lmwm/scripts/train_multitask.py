@@ -147,7 +147,8 @@ def main():
         ie, _ = read_frames(cfg, E, FR, np.array(uniq), 224, 128)
         grids = enc.encode_grid(ie, bs=32); din = grids.shape[1]
         progn = ((pord - pord.min()) / (pord.max() - pord.min() + 1e-8)).astype(np.float32)
-        idproj = (rng.standard_normal((din, args.id_dim)).astype(np.float32) / np.sqrt(din)) if ti == 0 else tasks_meta[0]["idproj"]
+        pdim = proto.shape[1]                                             # DINOv3-H prototype dim (1280), NOT SigLIP grid dim
+        idproj = (rng.standard_normal((pdim, args.id_dim)).astype(np.float32) / np.sqrt(pdim)) if ti == 0 else tasks_meta[0]["idproj"]
         idtarget = (protoL @ idproj).astype(np.float32)                    # (M, id_dim) fixed id embedding per milestone
         # SigLIP proto (identity retrieval) per milestone from this task's val gists
         gnp = grids.mean((2, 3))
