@@ -139,7 +139,7 @@ def main():
     ap.add_argument("--datasets", default="kai0,coffee")
     ap.add_argument("--heldout", default="", help="comma tasks EXCLUDED from training, eval-only (open-vocab/LOO test)")
     ap.add_argument("--anchor", default="progress_id", choices=["union_ce", "progress", "progress_id"])
-    ap.add_argument("--teacher", default="inv", choices=["inv", "none"])    # inv=inverse-dynamics teacher+distill; none=direct predictor+generator end-to-end
+    ap.add_argument("--teacher", default="inv", choices=["inv", "none", "proto"])  # inv=inverse-dynamics; none=direct; proto=cluster-center teacher(code=next-milestone SigLIP center)
     ap.add_argument("--center_w", type=float, default=0.1)
     ap.add_argument("--margin", type=float, default=0.05)
     ap.add_argument("--id_dim", type=int, default=64)
@@ -210,6 +210,11 @@ def main():
     idtarget_g = np.concatenate([m["idtarget"] for m in train_metas])       # (total_M, id_dim), TRAINING global-ms
     progn_g = np.concatenate([m["progn"] for m in train_metas])             # (total_M,), TRAINING global-ms
     TR = [p for m in train_metas for p in m["tr"]]; rng.shuffle(TR); TR = np.array(TR)
+    zteach_t = None
+    if args.teacher == "proto":                                            # code = fixed projection of next-milestone SigLIP center
+        Wproj = (rng.standard_normal((din, args.code_dim)).astype(np.float32) / np.sqrt(din))
+        sp_g = np.concatenate([m["spL"] for m in train_metas])             # (total_M, din) SigLIP milestone centers
+        zteach_t = torch.from_numpy((sp_g @ Wproj).astype(np.float32)).to(dev)  # (total_M, code_dim) center-code per milestone
 
     inv = InverseEnc(din, args.code_dim).to(dev) if args.teacher == "inv" else None
     fwd = MilestoneGenerator(din, args.code_dim).to(dev)
@@ -244,6 +249,13 @@ def main():
             l1 = F.smooth_l1_loss(gh, Gf) + args.lift_w * lift + anchor_loss(z, gnm_t, gcm)
             o1.zero_grad(); l1.backward(); o1.step()
             l2 = predm.nll(gist_all[ca].to(dev), z.detach()); o2.zero_grad(); l2.backward(); o2.step()
+        elif args.teacher == "proto":                                      # CLUSTER-CENTER teacher: z = next-milestone center-code (fixed)
+            z = zteach_t[gnm_t]                                            # identity IS the code; generator renders it on current canvas
+            gh = fwd(Gc, z)
+            lift = torch.relu(cosr(gh.flatten(1), Gc.flatten(1)) - cosr(gh.flatten(1), Gf.flatten(1))).mean()
+            l1 = F.smooth_l1_loss(gh, Gf) + args.lift_w * lift             # no anchor: z already = milestone center
+            o1.zero_grad(); l1.backward(); o1.step()
+            l2 = predm.nll(gist_all[ca].to(dev), z.detach()); o2.zero_grad(); l2.backward(); o2.step()  # predm distills center-code
         else:                                                              # DIRECT: predictor code -> generator, end-to-end (no teacher)
             z = predm(gist_all[ca].to(dev))[1][:, 0]                       # 1st-component mean (differentiable)
             gh = fwd(Gc, z)
