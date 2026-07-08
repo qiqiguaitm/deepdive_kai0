@@ -60,6 +60,7 @@ ros2_ws/build/
 **/.env
 *.env.local
 .credentials.json
+.volc_creds
 
 # ===== Node =====
 node_modules/
