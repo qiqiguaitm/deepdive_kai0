@@ -210,7 +210,7 @@
     </div>
 
     <h3><span class="h3n">2.2</span>模型训练 & 部署 — 预测器 + 生成器(π0.5 SigLIP 同塔)</h3>
-    <p class="sub" style="margin-top:4px">解决 1.1:在线编码换成 <b>π0.5 自己的 SigLIP</b>(与策略同塔、复用 KV,零隔阂)。<b>预测器 Predictor</b> 回答"下一个价值 milestone 是<b>哪个</b>";<b>生成器 Generator</b> 回答"它在当前场景<b>长什么样</b>"。</p>
+    <p class="sub" style="margin-top:4px">解决 1.1:在线编码换成 <b>π0.5 自己的 SigLIP</b>(与策略同塔、复用 KV,零隔阂)。<b>预测器 Predictor + MDN(K=4)</b> 蒸馏下一 milestone 的<b>簇中心连续码</b>(proto teacher,零参数·开放词表);<b>生成器 Generator(AdaLN)</b> 以当前 grid 为画布渲染子目标。部署含 <b>prev_ẑ 反馈</b>(自身上步输出条件化)+ <b>密度弃权</b>(不确定时不硬塞)。</p>
     <p class="sub" style="margin-top:10px;margin-bottom:4px"><b>训练</b>与<b>部署</b>是两张不同的图:训练时有一道<b>「矿界」</b>—— 线下 CRAVE 挖矿的 label 工厂,只吐监督目标、不上线;部署时矿界整体消失,只剩两个网络在 π0.5 SigLIP 同塔上自包含前向。</p>
 
     <!-- ============ SVG A · 训练(含矿界)============ -->
@@ -259,8 +259,8 @@
         <!-- 在线形态的可训练主体 -->
         <rect class="n2bx" x="14" y="196" width="96" height="56" rx="8"/><text class="n2t" x="62" y="220">当前帧</text><text class="n2s" x="62" y="240">224²×3</text>
         <rect class="n2fz" x="132" y="196" width="140" height="56" rx="8"/><text class="n2t" x="202" y="220">π0.5 SigLIP</text><text class="n2s" x="202" y="240">❄ 冻结 · 同塔</text>
-        <rect class="n2bx" x="296" y="180" width="96" height="44" rx="8"/><text class="n2t" x="344" y="200">grid G_t</text><text class="n2s" x="344" y="216">16²×1152</text>
-        <rect class="n2bx" x="296" y="230" width="96" height="44" rx="8"/><text class="n2t" x="344" y="250">gist g_t</text><text class="n2s" x="344" y="266">pool 1152</text>
+        <rect class="n2bx" x="296" y="176" width="96" height="42" rx="8"/><text class="n2t" x="344" y="196">grid G_t</text><text class="n2s" x="344" y="212">16²×1152</text>
+        <rect class="n2bx" x="296" y="244" width="96" height="42" rx="8"/><text class="n2t" x="344" y="264">gist g_t</text><text class="n2s" x="344" y="280">= pool(G_t)</text>
         <rect class="n2ac" x="470" y="196" width="196" height="56" rx="8"/><text class="n2t" x="568" y="220">预测器 · MDN(K=4)</text><text class="n2s" x="568" y="240">蒸馏簇中心码 → ẑ(128)</text>
         <rect class="n2ac" x="330" y="318" width="200" height="56" rx="8"/><text class="n2t" x="430" y="342">生成器 · AdaLN(4 块)</text><text class="n2s" x="430" y="362">(G_t 画布, z)→ 预测 grid · zero-gate</text>
         <rect class="n2bx" x="562" y="318" width="104" height="56" rx="8"/><text class="n2t" x="614" y="342">预测 Ĝ</text><text class="n2s" x="614" y="362">16²×1152</text>
@@ -302,42 +302,52 @@
           .d2ar{stroke:#34d399;stroke-width:2;fill:none}
           .d2lb{fill:#6ee7b7;font:10px monospace;text-anchor:middle}
         </style>
-        <text x="20" y="26" style="fill:#6ee7b7;font:700 12px sans-serif">部署:⛏ 矿界消失 · 零 CRAVE / 零 DINO / 零 bank · 自包含 ~34M 两网络</text>
+        <text x="20" y="26" style="fill:#6ee7b7;font:700 12px sans-serif">部署:⛏ 矿界消失 · 零 CRAVE / 零 DINO / 零 bank · 自包含 ~34M</text>
 
-        <rect class="d2bx" x="14" y="70" width="92" height="58" rx="8"/><text class="d2t" x="60" y="94">当前帧</text><text class="d2s" x="60" y="114">224²×3</text>
-        <rect class="d2fz" x="128" y="70" width="150" height="58" rx="8"/><text class="d2t" x="203" y="94">π0.5 SigLIP</text><text class="d2s" x="203" y="114">❄ 冻结 · 复用 KV</text>
-        <rect class="d2bx" x="300" y="52" width="92" height="44" rx="8"/><text class="d2t" x="346" y="72">grid G_t</text><text class="d2s" x="346" y="88">16²×1152</text>
-        <rect class="d2bx" x="300" y="102" width="92" height="44" rx="8"/><text class="d2t" x="346" y="122">gist g_t</text><text class="d2s" x="346" y="138">pool 1152</text>
-        <rect class="d2ac" x="414" y="102" width="176" height="44" rx="8"/><text class="d2t" x="502" y="122">预测器 · MDN(K=4)</text><text class="d2s" x="502" y="138">g_t → 码 ẑ(128)</text>
-        <rect class="d2ac" x="626" y="70" width="182" height="58" rx="8"/><text class="d2t" x="717" y="94">生成器 · AdaLN</text><text class="d2s" x="717" y="114">(G_t 画布, ẑ)→ 子目标</text>
-        <rect class="d2bx" x="828" y="70" width="92" height="58" rx="8"/><text class="d2t" x="874" y="94">子目标 Ĝ</text><text class="d2s" x="874" y="114">16²×1152</text>
-        <rect class="d2fz" x="720" y="168" width="200" height="50" rx="8"/><text class="d2t" x="820" y="190">π0.5 action expert</text><text class="d2s" x="820" y="208">注入子目标 · KI · 下游 SR</text>
+        <rect class="d2bx" x="14" y="68" width="88" height="56" rx="8"/><text class="d2t" x="58" y="92">当前帧</text><text class="d2s" x="58" y="110">224²×3</text>
+        <rect class="d2fz" x="122" y="68" width="134" height="56" rx="8"/><text class="d2t" x="189" y="92">π0.5 SigLIP</text><text class="d2s" x="189" y="110">❄ 冻结·复用KV</text>
+        <rect class="d2bx" x="278" y="50" width="88" height="42" rx="8"/><text class="d2t" x="322" y="70">grid G_t</text><text class="d2s" x="322" y="86">16²×1152</text>
+        <rect class="d2bx" x="278" y="100" width="88" height="42" rx="8"/><text class="d2t" x="322" y="120">gist g_t</text><text class="d2s" x="322" y="136">= pool(G_t)</text>
+        <rect class="d2ac" x="388" y="100" width="166" height="42" rx="8"/><text class="d2t" x="471" y="118">预测器 MDN(K=4)</text><text class="d2s" x="471" y="136">g_t⊕prev_ẑ → ẑ</text>
+        <rect class="d2ac" x="578" y="68" width="170" height="56" rx="8"/><text class="d2t" x="663" y="92">生成器 AdaLN</text><text class="d2s" x="663" y="110">(G_t画布,ẑ)→Ĝ</text>
+        <rect class="d2bx" x="770" y="68" width="88" height="56" rx="8"/><text class="d2t" x="814" y="92">子目标 Ĝ</text><text class="d2s" x="814" y="110">16²×1152</text>
+        <rect class="d2fz" x="660" y="172" width="198" height="48" rx="8"/><text class="d2t" x="759" y="196">π0.5 action expert</text><text class="d2s" x="759" y="212">注入 Ĝ · KI · 下游SR</text>
 
-        <path class="d2ar" d="M106,99 L128,99" marker-end="url(#ah4)"/>
-        <path class="d2ar" d="M278,99 C288,99 292,74 300,74" marker-end="url(#ah4)"/>
-        <path class="d2ar" d="M278,99 C288,99 292,124 300,124" marker-end="url(#ah4)"/>
-        <path class="d2ar" d="M392,124 L414,124" marker-end="url(#ah4)"/>
-        <path class="d2ar" d="M346,52 C346,30 620,30 700,30 720,30 717,60 717,70" marker-end="url(#ah4)"/><text class="d2lb" x="520" y="24">grid 当画布</text>
-        <path class="d2ar" d="M590,124 C608,124 612,99 626,99" marker-end="url(#ah4)"/><text class="d2lb" x="608" y="145">ẑ</text>
-        <path class="d2ar" d="M808,99 L828,99" marker-end="url(#ah4)"/>
-        <path class="d2ar" d="M874,128 C874,168 830,168 820,168" marker-end="url(#ah4)"/>
+        <!-- arrows -->
+        <path class="d2ar" d="M102,96 L122,96" marker-end="url(#ah4)"/>
+        <path class="d2ar" d="M256,96 C266,96 270,71 278,71" marker-end="url(#ah4)"/><text class="d2lb" x="262" y="68">→</text>
+        <path class="d2ar" d="M256,96 C266,96 270,121 278,121" marker-end="url(#ah4)"/><text class="d2lb" x="262" y="118">pool→</text>
+        <path class="d2ar" d="M366,121 L388,121" marker-end="url(#ah4)"/>
+        <path class="d2ar" d="M322,50 C322,24 570,24 650,24 660,24 663,58 663,68" marker-end="url(#ah4)"/><text class="d2lb" x="480" y="18">grid = 画布</text>
+        <path class="d2ar" d="M554,121 C570,121 572,96 578,96" marker-end="url(#ah4)"/><text class="d2lb" x="562" y="150">ẑ*</text>
+        <path class="d2ar" d="M748,96 L770,96" marker-end="url(#ah4)"/>
+
+        <!-- prev_ẑ feedback -->
+        <path class="d2ar" d="M471,142 C471,158 510,158 570,158 600,158 600,148 640,148 C650,148 650,142 650,142" fill="none" marker-end="url(#ah4)" style="stroke-dasharray:5 3"/>
+        <text class="d2lb" x="560" y="174">prev_ẑ 反馈(上步输出)</text>
+
+        <!-- density gate badge -->
+        <rect x="395" y="148" width="130" height="18" rx="4" style="fill:#052e2b;stroke:#34d399;stroke-width:1"/>
+        <text x="460" y="160" style="fill:#6ee7b7;font:9px monospace;text-anchor:middle">密度门 · 低密度→弃权</text>
+
+        <path class="d2ar" d="M858,96 C858,172 868,196 858,196" marker-end="url(#ah4)"/>
       </svg>
       <div class="legend">
         <span><i style="background:#2a1065;border:1px solid #7c3aed"></i>❄ 冻结同塔 · 复用 KV</span>
         <span><i style="background:#052e2b;border:1px solid #34d399"></i>在线两网络(预测器/生成器)</span>
-        <span style="color:#6ee7b7">⛏ 矿界已消失 —— 部署零挖矿依赖</span>
+        <span style="color:#6ee7b7">⛏ 矿界已消失 · 部署零挖矿</span>
       </div>
     </div>
 
     <div class="scroll"><table>
       <thead><tr><th>模块</th><th>回答什么</th><th>训练形态</th><th>部署形态</th></tr></thead>
       <tbody>
-        <tr><td class="term">预测器<br>Predictor</td><td>下一个价值 milestone 是<b>哪个</b>?</td><td>逆向 teacher 看真未来 → 理想码 z(128)+ <b>簇中心 CE 身份锚</b>(强制码带"哪个价值簇")</td><td class="pos">MDN(K=4)从当前 gist 猜码 · argmax 分量取均值(确定、平滑)</td></tr>
-        <tr><td class="term">生成器<br>Generator</td><td>它在当前场景<b>长什么样</b>?</td><td colspan="2" class="pos">AdaLN:当前 grid 当画布,码 → per-block shift/scale/gate(zero-init gate),只学"变化" · 训练/部署同一形态</td></tr>
+        <tr><td class="term">预测器<br>Predictor</td><td>下一个价值 milestone 是<b>哪个</b>?</td><td><b>proto teacher</b>:下一 milestone 的 SigLIP 簇中心固定投影 → 连续码 z(128);MDN(K=4) NLL 蒸馏 · <b>开放词表</b>(无 CE anchor)</td><td class="pos">MDN(K=4) 条件于 g_t + <b>prev_ẑ 反馈</b>(上步自身输出)· <b>密度弃权</b>(低密度→交还语言通道,不硬塞错提示)</td></tr>
+        <tr><td class="term">生成器<br>Generator</td><td>它在当前场景<b>长什么样</b>?</td><td colspan="2" class="pos">AdaLN:当前 grid 当画布,码 → per-block shift/scale/gate(zero-init gate),只学"变化" · 外观由当前观测带入,训练/部署同一形态</td></tr>
       </tbody>
     </table></div>
 
-    <p style="margin-top:16px"><b>训练关键 · 簇中心锚强度 center_w</b>:锚太弱 → 预测冲出真实流形(解码黑斑,违反硬指标①);太强 → 过保守、reach 缩短。扫描 {0,0.1,0.25,0.5} 定案 <b>center_w=0.1</b> 为甜点(身份/deploy/reach/平滑同时见顶)。<span class="ref">完整扫描表 + 核心结构消融 + gist-vs-grid 预测器输入消融见报告 <code>lmwm/docs/FINAL_REPORT.md §4</code>。</span></p>
+    <p style="margin-top:16px"><b>架构定档(2026-07-08 P1/P2 数据收敛)</b>:teacher=<b>proto</b>(簇中心码,与 inv 打平但去掉 InverseEnc+CE 锚,更简/开放词表);预测器加 <b>prev_ẑ 条件化</b>(自身上步输出反馈,code-top1 +0.029,xvla 身份 +0.012);不确定性通过<b>MDN 自身密度弃权</b>(替代熵门——pi 塌成 one-hot 而密度能分对错 AUC 0.63);<b>DINO 沙箱否决</b>(SigLIP-native 解码 L1 0.027 ≈ DINO-true 0.025,穿过 DINO 反而赔钱)。完整设计赌注逐项裁决见 <code>lmwm/docs/LMWM2_FINAL_ARCHITECTURE.md</code>。</p>
 
     <h3><span class="h3n">2.3</span>预测渲染效果</h3>
     <p class="sub" style="margin-top:4px">最终模型(center_w=0.1)预测 milestone+1。四栏 = 当前 │ <b>预测 m+1 解码</b> │ 真实 m+1 编→解码 │ 真实 m+1 帧(中间两栏过<b>同一</b>解码器 → 差异纯是预测质量)。</p>

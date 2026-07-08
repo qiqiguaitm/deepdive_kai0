@@ -10,10 +10,10 @@
 
 | # | 文档 | 一句话 |
 |---|---|---|
-| 0 | [`REDESIGN_LMWM2_2026-07.md`](REDESIGN_LMWM2_2026-07.md) | ⭐ **重设计方案 LMWM-2**(2026-07-08;三红线:弃检索/部署零CRAVE/结构入表示;价值几何化码空间——价值=方向、达成=码距、验证=MDN自身密度;部署仍两网络34M;SR 裁决计划 + vs 现 LMWM 对比定案) |
-| 1 | [`FINAL_REPORT.md`](FINAL_REPORT.md) | **最终架构 + 各指标含义 + LaWM baseline 对比**(先看这个) |
-| 2 | [`FINAL_CROSSTASK_PREDICTOR.md`](FINAL_CROSSTASK_PREDICTOR.md) | **最优跨任务预测器**(多任务联合、teacher=proto 簇中心、交付 ckpt) |
-| 3 | [`ARCHITECTURE_AND_BASELINE.md`](ARCHITECTURE_AND_BASELINE.md) | **最终架构总表 + 参数量 + I/O + vs LaWM 指标一览**(单页速查) |
+| 0 | [`LMWM2_FINAL_ARCHITECTURE.md`](LMWM2_FINAL_ARCHITECTURE.md) | ⭐ **最终定档架构**(2026-07-08 P1/P2 数据收敛;9设计赌注逐项裁决表;保留/降级/砍掉全表;组件I/O规范;跨任务机制;编码器耦合;降级阶梯;待SR裁决清单) |
+| 1 | [`REDESIGN_LMWM2_2026-07.md`](REDESIGN_LMWM2_2026-07.md) | 重设计方案 LMWM-2(三路文献调研;优雅性假设部分被实测证伪→定档见 #0) |
+| 2 | [`ARCHITECTURE_AND_BASELINE.md`](ARCHITECTURE_AND_BASELINE.md) | 现 LMWM 架构速查(参数量/I-O/vs LaWM)——作为参照基线 |
+| 3 | [`FINAL_CROSSTASK_PREDICTOR.md`](FINAL_CROSSTASK_PREDICTOR.md) | proto teacher 定案 + 交付 ckpt + 跨任务指标 |
 | 4 | [`PITFALLS_AND_HISTORY.md`](PITFALLS_AND_HISTORY.md) | **版本演进史 + 踩坑/错误路径**(避免重复犯错,踩坑前必看) |
 
 ## 📚 专题(深挖时看)
@@ -30,13 +30,14 @@
 
 ---
 
-## 🧭 一句话现状(2026-07-08)
+## 🧭 一句话现状(2026-07-08,最终定档)
 
-- **最终架构**:π0.5 SigLIP 冻结共享塔 → 预测器(teacher 出码 / MDN 部署)+ 生成器(AdaLN,当前 grid 当画布)→ milestone+1 子目标 grid。部署主体 ~34M CNN。
-- **teacher 定案 = proto(簇中心)**:码 = 下一 milestone 的 SigLIP 中心固定投影;predm 蒸馏它;生成器渲染到当前画布。与 inv(逆向动力学)打平但更简/更轻/开放词表。
-- **跨任务**:多任务并集联合训练(kai0/coffee/xvla[/vis]),一个模型同时干 3 种任务(mean deploy ~0.75)。
-- **vs LaWM**:reach 1.67s > 1.48s、参数轻 ~10×、与 VLA 同塔嵌入更深;唯一未覆盖 = 下游 SR。
-- **下一步(唯一真缺口)**:接 π0.5 action expert 测 action-MAE / 真机 SR。
+- **最终架构(via P1/P2 数据收敛)**:π0.5 SigLIP 冻结共享塔 → 预测器(proto teacher/MDN K=4,prev_ẑ 条件化,密度弃权)+ 生成器(AdaLN)→ milestone+1 子目标 grid。部署 ~34M,零 CRAVE/零 DINO/零 bank。
+- **teacher = proto(簇中心码,定案)**:开放词表,与 inv 打平但去 InverseEnc+CE 锚;ID 活在 SigLIP 连续流形。
+- **跨任务**:多任务联合训练(kai0/coffee/xvla),prev_ẑ 自递归条件 = 主杠杆,proto 连续码 = 开放词表。
+- **vs LaWM**:reach 1.67s > 1.48s、参数轻 ~10×、同塔嵌入;唯一未覆盖 = 下游 SR → P0。
+- **P1/P2 关键裁决**:价值几何(u·z)证伪/熵门证伪/DINO 沙箱否决/密度弃权成立/proto+prev_ẑ 保留。
+- **下一步:P0 oracle-SR**(子目标条件对 π0.5 是否有正增量;milestone-horizon vs 固定 1.2s 论文主张)。
 
 ## 🔧 关键产物(代码/模型/数据)
 
