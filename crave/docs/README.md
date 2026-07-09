@@ -19,7 +19,8 @@
 |---|---|
 | **[cross_episode_recurrence_value_METHOD](cross_episode_recurrence_value_METHOD.md)** | **离散主线 V2.4**:9 步配方 + 四场景验证 + 否决死路 |
 | **[viterbi_computation](viterbi_computation.md)** | Viterbi-DP 计算流程详解 (含频率参数标定附录) |
-| **[sym_adaptive_vote](sym_adaptive_vote.md)** | **🆕 Viterbi-free 替代**: 对称自适应投票 (在线,3 参数,corr=0.974 vs Viterbi) |
+| **[online_readout_route](online_readout_route.md)** | **🆕 在线读出路线(完全因果)**: 三档(对称/非对称 forward-DP + 因果 GRU 蒸馏)追平离线 Viterbi;GRU 留出 corr vs GT 0.955=离线水平, 0.735M 参数, 零未来 |
+| **[sym_adaptive_vote](sym_adaptive_vote.md)** | Viterbi-free 替代: 对称自适应投票 (在线,3 参数,corr=0.974 vs Viterbi;粗milestone+3Hz下退化, 见 online_readout_route) |
 | **[milestone_centroid_decoding](milestone_centroid_decoding.md)** | 簇中心解码 + 解码器对比 + 标准配置 (含 centroid config 附录) |
 | **[encoders](encoders.md)** | 编码器作用 / 选型 / 对比:DINOv3 vs Wan-VAE |
 
