@@ -93,7 +93,7 @@
     <span class="tag">编码器 <b>π0.5 SigLIP(同塔) · DINOv3-H 离线</b></span>
     <span class="tag">世界模型 <b>~34M CNN</b></span>
     <span class="tag">baseline <b>LaWM</b></span>
-    <span class="tag">2026-07-07</span>
+    <span class="tag">2026-07-08</span>
   </div>
   <p class="ref" style="margin-top:14px">本页是<b>精简可视化 showcase</b>;完整数据记录、全部消融表与过程迭代见报告 <code>lmwm/docs/FINAL_REPORT.md</code>。</p>
 </div></header>
@@ -102,7 +102,7 @@
 
   <div class="tiles">
     <div class="tile hl"><div class="k">deploy grid-cos</div><div class="v">0.728</div><div class="n">实战保真(身份 top3 0.511)</div></div>
-    <div class="tile"><div class="k">oracle 天花板</div><div class="v">0.715</div><div class="n">已知真答案的上限</div></div>
+    <div class="tile"><div class="k">oracle 天花板</div><div class="v">0.761</div><div class="n">已知真答案的上限(&gt; deploy)</div></div>
     <div class="tile"><div class="k">预测 reach</div><div class="v">1.67<small>s</small></div><div class="n">&gt; LaWM 1.48s(更难目标)</div></div>
     <div class="tile"><div class="k">世界模型参数</div><div class="v">~34<small>M</small></div><div class="n">vs LaWM ~230M(轻 ~10×)</div></div>
   </div>
@@ -251,35 +251,34 @@
         <path class="n2arm" d="M708,72 L742,72" marker-end="url(#ahm3)"/>
 
         <!-- 两条监督穿过矿界下行 -->
-        <path class="n2ard" d="M633,100 C633,150 470,150 400,196" marker-end="url(#ahd3)"/>
-        <text class="n2lb" x="470" y="150">簇中心码 z(teacher · 0 参数)</text>
-        <path class="n2ard" d="M854,100 L854,318" marker-end="url(#ahd3)"/>
-        <text class="n2lb" x="900" y="210">监督目标</text>
+        <path class="n2ard" d="M633,100 V150 H555 V178" marker-end="url(#ahd3)"/>
+        <text class="n2lb" x="555" y="150">簇中心码 z(teacher · 0 参数)</text>
+        <path class="n2ard" d="M854,100 V404" marker-end="url(#ahd3)"/>
+        <text class="n2lb" x="900" y="242">监督目标</text>
 
         <!-- 在线形态的可训练主体 -->
         <rect class="n2bx" x="14" y="196" width="96" height="56" rx="8"/><text class="n2t" x="62" y="220">当前帧</text><text class="n2s" x="62" y="240">224²×3</text>
-        <rect class="n2fz" x="132" y="196" width="140" height="56" rx="8"/><text class="n2t" x="202" y="220">π0.5 SigLIP</text><text class="n2s" x="202" y="240">❄ 冻结 · 同塔</text>
-        <rect class="n2bx" x="296" y="176" width="96" height="42" rx="8"/><text class="n2t" x="344" y="196">grid G_t</text><text class="n2s" x="344" y="212">16²×1152</text>
-        <rect class="n2bx" x="296" y="244" width="96" height="42" rx="8"/><text class="n2t" x="344" y="264">gist g_t</text><text class="n2s" x="344" y="280">= pool(G_t)</text>
-        <rect class="n2ac" x="470" y="196" width="196" height="56" rx="8"/><text class="n2t" x="568" y="220">预测器 · MDN(K=4)</text><text class="n2s" x="568" y="240">蒸馏簇中心码 → ẑ(128)</text>
-        <rect class="n2ac" x="330" y="318" width="200" height="56" rx="8"/><text class="n2t" x="430" y="342">生成器 · AdaLN(4 块)</text><text class="n2s" x="430" y="362">(G_t 画布, z)→ 预测 grid · zero-gate</text>
-        <rect class="n2bx" x="562" y="318" width="104" height="56" rx="8"/><text class="n2t" x="614" y="342">预测 Ĝ</text><text class="n2s" x="614" y="362">16²×1152</text>
+        <rect class="n2fz" x="132" y="162" width="250" height="142" rx="10"/><text class="n2t" x="200" y="196">π0.5 SigLIP</text><text class="n2s" x="200" y="214">❄ 冻结 · 同塔</text><text class="n2s" x="200" y="232">内部 patch token</text>
+        <rect class="n2bx" x="274" y="178" width="96" height="42" rx="8"/><text class="n2t" x="322" y="198">gist g_t</text><text class="n2s" x="322" y="214">= pool(G_t)</text>
+        <rect class="n2bx" x="274" y="250" width="96" height="42" rx="8"/><text class="n2t" x="322" y="270">grid G_t</text><text class="n2s" x="322" y="286">16²×1152</text>
+        <rect class="n2ac" x="450" y="178" width="210" height="58" rx="8"/><text class="n2t" x="555" y="202">预测器 · MDN(K=4)</text><text class="n2s" x="555" y="222">g_t → ẑ(128)</text>
+        <rect class="n2ac" x="450" y="304" width="210" height="62" rx="8"/><text class="n2t" x="555" y="329">生成器 · AdaLN(4 块)</text><text class="n2s" x="555" y="349">G_t 画布 + z → 预测 grid</text>
+        <rect class="n2bx" x="724" y="304" width="104" height="62" rx="8"/><text class="n2t" x="776" y="329">预测 Ĝ</text><text class="n2s" x="776" y="349">16²×1152</text>
 
-        <path class="n2ar" d="M110,224 L132,224" marker-end="url(#ah3)"/>
-        <path class="n2ar" d="M272,224 C282,224 286,202 296,202" marker-end="url(#ah3)"/>
-        <path class="n2ar" d="M272,224 C282,224 286,252 296,252" marker-end="url(#ah3)"/>
-        <path class="n2ar" d="M392,252 L470,224" marker-end="url(#ah3)"/><text class="n2lb" x="430" y="248">gist</text>
-        <path class="n2ar" d="M344,274 C344,318 360,318 380,318" marker-end="url(#ah3)"/><text class="n2lb" x="300" y="300">grid=画布</text>
-        <path class="n2ar" d="M530,346 L562,346" marker-end="url(#ah3)"/>
+        <path class="n2ar" d="M110,224 H132" marker-end="url(#ah3)"/>
+        <path class="n2ar" d="M250,224 H262 V271 H274" marker-end="url(#ah3)"/>
+        <path class="n2ar" d="M322,250 V220" marker-end="url(#ah3)"/><text class="n2lb" x="352" y="240">pool</text>
+        <path class="n2ar" d="M370,199 H450" marker-end="url(#ah3)"/><text class="n2lb" x="410" y="192">gist</text>
+        <path class="n2ar" d="M370,271 H410 V335 H450" marker-end="url(#ah3)"/><text class="n2lb" x="410" y="322">grid=画布</text>
+        <path class="n2ar" d="M660,335 H724" marker-end="url(#ah3)"/>
         <!-- 蒸馏箭头 predictor->generator code -->
-        <path class="n2ard" d="M568,252 C568,285 500,290 470,318" marker-end="url(#ahd3)"/><text class="n2lb" x="560" y="290">蒸馏 z</text>
+        <path class="n2ard" d="M555,236 V304" marker-end="url(#ahd3)"/><text class="n2lb" x="594" y="276">ẑ / z</text>
 
         <!-- 两个损失 -->
-        <rect class="n2loss" x="470" y="404" width="230" height="36" rx="8"/><text class="n2lt" x="585" y="426">① 生成器:smooth-L1 + lift(Ĝ ↔ 目标帧)</text>
-        <path class="n2arm" d="M614,374 L600,404" marker-end="url(#ahm3)"/>
-        <path class="n2arm" d="M854,318 C854,404 720,420 700,420" marker-end="url(#ahm3)"/>
+        <rect class="n2loss" x="600" y="404" width="260" height="36" rx="8"/><text class="n2lt" x="730" y="426">① 生成器:smooth-L1 + lift(Ĝ ↔ 目标帧)</text>
+        <path class="n2arm" d="M776,366 V404" marker-end="url(#ahm3)"/>
         <rect class="n2loss" x="18" y="404" width="210" height="36" rx="8"/><text class="n2lt" x="123" y="426">② 预测器:NLL 蒸馏簇中心码</text>
-        <path class="n2arm" d="M540,240 C400,240 200,320 123,404" marker-end="url(#ahm3)"/>
+        <path class="n2arm" d="M450,207 H430 V392 H123 V404" marker-end="url(#ahm3)"/>
       </svg>
       <div class="legend">
         <span><i style="background:#241206;border:1px dashed #b45309"></i>⛏ 矿界(离线挖矿 · 不上线)</span>
@@ -305,32 +304,32 @@
         <text x="20" y="26" style="fill:#6ee7b7;font:700 12px sans-serif">部署:⛏ 矿界消失 · 零 CRAVE / 零 DINO / 零 bank · 自包含 ~34M</text>
 
         <rect class="d2bx" x="14" y="68" width="88" height="56" rx="8"/><text class="d2t" x="58" y="92">当前帧</text><text class="d2s" x="58" y="110">224²×3</text>
-        <rect class="d2fz" x="122" y="68" width="134" height="56" rx="8"/><text class="d2t" x="189" y="92">π0.5 SigLIP</text><text class="d2s" x="189" y="110">❄ 冻结·复用KV</text>
-        <rect class="d2bx" x="278" y="50" width="88" height="42" rx="8"/><text class="d2t" x="322" y="70">grid G_t</text><text class="d2s" x="322" y="86">16²×1152</text>
-        <rect class="d2bx" x="278" y="100" width="88" height="42" rx="8"/><text class="d2t" x="322" y="120">gist g_t</text><text class="d2s" x="322" y="136">= pool(G_t)</text>
-        <rect class="d2ac" x="388" y="100" width="166" height="42" rx="8"/><text class="d2t" x="471" y="118">预测器 MDN(K=4)</text><text class="d2s" x="471" y="136">g_t⊕prev_ẑ → ẑ</text>
-        <rect class="d2ac" x="578" y="68" width="170" height="56" rx="8"/><text class="d2t" x="663" y="92">生成器 AdaLN</text><text class="d2s" x="663" y="110">(G_t画布,ẑ)→Ĝ</text>
-        <rect class="d2bx" x="770" y="68" width="88" height="56" rx="8"/><text class="d2t" x="814" y="92">子目标 Ĝ</text><text class="d2s" x="814" y="110">16²×1152</text>
-        <rect class="d2fz" x="660" y="172" width="198" height="48" rx="8"/><text class="d2t" x="759" y="196">π0.5 action expert</text><text class="d2s" x="759" y="212">注入 Ĝ · KI · 下游SR</text>
+        <rect class="d2fz" x="122" y="42" width="244" height="110" rx="10"/><text class="d2t" x="190" y="78">π0.5 SigLIP</text><text class="d2s" x="190" y="96">❄ 冻结·复用KV</text><text class="d2s" x="190" y="114">grid 在塔内产生</text>
+        <rect class="d2bx" x="268" y="52" width="88" height="42" rx="8"/><text class="d2t" x="312" y="72">grid G_t</text><text class="d2s" x="312" y="88">16²×1152</text>
+        <rect class="d2bx" x="268" y="102" width="88" height="42" rx="8"/><text class="d2t" x="312" y="122">gist g_t</text><text class="d2s" x="312" y="138">= pool(G_t)</text>
+        <rect class="d2ac" x="398" y="100" width="166" height="42" rx="8"/><text class="d2t" x="481" y="118">预测器 MDN(K=4)</text><text class="d2s" x="481" y="136">g_t⊕prev_ẑ → ẑ</text>
+        <rect class="d2ac" x="606" y="68" width="170" height="56" rx="8"/><text class="d2t" x="691" y="92">生成器 AdaLN</text><text class="d2s" x="691" y="110">(G_t画布,ẑ)→Ĝ</text>
+        <rect class="d2bx" x="804" y="68" width="88" height="56" rx="8"/><text class="d2t" x="848" y="92">子目标 Ĝ</text><text class="d2s" x="848" y="110">16²×1152</text>
+        <rect class="d2fz" x="749" y="172" width="198" height="48" rx="8"/><text class="d2t" x="848" y="196">π0.5 action expert</text><text class="d2s" x="848" y="212">注入 Ĝ · KI · 下游SR</text>
 
         <!-- arrows -->
         <path class="d2ar" d="M102,96 L122,96" marker-end="url(#ah4)"/>
-        <path class="d2ar" d="M256,96 C266,96 270,71 278,71" marker-end="url(#ah4)"/><text class="d2lb" x="262" y="68">→</text>
-        <path class="d2ar" d="M256,96 C266,96 270,121 278,121" marker-end="url(#ah4)"/><text class="d2lb" x="262" y="118">pool→</text>
-        <path class="d2ar" d="M366,121 L388,121" marker-end="url(#ah4)"/>
-        <path class="d2ar" d="M322,50 C322,24 570,24 650,24 660,24 663,58 663,68" marker-end="url(#ah4)"/><text class="d2lb" x="480" y="18">grid = 画布</text>
-        <path class="d2ar" d="M554,121 C570,121 572,96 578,96" marker-end="url(#ah4)"/><text class="d2lb" x="562" y="150">ẑ*</text>
-        <path class="d2ar" d="M748,96 L770,96" marker-end="url(#ah4)"/>
+        <path class="d2ar" d="M242,96 C252,96 256,73 268,73" marker-end="url(#ah4)"/>
+        <path class="d2ar" d="M312,94 L312,102" marker-end="url(#ah4)"/><text class="d2lb" x="342" y="101">pool</text>
+        <path class="d2ar" d="M356,123 H398" marker-end="url(#ah4)"/>
+        <path class="d2ar" d="M356,73 H586 V96 H606" marker-end="url(#ah4)"/><text class="d2lb" x="484" y="66">grid = 画布</text>
+        <path class="d2ar" d="M564,121 H586 V96 H606" marker-end="url(#ah4)"/><text class="d2lb" x="584" y="136">ẑ*</text>
+        <path class="d2ar" d="M776,96 H804" marker-end="url(#ah4)"/>
 
         <!-- prev_ẑ feedback -->
-        <path class="d2ar" d="M471,142 C471,158 510,158 570,158 600,158 600,148 640,148 C650,148 650,142 650,142" fill="none" marker-end="url(#ah4)" style="stroke-dasharray:5 3"/>
-        <text class="d2lb" x="560" y="174">prev_ẑ 反馈(上步输出)</text>
+        <path class="d2ar" d="M481,142 V164 H606 V124" fill="none" marker-end="url(#ah4)" style="stroke-dasharray:5 3"/>
+        <text class="d2lb" x="542" y="176">prev_ẑ 反馈(上步输出)</text>
 
         <!-- density gate badge -->
-        <rect x="395" y="148" width="130" height="18" rx="4" style="fill:#052e2b;stroke:#34d399;stroke-width:1"/>
-        <text x="460" y="160" style="fill:#6ee7b7;font:9px monospace;text-anchor:middle">密度门 · 低密度→弃权</text>
+        <rect x="406" y="148" width="130" height="18" rx="4" style="fill:#052e2b;stroke:#34d399;stroke-width:1"/>
+        <text x="471" y="160" style="fill:#6ee7b7;font:9px monospace;text-anchor:middle">密度门 · 低密度→弃权</text>
 
-        <path class="d2ar" d="M858,96 C858,172 868,196 858,196" marker-end="url(#ah4)"/>
+        <path class="d2ar" d="M848,124 V172" marker-end="url(#ah4)"/>
       </svg>
       <div class="legend">
         <span><i style="background:#2a1065;border:1px solid #7c3aed"></i>❄ 冻结同塔 · 复用 KV</span>
@@ -383,8 +382,8 @@
       <tbody>
         <tr><td class="term">在线编码器</td><td>独立 DINOv3 ViT-B/16(768)</td><td class="pos">π0.5 SigLIP-So400m(1152)· <b>与策略同塔</b></td></tr>
         <tr><td class="term">与 VLA 关系</td><td class="amb">脱离 · latent 跨空间蒸馏</td><td class="pos">同塔复用 KV · 子目标即策略空间</td></tr>
-        <tr><td class="term">逆向/预测</td><td>24 层 Perceiver-Transformer</td><td class="pos">预测器:逆向 teacher(2 层 CNN)+ MDN(K=4)</td></tr>
-        <tr><td class="term">码 / 调制</td><td>VAE code 32 · 12 层 AdaLN-DiT</td><td class="pos">码 128 + 簇中心锚 · 生成器 AdaLN(4 块 CNN)</td></tr>
+        <tr><td class="term">teacher / 预测</td><td>24 层 Perceiver-Transformer 逆向动力学</td><td class="pos">proto teacher(簇中心码,0 参数)+ MDN(K=4)预测器</td></tr>
+        <tr><td class="term">码 / 调制</td><td>VAE code 32 · 12 层 AdaLN-DiT</td><td class="pos">连续码 128(码即簇中心=身份,开放词表)· 生成器 AdaLN(4 块 CNN)</td></tr>
         <tr><td class="term">码调制方式</td><td>AdaLN-DiT(Transformer)</td><td>AdaLN(CNN · <b>收敛到同款</b>)</td></tr>
         <tr><td class="term">部署预测码</td><td class="amb">LAM 内无 predm · 甩给策略</td><td class="pos">内置 MDN predm · 世界模型自包含</td></tr>
         <tr><td class="term">世界模型参数</td><td>~230M Transformer</td><td class="pos">~34M CNN(轻 ~10×)</td></tr>
@@ -453,13 +452,13 @@
         <rect class="sbx" x="26" y="108" width="66" height="40" rx="7"/><text class="st" x="59" y="132">当前 o_t</text>
         <rect class="sbx" x="26" y="160" width="66" height="40" rx="7"/><text class="st" x="59" y="184">未来 o_T</text>
         <!-- shared siglip -->
-        <rect class="ssh" x="112" y="108" width="104" height="92" rx="9"/><text class="st" x="164" y="146">π0.5 SigLIP</text><text class="ss" x="164" y="164">冻结 · 共享塔</text><text class="ss" x="164" y="180">❄ 与策略同塔</text>
+        <rect class="ssh" x="112" y="96" width="196" height="116" rx="10"/><text class="st" x="166" y="132">π0.5 SigLIP</text><text class="ss" x="166" y="150">冻结 · 共享塔</text><text class="ss" x="166" y="166">❄ grid 在塔内</text>
         <!-- grids -->
-        <rect class="sbx" x="240" y="108" width="64" height="40" rx="7"/><text class="st" x="272" y="132">grid G_t</text>
-        <rect class="sbx" x="240" y="160" width="64" height="40" rx="7"/><text class="st" x="272" y="184">grid G_T</text>
+        <rect class="sbx" x="234" y="108" width="64" height="40" rx="7"/><text class="st" x="266" y="132">grid G_t</text>
+        <rect class="sbx" x="234" y="160" width="64" height="40" rx="7"/><text class="st" x="266" y="184">grid G_T</text>
         <!-- predictor teacher -->
-        <rect class="str" x="338" y="104" width="176" height="56" rx="9"/><text class="st" x="426" y="126">预测器 · 逆向 teacher</text><text class="ss" x="426" y="144">inv(G_t,G_T) → 码 z(128)</text>
-        <rect class="str" x="338" y="168" width="176" height="34" rx="8"/><text class="ss" x="426" y="189" style="fill:#c7cbf0">＋ 簇中心 CE 身份锚</text>
+        <rect class="str" x="338" y="104" width="176" height="56" rx="9"/><text class="st" x="426" y="126">proto teacher(0 参数)</text><text class="ss" x="426" y="144">下一 milestone 簇中心 → 码 z(128)</text>
+        <rect class="str" x="338" y="168" width="176" height="34" rx="8"/><text class="ss" x="426" y="189" style="fill:#c7cbf0">预测器 MDN(K=4)蒸馏码 z</text>
         <rect class="sbx" x="538" y="112" width="42" height="40" rx="7"/><text class="st" x="559" y="137">z</text>
         <!-- generator -->
         <rect class="str" x="606" y="106" width="158" height="58" rx="9"/><text class="st" x="685" y="128">生成器 · AdaLN(4块)</text><text class="ss" x="685" y="146">(G_t 画布, z) → 下一 grid</text>
@@ -470,16 +469,16 @@
         <!-- arrows S1 -->
         <path class="sar" d="M92,128 L112,138" marker-end="url(#a4)"/>
         <path class="sar" d="M92,180 L112,170" marker-end="url(#a4)"/>
-        <path class="sar" d="M216,132 L240,128" marker-end="url(#a4)"/>
-        <path class="sar" d="M216,176 L240,180" marker-end="url(#a4)"/>
-        <path class="sar" d="M304,128 L338,130" marker-end="url(#a4)"/>
-        <path class="sar" d="M304,180 C322,180 322,148 338,146" marker-end="url(#a4)"/>
+        <path class="sar" d="M202,138 C214,132 222,128 234,128" marker-end="url(#a4)"/>
+        <path class="sar" d="M202,170 C214,176 222,180 234,180" marker-end="url(#a4)"/>
+        <path class="sar" d="M298,138 C316,150 322,185 338,185" marker-end="url(#a4)"/><text class="slb" x="316" y="128">pool→gist</text>
+        <path class="sar" d="M266,200 C266,296 892,296 892,162" marker-end="url(#a4)"/><text class="slb" x="560" y="290">grid G_T = smooth-L1 目标</text>
         <path class="sar" d="M514,132 L538,132" marker-end="url(#a4)"/>
         <path class="sar" d="M580,132 L606,134" marker-end="url(#a4)"/>
-        <path class="sar" d="M272,148 C272,210 560,210 606,158" marker-end="url(#a4)"/><text class="slb" x="360" y="206">G_t 当画布</text>
+        <path class="sar" d="M266,148 C266,210 560,210 606,158" marker-end="url(#a4)"/><text class="slb" x="360" y="206">G_t 当画布</text>
         <path class="sar" d="M764,135 L788,135" marker-end="url(#a4)"/>
         <path class="sar" d="M870,135 L892,135" marker-end="url(#a4)"/>
-        <path class="sard" d="M620,232 C560,214 470,208 440,202" marker-end="url(#a4d)"/><text class="slb" x="560" y="226" style="fill:#eab308">身份 id 锚</text>
+        <path class="sard" d="M560,232 C500,214 460,190 460,164" marker-end="url(#a4d)"/><text class="slb" x="520" y="224" style="fill:#eab308">簇中心 → 码 z(teacher)</text>
         <path class="sard" d="M840,232 C900,210 937,190 937,162" marker-end="url(#a4d)"/>
 
         <!-- ================= STAGE 2 ================= -->
@@ -490,37 +489,39 @@
         <rect class="sbx" x="24" y="440" width="72" height="38" rx="7"/><text class="st" x="60" y="463">主视图 o_1</text>
         <rect class="sbx" x="24" y="488" width="72" height="34" rx="7"/><text class="ss" x="60" y="509" style="fill:#c7cbf0">“叠衣”指令</text>
         <!-- VLM shared -->
-        <rect class="ssh" x="118" y="392" width="150" height="130" rx="10"/><text class="st" x="193" y="446">π0.5 VLM</text><text class="ss" x="193" y="464">SigLIP 共享塔</text><text class="ss" x="193" y="480">+ 语言</text><text class="ss" x="193" y="500">prefix · KV 复用</text>
+        <rect class="ssh" x="118" y="382" width="252" height="150" rx="10"/><text class="st" x="194" y="438">π0.5 VLM</text><text class="ss" x="194" y="456">SigLIP 共享塔</text><text class="ss" x="194" y="472">+ 语言</text><text class="ss" x="194" y="488">prefix · KV 复用</text>
         <!-- upper LMWM branch -->
-        <rect class="sbx" x="300" y="360" width="70" height="38" rx="7"/><text class="st" x="335" y="383">grid G_t</text>
-        <rect class="str" x="300" y="418" width="176" height="54" rx="9"/><text class="st" x="388" y="440">预测器 · MDN 部署</text><text class="ss" x="388" y="458">g_t → 多峰码 ẑ(K=4)</text>
-        <rect class="sbx" x="498" y="424" width="42" height="42" rx="7"/><text class="st" x="519" y="450">ẑ</text>
-        <rect class="str" x="566" y="418" width="158" height="54" rx="9"/><text class="st" x="645" y="440">生成器 · AdaLN</text><text class="ss" x="645" y="458">(G_t, ẑ) → 子目标 Ĝ</text>
-        <rect class="sbx" x="748" y="424" width="58" height="42" rx="7"/><text class="st" x="777" y="450">Ĝ</text>
+        <rect class="sbx" x="288" y="396" width="70" height="38" rx="7"/><text class="st" x="323" y="419">grid G_t</text>
+        <rect class="sbx" x="288" y="452" width="70" height="38" rx="7"/><text class="st" x="323" y="475">gist g_t</text>
+        <rect class="str" x="400" y="418" width="176" height="54" rx="9"/><text class="st" x="488" y="440">预测器 · MDN 部署</text><text class="ss" x="488" y="458">g_t → 多峰码 ẑ(K=4)</text>
+        <rect class="sbx" x="600" y="424" width="42" height="42" rx="7"/><text class="st" x="621" y="450">ẑ</text>
+        <rect class="str" x="666" y="418" width="150" height="54" rx="9"/><text class="st" x="741" y="440">生成器 · AdaLN</text><text class="ss" x="741" y="458">(G_t, ẑ) → 子目标 Ĝ</text>
+        <rect class="sbx" x="838" y="424" width="58" height="42" rx="7"/><text class="st" x="867" y="450">Ĝ</text>
         <!-- KI injection -->
-        <rect class="str" x="566" y="540" width="240" height="48" rx="9"/><text class="st" x="686" y="562">Knowledge Insulation(KI)</text><text class="ss" x="686" y="579">+ RoPE 偏移 + mask 重设计</text>
+        <rect class="str" x="566" y="548" width="250" height="48" rx="9"/><text class="st" x="691" y="570">Knowledge Insulation(KI)</text><text class="ss" x="691" y="587">+ RoPE 偏移 + mask 重设计</text>
         <!-- action expert -->
-        <rect class="sact" x="838" y="398" width="146" height="210" rx="10"/><text class="st" x="911" y="470" style="fill:#dcfce7">π0.5</text><text class="st" x="911" y="490" style="fill:#dcfce7">action expert</text><text class="ss" x="911" y="510" style="fill:#a7f3d0">flow matching · ×N</text>
+        <rect class="sact" x="838" y="486" width="146" height="122" rx="10"/><text class="st" x="911" y="536" style="fill:#dcfce7">π0.5</text><text class="st" x="911" y="556" style="fill:#dcfce7">action expert</text><text class="ss" x="911" y="576" style="fill:#a7f3d0">flow matching · ×N</text>
         <rect class="sact" x="866" y="352" width="90" height="34" rx="7"/><text class="st" x="911" y="374" style="fill:#dcfce7">Actions</text>
         <rect class="sbx" x="866" y="620" width="90" height="30" rx="7"/><text class="ss" x="911" y="640" style="fill:#c7cbf0">Noise</text>
         <!-- distill -->
-        <path class="sard" d="M519,424 C519,300 519,300 559,164" marker-end="url(#a4d)"/><text class="slb" x="470" y="330" style="fill:#eab308">蒸馏 ‖ẑ−z‖²(对齐 Stage-1 teacher 码)</text>
+        <path class="sard" d="M621,424 V316 H559 V164" marker-end="url(#a4d)"/><text class="slb" x="520" y="330" style="fill:#eab308">蒸馏 ‖ẑ−z‖²(对齐 Stage-1 teacher 码)</text>
         <!-- arrows S2 -->
         <path class="sar" d="M96,411 L118,430" marker-end="url(#a4)"/>
         <path class="sar" d="M96,459 L118,460" marker-end="url(#a4)"/>
         <path class="sar" d="M96,505 L118,490" marker-end="url(#a4)"/>
-        <path class="sar" d="M268,420 C286,414 286,390 300,382" marker-end="url(#a4)"/>
-        <path class="sar" d="M268,458 C286,458 286,446 300,444" marker-end="url(#a4)"/><text class="slb" x="292" y="500">同塔 grid/gist</text>
-        <path class="sar" d="M370,392 C420,404 420,416 430,418" marker-end="url(#a4)"/>
-        <path class="sar" d="M476,446 L498,446" marker-end="url(#a4)"/>
-        <path class="sar" d="M540,446 L566,446" marker-end="url(#a4)"/>
-        <path class="sar" d="M724,446 L748,446" marker-end="url(#a4)"/>
-        <path class="sar" d="M777,466 C777,510 700,520 686,540" marker-end="url(#a4)"/>
-        <path class="sar" d="M519,466 C519,520 600,520 640,540" marker-end="url(#a4)"/><text class="slb" x="560" y="516">Ĝ + ẑ 一起注入</text>
-        <path class="sar" d="M806,564 C824,564 824,556 838,548" marker-end="url(#a4)"/>
-        <path class="sar" d="M268,500 C520,700 700,640 838,580" marker-end="url(#a4)"/><text class="slb" x="470" y="640">VLM prefix 条件</text>
-        <path class="sarg" d="M911,398 L911,386" marker-end="url(#a4g)"/>
-        <path class="sar" d="M911,620 L911,608" marker-end="url(#a4)"/>
+        <path class="sar" d="M268,420 C276,418 280,416 288,415" marker-end="url(#a4)"/>
+        <path class="sar" d="M323,434 L323,452" marker-end="url(#a4)"/><text class="slb" x="354" y="448">pool</text>
+        <path class="sar" d="M358,471 H400" marker-end="url(#a4)"/><text class="slb" x="380" y="492">g_t</text>
+        <path class="sar" d="M358,415 H650 V445 H666" marker-end="url(#a4)"/><text class="slb" x="520" y="408">G_t 当画布</text>
+        <path class="sar" d="M576,446 H600" marker-end="url(#a4)"/>
+        <path class="sar" d="M642,446 H666" marker-end="url(#a4)"/>
+        <path class="sar" d="M816,446 H838" marker-end="url(#a4)"/>
+        <path class="sar" d="M867,466 V548 H816" marker-end="url(#a4)"/>
+        <path class="sar" d="M621,466 V548 H566" marker-end="url(#a4)"/><text class="slb" x="636" y="528">Ĝ + ẑ 一起注入</text>
+        <path class="sar" d="M816,572 H838" marker-end="url(#a4)"/>
+        <path class="sar" d="M268,500 V660 H838 V590" marker-end="url(#a4)"/><text class="slb" x="520" y="654">VLM prefix 条件</text>
+        <path class="sarg" d="M911,486 V386" marker-end="url(#a4g)"/>
+        <path class="sar" d="M911,620 V608" marker-end="url(#a4)"/>
 
         <text x="500" y="20" style="fill:#a78bfa;font:800 13px sans-serif;text-anchor:middle">LMWAM 整体架构 —— 与 LaWM 关键区别:SigLIP 共享塔(非独立 DINO)· 内置 MDN 预测器 · 价值单调 milestone 目标</text>
       </svg>
@@ -529,7 +530,7 @@
         <span><i style="background:#1a0b3e;border:1px solid #a78bfa"></i>LMWM 可训练</span>
         <span><i style="background:#0f2e1a;border:1px solid #22c55e"></i>π0.5 action expert / 输出</span>
         <span><i style="background:transparent;border:1px dashed #3730a3"></i>CRAVE 离线</span>
-        <span><i style="background:transparent;border:1px dashed #eab308"></i>蒸馏 / 身份锚</span>
+        <span><i style="background:transparent;border:1px dashed #eab308"></i>蒸馏 / 簇中心码</span>
       </div>
     </div>
     <p class="ref" style="margin-top:8px">对照 LaWM 两阶段图(§01):我们把 <b>Stage-1 世界模型</b>(预测器+生成器)与 <b>Stage-2 VLA 融合</b>(KI + RoPE 偏移 + mask 注入 π0.5 action expert)画到同一流程。<b>三点关键区别</b>:① 编码器是<b>与策略共享的 π0.5 SigLIP</b>(LaWM 用独立 DINO,融合有隔阂);② 预测器内置 MDN、世界模型自包含(LaWM 把预测码甩给策略);③ 目标是 CRAVE <b>价值单调 milestone+1</b>(LaWM 固定 1.6s 未来)。</p>
@@ -547,8 +548,8 @@
 </div>
 
 <footer><div class="wrap">
-  <b>完整报告(数据记录 + 过程迭代)</b>:<code>lmwm/docs/FINAL_REPORT.md</code> · 消融全表 <code>ABLATION_CONVERGENCE_2026-07.md</code> · 命名/多峰 <code>RESEARCH_DIRECTION_...md</code> · LaWM <code>PROGRESS_lawm_comparison_2026-07.md</code><br>
-  产物 · <code>lmwm/checkpoints/twomodel_final.pt</code>(center_w=0.1) · <code>train_twomodel_v2.py</code> · <code>train_ablation.py</code> · <code>measure_lawm_lag.py</code> · <code>render_twomodel_video.py</code> · baseline: <a href="https://rlinf.github.io/LaWAM/">LaWM (rlinf.github.io/LaWAM)</a>
+  <b>最终定档架构</b>:<code>lmwm/docs/LMWM2_FINAL_ARCHITECTURE.md</code> · <b>完整报告</b> <code>FINAL_REPORT.md</code> · 消融全表 <code>ABLATION_CONVERGENCE_2026-07.md</code> · 跨任务预测器 <code>FINAL_CROSSTASK_PREDICTOR.md</code> · LaWM <code>PROGRESS_lawm_comparison_2026-07.md</code><br>
+  产物 · <code>lmwm/checkpoints/teach_proto_3task.pt</code>(⭐推荐,proto 跨任务)· <code>twomodel_final.pt</code>(单任务 cw0.1)· <code>train_multitask.py</code> · <code>train_twomodel_v2.py</code> · <code>train_ablation.py</code> · baseline: <a href="https://rlinf.github.io/LaWAM/">LaWM (rlinf.github.io/LaWAM)</a>
 </div></footer>
 </body>
 </html>
