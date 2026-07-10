@@ -35,7 +35,7 @@
 
 > **在线 GRU corr vs GT 0.955 ≥ 离线本身 0.943 → gap 归零**(GRU 还平滑掉了离散阶梯噪声)。
 
-![GRU 留出集](visualization/encoders/gru_heldout_6ep.png)
+![GRU 留出集](visualization/online_value/gru_heldout_6ep.png)
 *档③ 因果 GRU(紫, 零未来)vs 离线 Viterbi(蓝)· 6 个严格留出 ep · 台阶对齐 + 自学登顶*
 
 ### ⓪ 为什么否决固定滞后
@@ -94,7 +94,7 @@ for each frame:
 
 **差距集中在末段登顶**(前中段贴合, 前80% 一致性 0.84、单调持平、零毛刺)。零训练档②靠前向偏置把末值抬到 0.82~0.95; 要真正抹平(0.955)用档③ GRU。
 
-![在线vs离线差距曲线](visualization/encoders/online_vs_offline_curves.png)
+![在线vs离线差距曲线](visualization/online_value/online_vs_offline_curves.png)
 *档① 完全在线(红)vs 离线(蓝)· 前中段贴合, 分歧集中末段登顶(粉阴影)*
 
 ---
