@@ -216,6 +216,32 @@ wd 有天花板。**离线标签蒸馏(crave_stage 用途)→ 双锚 Viterbi 定
 
 ---
 
+## 2.12 代表帧折线读出(polyline · 可选平滑版)
+
+阶梯(step)之外的**平滑替代**, 在双锚 Viterbi 分段基础上:
+
+1. 双锚 Viterbi → 逐帧 milestone value(阶梯);
+2. 每个连续 stage 段取【离该簇质心最近的一帧】为**代表帧**, 钉在簇 value;
+3. 相邻代表帧之间**线性连成折线**, 每帧 value = 折线对应值。
+
+硬阶梯 → 锚在"最典型帧"上的分段线性。实测(200ep vs 监督 stage_gt):
+
+| 读出 | corr vs GT | 单调 |
+|---|---|---|
+| 阶梯 step | 0.944 | 0.981 |
+| **折线 polyline** | **0.957** | 0.790 |
+| 折线 + cummax | ≈0.957 | 1.000 |
+
+**折线 corr 反超阶梯**(监督 GT 本身是平滑 ramp, 折线更贴)。代价是 raw 折线单调降到 0.79
+(相邻近等值 milestone 代表帧的微摆 + 真实再抓); 需单调时 cummax 即可(与 crave_stage_B 一致)。
+
+![代表帧折线vs阶梯](visualization/encoders/polyline_vs_step_9ep.png)
+*红=折线, 蓝=阶梯, 橙=GT, 黑点=各 stage 最贴簇心的代表帧锚点*
+
+产物: `gen_polyline_labels.py` → `temp/crave_ae_labels/polyline/`(raw) + `polyline_mono/`(cummax)。
+
+---
+
 ## 3. 最终标签质量(3055 ep,双锚 Viterbi 无 smooth · 无 norm01)
 
 | 指标 | 值 | 说明 |

@@ -1,0 +1,16 @@
+loading img⊕pos for 1500 eps...
+joint (164232, 142)
+
+=== 底层过聚类器对比 (img⊕pos, K0=32, min_cov=0.5) ===
+                KMeans: K_eff=25 Tstd=0.1796 cov=0.632 多峰簇=3
+   (23s)
+       MiniBatchKMeans: K_eff=20 Tstd=0.1859 cov=0.646 多峰簇=2
+   (6s)
+             GMM(diag): K_eff=16 Tstd=0.1621 cov=0.690 多峰簇=1
+   (50s)
+/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages/sklearn/mixture/_base.py:293: ConvergenceWarning: Best performing initialization did not converge. Try different init parameters, or increase max_iter, tol, or check for degenerate data.
+  warnings.warn(
+    BayesianGMM(eff28): K_eff=14 Tstd=0.1607 cov=0.711 多峰簇=2
+   (148s)
+/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages/sklearn/cluster/_hdbscan/hdbscan.py:722: FutureWarning: The default value of `copy` will change from False to True in 1.10. Explicitly set a value for `copy` to silence this warning.
+  warn(
