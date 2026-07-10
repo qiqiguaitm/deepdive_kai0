@@ -1,0 +1,29 @@
+# LMVLA — umbrella / meta-project.
+#
+# This root declares a uv workspace over the two sub-projects (`crave`, `lmwm`) so that
+# shared dev tooling (ruff, editor config) is defined once. It is *not* a runtime env:
+#   - CRAVE runs inside the `srpo` conda env (torch 2.10 + transformers 4.57, DINOv3-capable);
+#   - LMWM runs inside its own PyTorch (>=2.1) env.
+# Do NOT expect `uv sync` here to produce a DINOv3-capable interpreter — install each
+# sub-project into its documented runtime instead (see each sub-project README).
+
+[project]
+name = "lmvla"
+version = "0.1.0"
+description = "Latent-Milestone VLA — umbrella over CRAVE (zero-train milestone/value) + LMWM (recurrence milestone world model) → π0.5 injection"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.uv.workspace]
+members = ["crave", "lmwm"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+# match the sub-projects' conventions; add rules here only if applied to both members.
+
+[tool.pytest.ini_options]
+testpaths = ["crave/src", "crave/scripts", "lmwm/src", "lmwm/scripts"]

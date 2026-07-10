@@ -1,0 +1,40 @@
+# LMVLA umbrella .gitignore
+# NOTE: lmwm/ has its own .gitignore (data/**, outputs/**, checkpoints/**, *.pt ...).
+# The repo-root deepdive_kai0/.gitignore already ignores checkpoints/, logs/, __pycache__/, .venv/.
+# This file only adds umbrella-level + crave-side guards (crave has no own .gitignore).
+
+# --- python / tooling ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.ruff_cache/
+.venv/
+.uv/
+uv.lock
+
+# --- regenerable artifacts (both sub-projects) ---
+**/checkpoints/
+**/outputs/
+**/logs/
+!**/logs/.gitkeep
+!**/checkpoints/.gitkeep
+!**/outputs/.gitkeep
+!**/data/.gitkeep
+
+# --- large binaries anywhere (feature caches / weights) ---
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.npz
+
+# --- doc videos: local-only, regenerable, non-diffable (~75MB across docs/assets).
+#     Kept on disk; a `_VIDEOS_local_only.md` manifest is committed in each assets dir instead.
+*.mp4
+
+# crave feature caches live under the shared temp/ root, not in-tree — nothing to ignore here,
+# but guard against accidental in-tree caches:
+crave/**/_cache/
+crave/**/*.parquet
