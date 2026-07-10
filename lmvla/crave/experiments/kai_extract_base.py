@@ -37,7 +37,7 @@ def merge():
     parts=sorted(WORK.glob("part_*.npz"))
     E=np.concatenate([np.load(p)["E"] for p in parts]); FR=np.concatenate([np.load(p)["FR"] for p in parts]); feat=np.concatenate([np.load(p)["feat"] for p in parts])
     o=np.lexsort((FR,E)); E,FR,feat=E[o],FR[o],feat[o]; n=len(E)
-    out=D/"temp/kai_dinov3base"; out.mkdir(exist_ok=True)
+    out=D/"lmvla/crave/data/kai_dinov3base"; out.mkdir(exist_ok=True)
     np.savez(out/"index.npz",E=E.astype(np.int64),FR=FR.astype(np.int64),T=(FR/30.0).astype(np.float32),n=np.int64(n))
     np.savez(out/"shard_0.npz",gidx=np.arange(n,dtype=np.int64),feat=feat,valid=np.ones(n,bool))
     print(f"merged {len(np.unique(E))} eps / {n} frames -> temp/kai_dinov3base/")

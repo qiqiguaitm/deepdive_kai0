@@ -8,7 +8,7 @@ DS=[('kai','kai_dinov3base',30.,0,1000),('vis','vis_dinov3base',30.,0,10000),
     ('xvla','xvla_dinov3base_full',30.,1,1000),('coffee','coffee_dinov3base',50.,2,10000)]
 def l2(x): return x/(np.linalg.norm(x,axis=-1,keepdims=True)+1e-9)
 def load_bank(bank):
-    d=REPO/'temp'/bank; idx=np.load(d/'index.npz'); E=idx['E'];FR=idx['FR'];N=len(E);feat=np.zeros((N,768),np.float16)
+    d=REPO/'lmvla/crave/data'/bank; idx=np.load(d/'index.npz'); E=idx['E'];FR=idx['FR'];N=len(E);feat=np.zeros((N,768),np.float16)
     for sh in sorted(d.glob('shard_*.npz')):
         s=np.load(sh); g=s['gidx']; v=s['valid'] if 'valid' in s else np.ones(len(g),bool); feat[g[v]]=s['feat'][v]
     return E,FR,feat

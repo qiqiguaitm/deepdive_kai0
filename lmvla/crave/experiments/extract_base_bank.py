@@ -31,7 +31,7 @@ def main(ds, gpu=0, ep_csv=None):
         feat = np.asarray(enc.encode_pooled(f224)).astype(np.float16); n = len(feat)
         E += [e]*n; FR += list(range(n)); FE.append(feat)
         if (k+1) % 25 == 0: print(f"[g{gpu}] {k+1}/{len(eps)} ep{e} n{n} · {(time.time()-t0)/60:.1f}min", flush=True)
-    out = REPO / "temp/xvla_extract_base" if ep_csv else REPO / f"temp/{ds}_dinov3base"
+    out = REPO / "temp/xvla_extract_base" if ep_csv else REPO / f"lmvla/crave/data/{ds}_dinov3base"
     out.mkdir(parents=True, exist_ok=True)
     if ep_csv:
         np.savez(out / f"part_{gpu}.npz", E=np.array(E,np.int64), FR=np.array(FR,np.int64), feat=np.concatenate(FE))

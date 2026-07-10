@@ -92,7 +92,7 @@ teacher-vs-归一时间:kai 0.957 / vis 0.984 / xvla 0.962 / coffee 0.997(M=11/1
 - **现与部署方案(DINOv3-base)完全一致。**
 
 脚本:`extract_base_bank.py`(vis/coffee,`load_ep_native`)、`kai_extract_base_gf3.py` / `xvla` 直读器(mp4/hdf5,8卡)、`train_multitask_base.py`(读 base bank + 内联 milestone + 参数扫描)。
-base bank(`temp/{kai,vis,coffee,xvla}_dinov3base`)在 gf3(di 盘满,择机同步)。注册表新增 `dinov3-base` 条目。
+base bank(`lmvla/crave/data/{kai,vis,coffee,xvla}_dinov3base`)在 gf3(di 盘满,择机同步)。注册表新增 `dinov3-base` 条目。
 
 ## 4. 诚实边界
 

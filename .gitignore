@@ -33,6 +33,7 @@ logs/
 logs
 log/
 temp/
+lmvla/crave/data/
 kai0/wandb/
 kai0/dagger_stage_viz
 kai0/label_sanity_viz
