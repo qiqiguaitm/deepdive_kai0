@@ -86,3 +86,14 @@ REPO=/home/tim/workspace/deepdive_kai0 PYTHONPATH=crave/src:lmwm/src:lmwm/script
   ![xvla centroids](visualization/decoder_benchmark/centroid_decode_xvla.png)
 
 **结论(与 §3 一致)**: decoder 适合"单帧 latent→图"(自重建 0.87); milestone 簇心可视化用**检索**。脚本 `train_decoder_base.py` / `decode_milestone_centroids.py`; ckpt `lmvla/crave/data/base_decoder_{coffee,xvla}.pt`(gf3, gitignore)。
+
+### 6b. 为什么 xvla milestone 只在 p=0.27-0.52(coverage 分析)
+
+![xvla coverage analysis](visualization/decoder_benchmark/xvla_coverage_analysis.png)
+
+xvla(1532ep, 21 个变体批次)最终方案下 milestone 全集中在 p=0.27-0.52。分析(`xvla_coverage_analysis.py`):
+- **T 分布均匀**(0→1),非采样问题;
+- **max coverage 只在 T=0.2-0.6 达 0.9+**,早段(0-0.2)≈0、晚段(0.6-1.0)<0.5;
+- **7 个 milestone 的 T-std 都紧(0.14-0.19)= 真中段相位**,非首≈末别名(别名会是宽 T-std);晚段完成态簇 T-std 宽(0.3-0.47)+ 低覆盖。
+
+**根因**:① 中段"抓布→提→对折"是跨变体通用运动基元 → 高覆盖;② 首/末态跨 21 变体(no_sleeve/grasp_corner/不同布料/初始摆放)太多样 → 每种小簇够不到 cov≥0.5。**value 端点靠双锚兜住,不影响 corr(0.945)**。想端点也有 milestone → 用单一批次或降 coverage 阈值。
