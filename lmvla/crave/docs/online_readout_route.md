@@ -1,5 +1,7 @@
 # CRAVE 在线读出路线(完全因果 · 追平离线 Viterbi)
 
+> ✅ **当前权威(在线读出)**。⚠️ **修正(2026-07-11)**:最终 teacher = 双锚 Viterbi 的**去阶梯 polyline** 版(非硬阶梯);单任务最终脚本 = `render_kai_online_gru.py`(142D img⊕proprio + polyline teacher + 首帧 warmup)。下文档③里"teacher=离线双锚 Viterbi value"应理解为其 **polyline** 读出。旧 `train_online_gru.py`(`offline_teacher`=硬阶梯)已被取代。总索引 [HISTORY](HISTORY.md)(D3/A6)。
+
 > **日期**: 2026-07-09
 > **目标**: 在**不知道未来**(完全因果, 零延迟)的前提下, 逼近离线双锚 Viterbi 的 value 效果
 > **基准**: 离线双锚 Viterbi(见 [final_architecture](final_architecture.md)) vs 监督 stage_gt corr=**0.943**

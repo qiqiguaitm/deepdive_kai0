@@ -3,6 +3,11 @@
 > **CRAVE** = **C**ross-episode **R**ecurrence **a**s **V**alue **E**stimation
 > *(零训练 · 跨 episode 重复度 → milestone → 稠密 value)*
 
+> 🧭 **agent 先读这个**:[**HISTORY.md**](HISTORY.md) = 唯一的「**当前权威 vs 已淘汰方案**」总索引。
+> CRAVE 迭代多、`docs/` 与 `experiments/` 混着最终与淘汰方案;**动手/复用代码前先查 HISTORY**,避免误用旧脚本/旧图/旧结论(如阶梯-teacher 蒸馏、img-only 聚类、DINOv3-H、KMeans-K10、固定滞后 等均已被取代)。
+>
+> **当前权威文档**(其余为历史/过渡):[final_architecture](final_architecture.md)(离线收口)· [multitask_value](multitask_value.md)(在线 multitask)· [online_readout_route](online_readout_route.md)(在线因果)· [decoder_benchmark](decoder_benchmark.md)(解码)· [cross_dataset_validation](cross_dataset_validation.md)(泛化)。
+
 ## 文档结构
 
 ### 总览
@@ -43,6 +48,7 @@
 
 | 文档 | 作用 |
 |---|---|
+| **[HISTORY](HISTORY.md)** | 🧭 **迭代史 & 淘汰方案总索引**:当前权威 canonical 脚本/文档清单 + 已淘汰方案 ledger(方法→为何淘汰→取代→旧脚本路径)。复用旧代码前必看。 |
 | **[STATUS](STATUS.md)** | 单页 TODO:已收口 / 已否决 / 未做可做 |
 | **[decoder_benchmark](decoder_benchmark.md)** | 🏆 解码器统一基准(最优解码方案):检索(最近真实帧)语义保真+锐度双赢 cos0.84/940;合成保真封顶 ~0.47 |
 | **[milestone_concept_and_universal_next](milestone_concept_and_universal_next.md)** | 🧭 概念再审视:recurrence 是频率代理非本质;更合理 milestone=瓶颈+变点+不可逆;普适 milestone+1=离散功能化 latent world model |

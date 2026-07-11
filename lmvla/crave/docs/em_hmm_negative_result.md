@@ -1,5 +1,7 @@
 # EM-HMM 统一概率框架 → 已否决
 
+> ⚠️ **已否决(负结果)** — 当前 = BayesianGMM + Viterbi 分离;索引 [HISTORY](HISTORY.md)(B2)。
+
 > **结论**: EM-HMM 在 768D 特征空间上系统性地弱于 KMeans,不建议再投入。
 > **实验日期**: 2026-07-01
 > **脚本**: `crave/experiments/em_hmm_vs_kmeans.py`

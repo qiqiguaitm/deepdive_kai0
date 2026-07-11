@@ -1,5 +1,7 @@
 # Symmetric Adaptive Vote — Viterbi-free 在线 progress 读出
 
+> ⚠️ **历史/被取代** — 在线读出最终用**因果 GRU 蒸馏**,见 [online_readout_route](online_readout_route.md);索引 [HISTORY](HISTORY.md)(C2/D)。
+
 > **日期**: 2026-07-01  
 > **定位**: 替代 CRAVE Viterbi-DP 的在线推理方法  
 > **实验 ep**: 2302 (kai0_base, 30Hz, 39 milestones)  

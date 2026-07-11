@@ -1,5 +1,7 @@
 # CRAVE:跨 Episode 重复度挖掘 → 自动 Milestone / Value(最终方法 V2.4)
 
+> ⚠️ **历史/过渡(V2.4)** — 收口方案见 [final_architecture](final_architecture.md);淘汰方案全索引见 [HISTORY](HISTORY.md)。本文 9 步配方叙事仍可参考。
+
 > **方法名 CRAVE** = **C**ross-episode **R**ecurrence **a**s **V**alue **E**stimation —— *training-free dense value from what demonstrations repeat*。V2.4 / "milestone-value" 为其实现代号。
 >
 > **本文档 = 最终可靠方法的方法 + 效果 + 结论(干净版)。** 完整探索过程(所有迭代、否决的死路、诊断图、文献调研)见 [archive/cross_episode_recurrence_value_plan.md](archive/cross_episode_recurrence_value_plan.md)(探索记录,§4.4.6-4.4.18 共 56 图)。

@@ -1,5 +1,7 @@
 # CRAVE 簇中心解码 与 解码器对比试验
 
+> ⚠️ **历史/被取代** — 最终解码基准见 [decoder_benchmark](decoder_benchmark.md);索引 [HISTORY](HISTORY.md)(E)。
+
 > 2026-06-18/19。把 milestone 簇中心从"取最近真实帧"扩展为"**解码出合成质心图**",并系统对比各编码器/解码器。
 > **图集统一放** `docs/visualization/centroid_decoder/`(本文件所有图引用均在该子目录)。
 > 选型结论(标准配置)见本文 §4 + 附录 与 [`decoder_benchmark.md`](decoder_benchmark.md)(2026-07-03 统一横评:最优 = 检索最近真实帧)。

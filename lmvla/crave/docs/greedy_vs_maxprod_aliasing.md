@@ -1,5 +1,7 @@
 # greedy ≠ max-product = milestone 混叠的指纹
 
+> ⚠️ **诊断/历史** — 概念参考;总索引 [HISTORY](HISTORY.md)。
+
 > **一句话**:即便训练数据 100% 是成功叠衣演示,循环转移图上 greedy 与 max-product 仍在 **57% 的 milestone 上给出不同后继**。分歧有**两个可加成分**:① **混叠**(milestone 视觉簇跨阶段重访 —— 可用相位唯一 milestone 修复)+ ② **行为熵**(演示多顺序/绕路/次优 —— 换任何表示也消不掉)。本质是"**greedy 解码 ≠ Viterbi/MAP 解码**":**最理想情况下二者也不必一致**。而 rollout 里"下一格 milestone(+1)"更贴合 **greedy**,不是 max-product。
 >
 > 数据:LMWM 循环图 `lmwm/data/recurrence_graphs/kai0base_dinov3h/`(37 milestone / 3,055 成功 ep)。脚本:[`crave/experiments/greedy_vs_maxprod_diag.py`](../experiments/greedy_vs_maxprod_diag.py)。日期:2026-07-02。

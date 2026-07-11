@@ -1,5 +1,7 @@
 # 编码器(Encoders)：作用、选型与对比
 
+> ⚠️ **综述/部分历史** — 最终编码器 = **DINOv3-base**,见 [final_architecture](final_architecture.md) §2.1;索引 [HISTORY](HISTORY.md)(A1)。
+
 > CRAVE 全程**零训练**,唯一的"表征"来自一个**冻结的视觉编码器**:帧 → 编码器 → 特征 →
 > KMeans 聚类 → milestone 排序 → Viterbi-DP 读出 value。**编码器决定整条 pipeline 聚类
 > 的特征空间**,是除数据质量外对 milestone/value 质量影响最大的单一旋钮。

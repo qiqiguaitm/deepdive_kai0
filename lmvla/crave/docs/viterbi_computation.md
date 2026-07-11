@@ -1,5 +1,7 @@
 # CRAVE · Viterbi-DP 计算流程详解
 
+> ⚠️ **部分历史** — DP 计算详解仍有效,但**固定滞后附录已否决**(偷看未来)。在线读出见 [online_readout_route](online_readout_route.md);总索引 [HISTORY](HISTORY.md)(D1)。
+
 > 把"逐帧最近 milestone"这串带噪观测,解成一条平滑、起点锚 0、终点偏置 1 的进度 value 曲线。
 > 代码:`train_scripts/kai/data/crave_value.py` 的 `viterbi()`(32–40)+ `DiscreteValue.value()`(165–184)。
 > 配图脚本:`crave/experiments/viterbi_compare.py`(kai0_base,kai-only);数据 `temp/crave_a1a2/viterbi_crop_summary.json`。

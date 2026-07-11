@@ -1,5 +1,7 @@
 # CRAVE 聚类方法对比
 
+> ⚠️ **历史(KMeans-era)** — 当前聚类器 = **BayesianGMM**,见 [final_architecture](final_architecture.md) §2.5;索引 [HISTORY](HISTORY.md)(B1)。
+
 > **日期**: 2026-07-08
 > **结论**: Overcluster + Otsu coverage filter 是最优方案。KMeans 强制等方差是优点而非缺陷。
 > **实验数据**: DINOv3-H 1280D, 50 ep kai0_base, 5483 帧 @3Hz
