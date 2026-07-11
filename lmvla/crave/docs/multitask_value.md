@@ -94,6 +94,32 @@ teacher-vs-归一时间:kai 0.957 / vis 0.984 / xvla 0.962 / coffee 0.997(M=11/1
 脚本:`extract_base_bank.py`(vis/coffee,`load_ep_native`)、`kai_extract_base_gf3.py` / `xvla` 直读器(mp4/hdf5,8卡)、`train_multitask_base.py`(读 base bank + 内联 milestone + 参数扫描)。
 base bank(`lmvla/crave/data/{kai,vis,coffee,xvla}_dinov3base`)在 gf3(di 盘满,择机同步)。注册表新增 `dinov3-base` 条目。
 
+## 3.7 扩到 12 任务(下载 8 个 ALOHA 任务补充多样性)
+
+coffee 只有 50ep 一个 ALOHA 任务太单薄 → 从 HuggingFace 下载 **8 个 lerobot/aloha_static_* 任务**(cups_open/candy/screw_driver/vinh_cup/ziploc_slide/coffee_new/pro_pencil/vinh_cup_left,共 471ep,同 aloha 本体不同任务)。视频是 **AV1 编码**,cv2 无软解 → 改 **pyav(libdav1d)** 直读;gf3 8卡各抽一个数据集 base 特征。
+
+域重组 **3 组**:kai+vis(Piper 叠衣)/ xvla(新本体折叠)/ **9 个 ALOHA 操作任务**;均衡采样,训一个共享 **0.72M** value model:
+
+| 任务 | corr | 任务 | corr |
+|---|---|---|---|
+| kai | 0.968 | coffee | 0.983 |
+| vis | 0.972 | cups_open | 0.987 |
+| xvla | 0.945 | candy | 0.966 |
+| screw_driver | 0.989 | vinh_cup | 0.983 |
+| ziploc_slide | 0.982 | coffee_new | 0.992 |
+| pro_pencil | 0.980 | vinh_cup_left | 0.981 |
+| | | **12 任务 mean** | **0.977** |
+
+**一个共享 0.72M 模型跨 12 个任务(2 域 + 新本体),mean 0.977 —— 比 4 任务(0.969)还高**:新加的 ALOHA 任务都很好拟合(0.966–0.992),原任务不退。**印证"加 demo 少的新任务挂共享 trunk 更好"**;value model 输出零未来因果、可直接接 AWBC。
+
+![9个ALOHA任务留出](visualization/online_value/base_aloha9.png)
+*一个共享模型在 9 个 ALOHA 操作任务留出集(蓝=value model 零未来 / 绿=CRAVE teacher / 橙=时间)*
+
+![xvla留出](visualization/online_value/base_xvla.png) · ![coffee留出](visualization/online_value/base_coffee.png)
+
+脚本:`aloha_extract_base.py`(pyav 解 AV1,单文件按 ep 长度切)、`train_multitask_12task.py`。
+数据:`lmvla/crave/data/aloha_static_*_dinov3base`(gf3;本地择机同步)。
+
 ## 4. 诚实边界
 
 - teacher 是 CRAVE 无监督(vis/coffee/xvla 无 GT),corr 是 vs teacher;teacher vs 归一时间 0.96–0.997 有保证。
