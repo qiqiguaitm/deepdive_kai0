@@ -282,6 +282,7 @@ a.link{color:var(--accent3);text-decoration:none;border-bottom:1px dashed var(--
 <p><b>转移概率(压末端假跌)：</b>从大量 demo 中学到"任务只能往前推进",所以当某帧突然像起始态(折叠时画面骤变→相似度假跌),Viterbi 会说"末段跳到起始的概率极低",不会真的跟丢、progress 不会随之暴跌——直接解掉痛点③。</p>
 
 <p><b>双锚(替代 per-ep norm01,关键修正)：</b>起点锚=全 ep 首 3 帧均值→固定为 <b>0</b>,终点锚=全 ep 末 3 帧均值→固定为 <b>1</b>;Viterbi 强制首帧=bin0、末帧=bin1.0。这样 raw 值天然 0→1(不再靠 per-ep min-max 拉伸掩盖"达顶失败"),且 DP 为登顶<b>必阶梯经过高 milestone</b>(0.6→0.83→0.96)→ 高 milestone 被激活、中段形状诚实。标准读出<b>不加 smooth、不加 norm01</b>,vs 监督 stage_gt corr <b>0.943</b>、单调 0.981、末值 0.999。</p>
+<p><b>去阶梯 polyline(平滑版)：</b>硬阶梯可再<b>去阶梯</b>成平滑曲线——每个连续 milestone 段取离簇心最近的<b>代表帧</b>钉在簇值,相邻代表帧之间<b>线性连成折线</b>。得到锚在"最典型帧"上的分段线性 ramp(vs 监督 GT corr <b>0.957</b>,更贴平滑 GT)。<b>下一节 §5.3 的在线 GRU 蒸馏的正是这条去阶梯 polyline teacher</b>。</p>
 
 <figure><img src="assets/viterbi_mechanism.png" alt="Viterbi 机制"><figcaption><b>① 无 Viterbi</b>(逐帧最近 milestone,乱抖)<b>→ ② Viterbi</b>(平滑单调 mono≈0.8→0.98);双锚 + 转移概率进一步保证 0→1 登顶、压末端假跌。</figcaption></figure>
 <p style="color:var(--text2);font-size:13.5px">以上是<b>离线</b>读出(需整条 episode)。真机部署要<b>完全因果、零未来</b>的在线读出 —— 见下一节 §5。</p>
@@ -317,14 +318,14 @@ a.link{color:var(--accent3);text-decoration:none;border-bottom:1px dashed var(--
 </figure>
 
 <h3>5.3 追平离线:因果 GRU 蒸馏 ★</h3>
-<p>把离线双锚 Viterbi 当 <b>teacher</b>,训一个<b>单向 GRU(结构上严格因果)</b> 当 student 回归它。GRU 见过几千条同类轨迹,内化了"这个状态之后进度通常跳到 X / 平台还剩多久 / 这类轨迹会完成"——用<b>学到的未来预期</b>补上滞后、中段选级、甚至登顶,而<b>推理时零未来</b>。</p>
+<p>把离线双锚 Viterbi 的<b>去阶梯 polyline 读出</b>(§4.3 末,代表帧分段线性、平滑 ramp)当 <b>teacher</b>,训一个<b>单向 GRU(结构上严格因果)</b> 当 student 回归它。GRU 见过几千条同类轨迹,内化了"这个状态之后进度通常跳到 X / 平台还剩多久 / 这类轨迹会完成"——用<b>学到的未来预期</b>补上滞后、中段选级、甚至登顶,而<b>推理时零未来</b>。蒸馏 polyline(而非硬阶梯)让 student 输出天然平滑,无需再做后处理平滑。</p>
 <ul>
   <li><b>严格因果</b>:第 t 帧输出只依赖隐状态 h<sub>t</sub>(累积自 1..t),零未来;真机逐帧复用隐状态,<b>O(1)/帧</b>实时。</li>
   <li><b>轻量</b>:GRU(142→256)+ progress 头 = <b>0.735M 参数</b>(ckpt 2.94MB);输入 = 每帧 img PCA128 ⊕ proprio 位置14。</li>
   <li><b>效果</b>:留出集(严格未见)corr vs 监督GT <b>0.955 ≥ 离线本身 0.943</b> → gap 归零,还平滑掉了离散阶梯噪声。</li>
 </ul>
 <figure><img src="assets/online_gru_heldout.png" alt="因果 GRU 留出集">
-  <figcaption><b>档③ 因果 GRU(紫,零未来)vs 离线 Viterbi(蓝)· 6 个严格留出 ep</b>:台阶对齐 + 自学登顶,corr 0.955 追平离线。同一模型可跨 12 任务共享(见 §6 复用与选型)。</figcaption>
+  <figcaption><b>档③ 因果 GRU(蓝,零未来+warmup)蒸馏「去阶梯 polyline 双锚 Viterbi」teacher(绿)· 6 条 kai 严格留出 ep</b>:student 平滑贴合 polyline ramp(<b>非硬阶梯</b>),mean corr <b>0.955</b> 追平离线;首帧 warmup 已消除 GRU 冷启动尖峰(从 0 起步)。橙=归一时间参考。同一因果模型可跨 12 任务共享(见 §6 复用与选型)。</figcaption>
 </figure>
 <div class="callout ok"><b>首帧冷启动已修:</b>单向 GRU 在 t=0 时 h₀=0 无时序上下文 → 首帧输出冷启动默认值(跨任务一致的架构性小尖峰)。<b>推理时 warmup</b>(首帧复制 ~20 步前置进 GRU、丢弃预热输出)把首帧 pred 从 0.057→0.009 直接消除,零重训、因果友好。</div>
 
