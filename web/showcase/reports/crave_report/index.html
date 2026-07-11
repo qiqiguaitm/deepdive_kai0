@@ -311,19 +311,55 @@ a.link{color:var(--accent3);text-decoration:none;border-bottom:1px dashed var(--
 
 <h3>5.2 因果 GRU 蒸馏 polyline teacher ★</h3>
 <p>把离线双锚 Viterbi 的<b>去阶梯 polyline 读出</b>(§4.3 末,代表帧分段线性、平滑 ramp)当 <b>teacher</b>,训一个<b>单向 GRU(结构上严格因果)</b> 当 student 回归它。GRU 见过几千条同类轨迹,内化了"这个状态之后进度通常跳到 X / 平台还剩多久 / 这类轨迹会完成"——用<b>学到的未来预期</b>补上滞后、中段选级、甚至登顶,而<b>推理时零未来</b>。蒸馏 polyline(而非硬阶梯)让 student 输出天然平滑,无需再做后处理平滑。</p>
+<div class="card"><h4>模型架构 · 参数量(在线因果 value 头)</h4>
+<div class="flow">
+  <div class="node"><div class="ix">输入 / 帧</div><div class="t">142D</div><div class="d">img PCA128(DINOv3-base 768D→PCA,L2)⊕ proprio 位置14(标准化+L2,能量 1:1)</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="ix">主干</div><div class="t">2 层单向 GRU · h256</div><div class="d">142→256→256;严格因果,第 t 帧只依赖累积 h<sub>t</sub>(1..t)</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="ix">读出头</div><div class="t">256→128→1 · sigmoid</div><div class="d">progress ∈ [0,1]</div></div>
+</div>
 <ul>
-  <li><b>严格因果</b>:第 t 帧输出只依赖隐状态 h<sub>t</sub>(累积自 1..t),零未来;真机逐帧复用隐状态,<b>O(1)/帧</b>实时。</li>
-  <li><b>轻量</b>:GRU(142→256)+ progress 头 = <b>0.735M 参数</b>(ckpt 2.94MB);输入 = 每帧 img PCA128 ⊕ proprio 位置14。</li>
+  <li><b>参数量</b>:GRU 701,952 + head 33,025 = <b>734,977 ≈ 0.735M</b>(ckpt <b>2.94MB</b>);同一模型可<b>跨 12 任务共享</b>(见 §6)。</li>
+  <li><b>推理代价</b>:逐帧复用隐状态、<b>O(1)/帧</b>;完整在线栈 = 一次<b>冻结 DINOv3-base 编码</b>(ViT-B/16 ~86M,跨任务共享)+ 微秒级 GRU 递推。</li>
+  <li><b>训练代价</b>:蒸馏离线 polyline teacher,MSE 回归,2000 train / 300 eval,<b>~2min(1×A100)</b>;milestone 发现本身零训练、零标注。</li>
   <li><b>效果</b>:留出集(严格未见)corr vs 监督GT <b>0.955 ≥ 离线本身 0.943</b> → gap 归零,还平滑掉了离散阶梯噪声。</li>
-</ul>
+</ul></div>
 <figure><img src="assets/online_gru_heldout.png" alt="因果 GRU 留出集">
   <figcaption><b>因果 GRU(蓝,零未来+warmup)蒸馏「去阶梯 polyline 双锚 Viterbi」teacher(绿)· 6 条 kai 严格留出 ep(img PCA128 ⊕ proprio14,M=10 milestone)</b>:teacher 明显偏离橙色时间对角线——<b>~0.4 处的折叠停留平台</b>(主 milestone)、中段拐点、个别 ep 的再抓回落,正是 CRAVE 相对"朴素时间"的增量;student 平滑贴合(mean corr <b>0.975</b>,首帧 warmup 消除冷启动尖峰、从 0 起步)。同一因果模型可跨 12 任务共享(见 §6)。</figcaption>
 </figure>
 <div class="callout ok"><b>首帧冷启动已修:</b>单向 GRU 在 t=0 时 h₀=0 无时序上下文 → 首帧输出冷启动默认值(跨任务一致的架构性小尖峰)。<b>推理时 warmup</b>(首帧复制 ~20 步前置进 GRU、丢弃预热输出)把首帧 pred 从 0.057→0.009 直接消除,零重训、因果友好。</div>
 
-<h3>5.3 选型与诚实边界</h3>
-<p>在线因果 value <b>只有一档收口方案:因果 GRU 蒸馏 polyline teacher</b> —— corr vs 监督GT <b>0.955</b>=离线水平,0.735M 参数、<b>O(1)/帧</b>真机实时,且同一模型可<b>跨 12 任务共享</b>(见 §6)。此前的零训练因果先验档(forward-DP)已被它取代,不再作为并列选项。</p>
-<div class="callout warn"><b>诚实边界:</b>GRU 末端登顶靠"训练全是成功 demo"学到的先验;真机遇失败 rollout 仍可能高估(所有在线法通病),但这是<b>学出来、更好校准</b>的先验,非硬编码强制。若部署有外部成功/终止信号,可作 end-trigger 进一步校准。</div>
+<h3>5.3 vs 监督 AE:架构代价与优缺点对比</h3>
+<p>报告开头的三大痛点都来自<b>监督 value 头</b>(KAI0-AE):它是一个 3 层 value MLP,挂在<b>完整 pi0 VLA</b>(PaliGemma 2B + SigLIP + action expert,<b>~3B+ 参数</b>)之上——每帧要跑整条 VLA 前向、每个任务要用 GT/reward 重训整套。CRAVE 在线 value 走的是完全相反的路线:<b>冻结共享编码器 + 0.735M 因果小头</b>。逐维度对比:</p>
+<table>
+<thead><tr><th>维度</th><th>KAI0-AE(监督 value 头)</th><th>CRAVE 在线 GRU</th></tr></thead>
+<tbody>
+<tr><td><b>模型 / 参数</b></td><td>value MLP 挂在<b>完整 pi0 VLA</b>(~3B+)</td><td>冻结 DINOv3-base(~86M,共享)+ <b>0.735M</b> 因果 GRU</td></tr>
+<tr><td><b>任务专属可训练量</b></td><td>整套 VLA / value 头<b>每任务重训</b></td><td>仅 <b>0.735M</b> GRU 蒸馏 ~2min,<b>小 ~4000×</b>,可跨 12 任务共享</td></tr>
+<tr><td><b>标注成本</b></td><td>需人工 / 规则 GT 或外部 reward</td><td><b>零人工标注</b>(跨 ep 复现自监督)</td></tr>
+<tr><td><b>每帧推理</b></td><td>跑整条 <b>~3B VLA 前向</b>(重)</td><td>一次 ~86M 编码 + <b>O(1)/帧</b> GRU 递推</td></tr>
+<tr><td><b>时序稳定性</b></td><td>逐帧独立回归、无时序积分 → 抖动(ep2302 正负翻转 256 次)</td><td>单向 GRU 累积 h<sub>t</sub>,<b>平滑单调、正负段化稀疏</b></td></tr>
+<tr><td><b>末端行为</b></td><td>相似度骤变 → <b>末端假跌</b></td><td>转移先验 + 学到登顶,<b>无末端假跌</b></td></tr>
+<tr><td><b>可解释性</b></td><td>黑盒回归标量</td><td>每帧对应<b>具体 milestone</b>,升降可指认</td></tr>
+</tbody>
+</table>
+<div class="cols2">
+  <div class="col good"><h4>✅ CRAVE 在线 GRU 的优势</h4><ul>
+    <li><b>任务专属部分小 ~4000×</b>:0.735M vs ~3B,ckpt 2.94MB,真机 O(1)/帧实时;</li>
+    <li><b>零标注 + 近零训练</b>:milestone 零训练,仅小头蒸馏 2min,<b>完全不动大 VLA</b>;</li>
+    <li><b>跨任务复用</b>:同一头跨 12 任务共享(mean 0.977),demo 少的新任务挂 trunk 即用;</li>
+    <li><b>干净可解释</b>:平滑单调、段化稀疏、每帧对齐 milestone,直接解掉三大痛点;</li>
+    <li><b>严格因果</b>:结构上零未来,不像离线 Viterbi 需整条 episode。</li>
+  </ul></div>
+  <div class="col bad"><h4>⚠️ 代价 / 边界</h4><ul>
+    <li>依赖一个<b>冻结视觉编码器</b>(DINOv3-base)+ 一次性 milestone 发现步骤;</li>
+    <li>需<b>足够多同任务 demo</b>让"复现"显现,否则 milestone 挖不出;</li>
+    <li>末端登顶靠"训练全成功 demo"的先验,<b>真机失败 rollout 可能高估</b>(所有在线法通病);</li>
+    <li>是<b>进度 / value 估计器</b>,不直接产动作——与 VLA 策略<b>解耦互补</b>,非替代。</li>
+  </ul></div>
+</div>
+<div class="callout warn"><b>诚实边界:</b>末端登顶是<b>学出来、更好校准</b>的先验(非硬编码强制);若部署有外部成功 / 终止信号,可作 end-trigger 进一步校准。<b>此前的零训练 forward-DP 档已被 GRU 取代,不再作为并列选项。</b></div>
 </section>
 
 <!-- ════ 6. 优缺点 ════ -->
