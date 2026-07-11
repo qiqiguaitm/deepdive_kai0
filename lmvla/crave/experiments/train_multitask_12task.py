@@ -79,7 +79,9 @@ for e in range(40):
 torch.save(net.state_dict(),REPO/'lmvla/crave/data/base_multitask_h256.pt')
 net.eval()
 @torch.no_grad()
-def pred(f): return net(torch.tensor(f[None],device=DEV),torch.tensor([len(f)]))[0].cpu().numpy()
+def pred(f, warm=20):
+    fw=np.concatenate([f[:1].repeat(warm,0),f])
+    return net(torch.tensor(fw[None],device=DEV),torch.tensor([len(fw)]))[0].cpu().numpy()[warm:]
 # per-task corr 全表
 print("=== 12任务 per-dataset 留出 corr ===",flush=True)
 allcorr={}
@@ -96,7 +98,7 @@ for ax,dn in zip(axes,alods):
 axes[0].legend(fontsize=7)
 fig.suptitle('DINOv3-base 12任务 multitask value · 9个ALOHA任务留出集',fontsize=12); fig.tight_layout()
 fig.savefig(REPO/"temp/base_aloha9.png",dpi=110,bbox_inches='tight'); print('SAVED base_aloha9.png',flush=True)
-for dsname,ncol in [('xvla',6)]:
+for dsname,ncol in [("xvla",6),("coffee",8)]:
     ev=EV[dsname][:ncol]; nr=2; nc=(len(ev)+1)//2
     fig,axes=plt.subplots(nr,nc,figsize=(3.2*nc,6)); axes=np.atleast_1d(axes).flatten()
     for ax,(f,v,t,tg,e) in zip(axes,ev):

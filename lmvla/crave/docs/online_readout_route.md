@@ -73,11 +73,15 @@ pen[i,j] = λf·(bin_i−bin_j)  若上升;  λb·(bin_j−bin_i)  若下降
 **真机在线推理(逐帧, 严格因果):**
 ```python
 h = None
+# 冷启动修正: 首帧前先用首帧 warmup GRU ~20 步(丢弃输出), 消除 h0=0 的首帧尖峰
+x0 = concat[img_pca128_l2, pos14_std_l2].view(1, 1, D)
+for _ in range(20): _, h = net.g(x0, h)      # warmup, 结果丢弃
 for each frame:
-    x_t = concat[img_pca128_l2, pos14_std_l2].view(1, 1, 142)
+    x_t = concat[img_pca128_l2, pos14_std_l2].view(1, 1, D)
     o, h = net.g(x_t, h)                 # 复用隐状态
     p_t = torch.sigmoid(net.head(o)).item()   # 当前 progress, 零未来
 ```
+> **首帧冷启动尖峰(已修)**: 单向 GRU 在 t=0 时 h₀=0 无时序上下文 → head 输出冷启动默认值(~0.05–0.3, 跨任务一致=纯架构性), 1–2 帧后自纠。**推理时 warmup**(首帧复制 ~20 步前置进 GRU、丢弃预热输出)把首帧 pred 从 0.057→0.009 直接消除尖峰(实测), 零重训、因果友好; 亦可首帧后处理锚 0 兜底。
 
 ---
 
