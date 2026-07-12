@@ -226,6 +226,9 @@ a.link{color:var(--accent3);text-decoration:none;border-bottom:1px dashed var(--
   <div class="node"><div class="ix">③ 读出</div><div class="t">双锚 Viterbi-DP</div><div class="d">milestone + 起点/终点锚 → 稠密单调 progress</div></div>
 </div>
 <p style="color:var(--text2);font-size:13.5px">全链无梯度更新:DINOv3-base 冻结 + PCA + 贝叶斯GMM + 双锚 DP,没有任何可学习参数被训练。</p>
+<figure><img src="assets/bgmm_milestone_overview.png" alt="贝叶斯GMM 自动浮现的 12 个 milestone:簇中心代表帧 + 每簇 value 分布 + 覆盖率">
+  <figcaption><b>步骤② 的产物:贝叶斯GMM 自动浮现 12 个 milestone(自动定 K,无需预设簇数)</b> —— <b>上排</b>=每个 milestone 的<b>簇中心代表帧</b>(标 <code>v=</code> 该簇成员的进度中位数,从 0.01 抓取 → 0.96 叠好,按进度自动排开);<b>中排</b>=每个簇成员的 <b>T(进度)分布直方图</b>(红线=median → 就用它当该 milestone 的进度值),分布<b>窄而单峰</b> = 同簇的帧确实集中在任务同一阶段(时间纯);<b>下排</b>=每个 mode 的<b>跨 episode 覆盖率</b>(cov%,只保留 ≥50% 的簇 → 过滤偶发态、留下"反复出现的必经 milestone")。这张图正是"② 找反复出现的态 → 自动浮现 milestone + 定进度"的完整可视化。</figcaption>
+</figure>
 
 <h3>2.3 充分利用「簇间转移概率」(直接解痛点③)</h3>
 <p>从 demo 统计"当前 milestone 的下一个最可能是谁"的经验概率 <code>P(next | cur)</code>,折进 DP:它知道"末段几乎不会跳回起始态",于是把相似度造成的末端假跌重罚压住。质量集中在对角线右上(单向前进 + 合法跳级),"中段→起始"近乎为 0。</p>
