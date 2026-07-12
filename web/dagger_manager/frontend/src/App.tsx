@@ -73,6 +73,18 @@ export default function App() {
         <span className={`chip ${snap?.ros_alive ? "on" : ""}`}>
           {snap?.ros_alive ? "● infra" : "○ infra"}
         </span>
+        {(() => {
+          const sf = snap?.speed_factor ?? 1.0;
+          const fast = sf > 1.001;
+          return (
+            <span
+              className={`chip ${fast ? "rec" : ""}`}
+              title="脚踏板油门(切换): 踩一下开加速, 再踩一下回默认; 用过油门的 rollout 会在 episode meta 标 used_throttle=true"
+            >
+              {fast ? `⏩ ${sf.toFixed(2)}× 油门` : "1.0× 默认速"}
+            </span>
+          );
+        })()}
         <span className="spacer" />
         <div className="conn">ws: {conn}</div>
       </div>

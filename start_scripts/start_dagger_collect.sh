@@ -206,6 +206,7 @@ echo " leaf suffix: $KAI0_DATE_SUFFIX (<task>/<subset>/<date>$KAI0_DATE_SUFFIX; 
 echo " trim       : front=$KAI0_FRONT_TRIM tail=$KAI0_TAIL_TRIM (record-time leading + trailing idle cap, keep 15-frame settle)"
 echo " depth fmt  : packed 1 file/episode (.zarr.zip) — EpisodeWriter.finalize auto-packs the zarr dir"
 echo " inference  : $([ "$RECORD_INFERENCE" = "true" ] && echo 'ON (Form C: dagger/ + inference/)' || echo 'OFF (dagger/ only)')"
+echo " master arm : $([ "${KAI0_ENABLE_MASTER:-1}" = "0" ] && echo '油门-only OFF (无 master_servo / 无接管, 只录 inference/+inference_fast/)' || echo 'ON (dagger 接管可用)')"
 echo " prompt     : ${PROMPT:-<infer-from-ckpt>}"
 echo " config     : $CONFIG_NAME"
 echo " asset_id   : ${ASSET_ID:-<none>}"
@@ -217,6 +218,12 @@ echo ""
 DAGGER_ARGS=("record_subset:=$SUBSET" "record_inference:=$RECORD_INFERENCE")
 [[ -n "$TASK_NAME" ]] && DAGGER_ARGS+=("record_task:=$TASK_NAME")
 [[ -n "$PROMPT" ]] && DAGGER_ARGS+=("record_prompt:=$PROMPT" "prompt:=$PROMPT")
+# 油门-only 采集 (KAI0_ENABLE_MASTER=0, 由 start_throttle_collect.sh 设): 关掉
+# 2× master_servo。策略自主跑从臂 + 脚踏板控速, recorder 停 POLICY_RUN 只录
+# inference/ + inference_fast/。主臂返厂 / 无人接管时用。默认 1 = 正常 dagger。
+if [[ "${KAI0_ENABLE_MASTER:-1}" == "0" ]]; then
+    DAGGER_ARGS+=("enable_master:=false")
+fi
 
 # Delegate to start_autonomy.sh with --dagger flag.
 # start_autonomy.sh handles: CAN activation, USB camera reset, GPU selection,

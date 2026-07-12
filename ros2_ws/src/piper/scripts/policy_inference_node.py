@@ -183,6 +183,18 @@ def _to_bool(value) -> bool:
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# Piper 物理关节速度上限 (rad/s), 官方 URDF piper_description.urdf 权威值:
+#   j1-j5 = 5, j6 = 3  (gripper 指关节 vel=1, 但油门 clamp 不动夹爪 → 置 inf)
+# 用于 speed_factor 油门加速时的物理安全 clamp (_clamp_joint_velocity): 压缩后的
+# chunk 帧间 |Δq| 不得超过 vmax·(1/publish_rate), 否则命令超硬件能力 → 饱和/报错.
+# 14-dim 双臂 layout: [L_j1..j6, L_grip, R_j1..j6, R_grip]; 夹爪维 (6,13) 置 inf 免 clamp.
+# ────────────────────────────────────────────────────────────────────────────
+_PIPER_ARM_VMAX = [5.0, 5.0, 5.0, 5.0, 5.0, 3.0]   # rad/s, 单臂 6 关节
+PIPER_JOINT_VMAX14 = np.array(
+    _PIPER_ARM_VMAX + [np.inf] + _PIPER_ARM_VMAX + [np.inf], dtype=np.float64)
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # StreamActionBuffer — 从原版 agilex_inference_openpi_temporal_smoothing_ros2.py
 #                      逐行复制, 不做任何修改
 # ────────────────────────────────────────────────────────────────────────────
@@ -510,6 +522,20 @@ class PolicyInferenceNode(Node):
         self.declare_parameter('latency_k', 8)
         self.declare_parameter('min_smooth_steps', 8)
         self.declare_parameter('decay_alpha', 0.25)
+        # ── V2 油门 (全局速度倍率) ─────────────────────────────────────────────
+        # speed_factor > 1 → 部署策略以【超训练集速度】执行 (客户端时间压缩 chunk,
+        # 后端无关: v0/v1/v2 皆可, 但闭环重规划快慢决定安全上限 — v1@20Hz 可上 2x+,
+        # v0@3Hz 只宜温和 ≤1.5x). 方案 b1: 保持 publish_rate 定时器不变, 在 chunk
+        # 喂进 buffer 前按 speed_factor 重采样 (复用 _resample_actions). =1.0 逐比特回退.
+        # 夹爪维 (6,13) 走最近邻 (线性插值近二值夹爪 → half-grasp); 臂维过物理 vmax clamp.
+        self.declare_parameter('speed_factor', 1.0)          # 1.0=原速; 静态基线 (热更 ros2 param set)
+        self.declare_parameter('speed_factor_max', 2.0)      # 硬上限, 防误设 (真机爬坡再放宽)
+        self.declare_parameter('vmax_safety_scale', 0.9)     # clamp = URDF vmax × 此比例 (留裕度)
+        # 脚踏板油门: /policy/throttle_hold=True 时用 throttle_factor 提速, =False 回
+        # speed_factor (默认 1.0). 本 node 只看电平, 与踏板是切换(toggle)还是保持(hold)
+        # 无关 (瞬时踏板由 dagger_pedal_node 做成 toggle: 踩一下开, 再踩一下关, 心跳锁存).
+        self.declare_parameter('throttle_factor', 1.5)       # 油门开启时的目标倍率 (clamp 到 ≤ speed_factor_max)
+        self.declare_parameter('throttle_timeout_s', 0.5)    # 看门狗: 超时无 hold 心跳 → fail-safe 回 1.0
         # P2 Step 1+2 (2026-05-23, §7.8): client obs_construct fast path.
         # When True: skip JPEG mapping (#2, ~10-25ms) + CvBridge (#1, ~3-8ms) +
         #            BGR↔RGB cvtColor (~0.2ms). 用 np.frombuffer 直接 view msg.data;
@@ -640,6 +666,28 @@ class PolicyInferenceNode(Node):
         self.latency_k = self.get_parameter('latency_k').value
         self.min_smooth_steps = self.get_parameter('min_smooth_steps').value
         self.decay_alpha = self.get_parameter('decay_alpha').value
+        # V2 油门: 读参 + clamp 到 [0.5, speed_factor_max]
+        self._speed_factor_max = max(1.0, float(self.get_parameter('speed_factor_max').value))
+        self._speed_factor = float(np.clip(
+            self.get_parameter('speed_factor').value, 0.5, self._speed_factor_max))
+        self._vmax_safety_scale = float(np.clip(
+            self.get_parameter('vmax_safety_scale').value, 0.1, 1.0))
+        # 瞬时油门状态: throttle_factor=踩住目标; _throttle_held=踏板当前是否踩住;
+        # _throttle_last_ts=最后一次 hold 消息时刻 (看门狗); _active_sf=当前【生效】倍率
+        # (踩住→throttle_factor, 松开→speed_factor), 广播/压缩/latency 缩放都用它.
+        self._throttle_factor = float(np.clip(
+            self.get_parameter('throttle_factor').value, 1.0, self._speed_factor_max))
+        self._throttle_timeout_s = float(self.get_parameter('throttle_timeout_s').value)
+        self._throttle_held = False
+        self._throttle_last_ts = 0.0
+        self._active_sf = self._speed_factor
+        if abs(self._speed_factor - 1.0) > 1e-3:
+            self.get_logger().warn(
+                f'[SPEED] 静态基线 speed_factor={self._speed_factor:.2f} '
+                f'(vmax_scale={self._vmax_safety_scale:.2f}); =1.0 为原速')
+        self.get_logger().info(
+            f'[SPEED] 瞬时油门就绪: 踩住 /policy/throttle_hold → {self._throttle_factor:.2f}x, '
+            f'松开回 {self._speed_factor:.2f}x (看门狗 {self._throttle_timeout_s:.1f}s)')
         self._enable_rtc = _to_bool(self.get_parameter('enable_rtc').value)
         self._rtc_execute_horizon = int(self.get_parameter('rtc_execute_horizon').value)
         self._rtc_max_guidance_weight = float(self.get_parameter('rtc_max_guidance_weight').value)
@@ -811,6 +859,16 @@ class PolicyInferenceNode(Node):
         # Replay progress: [frame_idx, total_frames, done_flag]
         self.pub_replay_progress = self.create_publisher(
             Float32MultiArray, '/replay_progress', 5)
+        # V2 油门: 广播当前 speed_factor (latched) —— dagger_recorder 跨进程订阅, 落进
+        # inference/ episode meta, 让高速 rollout 数据可复现 (否则无法标注几倍速采的).
+        from std_msgs.msg import Float32 as _Float32
+        _latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.pub_speed_factor = self.create_publisher(_Float32, '/policy/speed_factor', _latched)
+        self._publish_speed_factor()
+        # 瞬时油门输入: 脚踏板节点 (dagger_pedal_node) 踩下→True/松开→False + 10Hz 心跳.
+        # 一个物理踏板双用: POLICY_RUN 时=油门 (此处), HUMAN_RECORD 时=录制开关 (recorder).
+        from std_msgs.msg import Bool as _Bool
+        self.create_subscription(_Bool, '/policy/throttle_hold', self._on_throttle_hold, 10)
 
         # ── EE-mode kinematics (only when execution_mode=ee_pose) ──
         # Lives here so the legacy joint path is byte-identical when off (no IK,
@@ -936,6 +994,16 @@ class PolicyInferenceNode(Node):
                     self.latency_k = int(p.value)
                 elif p.name == 'min_smooth_steps':
                     self.min_smooth_steps = int(p.value)
+                elif p.name == 'speed_factor':
+                    self._speed_factor = float(np.clip(p.value, 0.5, self._speed_factor_max))
+                    self._refresh_effective_sf()   # 未踩踏板时立即生效 + 广播
+                    self.get_logger().warn(f'[SPEED] speed_factor 静态基线 → {self._speed_factor:.2f} (热更)')
+                elif p.name == 'throttle_factor':
+                    self._throttle_factor = float(np.clip(p.value, 1.0, self._speed_factor_max))
+                    self._refresh_effective_sf()   # 踩住时立即生效 + 广播
+                    self.get_logger().warn(f'[SPEED] throttle_factor 踩住目标 → {self._throttle_factor:.2f} (热更)')
+                elif p.name == 'vmax_safety_scale':
+                    self._vmax_safety_scale = float(np.clip(p.value, 0.1, 1.0))
                 elif p.name == 'obs_state_lowpass_alpha':
                     self._obs_state_lp_alpha = float(p.value)
                     self._obs_state_lp_prev = None
@@ -1142,6 +1210,96 @@ class PolicyInferenceNode(Node):
         return np.array(
             [np.interp(new_idx, old_idx, actions[:, d]) for d in range(actions.shape[1])],
             dtype=np.float32).T
+
+    # ── V2 油门: 全局 speed_factor 时间压缩 (方案 b1, 客户端, 后端无关) ──────────
+    def _clamp_joint_velocity(self, actions: np.ndarray) -> np.ndarray:
+        """物理安全: 把 (已按 speed_factor 压缩的) chunk 帧间速度限到 Piper URDF vmax.
+
+        逐帧 forward rate-limit: |q[k]-q[k-1]| ≤ vmax·dt, 超出则沿原方向 clamp (保方向,
+        只减速). dt=1/publish_rate. 夹爪维 (6,13) vmax=inf → 不 clamp (保二值忠实).
+        效果: speed_factor 请求提速, 但绝不命令超硬件能力 — 若示范本已近 vmax, clamp 会
+        让实际提速自然封顶在 vmax (仍 ≥ 示范速度, 安全 by construction)."""
+        if actions.shape[0] < 2:
+            return actions
+        dt = 1.0 / float(self.publish_rate)
+        max_step = PIPER_JOINT_VMAX14 * self._vmax_safety_scale * dt   # [14], 夹爪 = inf
+        out = actions.astype(np.float64, copy=True)
+        n_clamped = 0
+        for k in range(1, out.shape[0]):
+            d = out[k] - out[k - 1]
+            over = np.abs(d) > max_step        # 夹爪 max_step=inf → 永远 False, 不 clamp
+            if over.any():
+                n_clamped += 1
+                # np.clip 用 ±inf 边界对夹爪维恒等 (避免 0*inf=nan), 臂维裁到 ±max_step
+                out[k] = out[k - 1] + np.clip(d, -max_step, max_step)
+        if n_clamped > 0:
+            self.get_logger().warn(
+                f'[SPEED] vmax clamp 生效 {n_clamped}/{out.shape[0]-1} 帧 '
+                f'(speed_factor={self._active_sf:.2f} 超关节 vmax, 已封顶)',
+                throttle_duration_sec=2.0)
+        return out.astype(np.float32)
+
+    def _on_throttle_hold(self, msg) -> None:
+        """踏板 hold 信号: True=踩住 (加速), False=松开 (回默认). 收到即刷新生效倍率."""
+        try:
+            held = bool(msg.data)
+        except (TypeError, ValueError):
+            return
+        self._throttle_held = held
+        self._throttle_last_ts = self.get_clock().now().nanoseconds * 1e-9
+        self._refresh_effective_sf()
+
+    def _effective_speed_factor(self) -> float:
+        """当前【生效】倍率: 踩住→throttle_factor, 松开→speed_factor 静态基线.
+        看门狗: 踩住状态但超时无心跳 (松开事件丢失 / 踏板节点挂掉) → fail-safe 回松开态
+        (fail 方向永远是【减速】, 安全)."""
+        held = self._throttle_held
+        if held and self._throttle_timeout_s > 0:
+            age = self.get_clock().now().nanoseconds * 1e-9 - self._throttle_last_ts
+            if age > self._throttle_timeout_s:
+                held = False
+                self._throttle_held = False  # 熄灭闩锁, 需下一次踩下重新触发
+        base = self._throttle_factor if held else self._speed_factor
+        return float(np.clip(base, 0.5, self._speed_factor_max))
+
+    def _refresh_effective_sf(self) -> float:
+        """重算生效倍率; 若变化则更新 _active_sf + 广播 (跨进程 recorder 据此分流数据) + 记日志."""
+        sf = self._effective_speed_factor()
+        if abs(sf - self._active_sf) > 1e-3:
+            self._active_sf = sf
+            self._publish_speed_factor()
+            self.get_logger().warn(
+                f'[SPEED] 生效倍率 → {sf:.2f} '
+                f'({"油门踩下" if self._throttle_held else "松开/默认"})')
+        return sf
+
+    def _apply_speed_factor(self, actions: np.ndarray, sf: float = None) -> np.ndarray:
+        """油门主入口: 按生效倍率时间压缩 chunk + 夹爪最近邻 + 物理 vmax clamp.
+        倍率≈1.0 → 原样返回 (逐比特回退). 返回压缩后的 [T', 14]."""
+        s = self._active_sf if sf is None else sf
+        if abs(s - 1.0) < 1e-3 or actions is None or len(actions) < 2:
+            return actions
+        actions = np.asarray(actions, dtype=np.float32)
+        T = actions.shape[0]
+        rs = self._resample_actions(actions, rate=s)      # 臂维线性插值压缩
+        newT = rs.shape[0]
+        # 夹爪 [6,13] 改最近邻 (线性插值近二值夹爪 → mid-range half-grasp 失败)
+        nn = np.clip(np.round(np.linspace(0.0, T - 1.0, newT)).astype(int), 0, T - 1)
+        rs[:, 6] = actions[nn, 6]
+        rs[:, 13] = actions[nn, 13]
+        # 物理安全: 臂维帧间速度 clamp 到 URDF vmax
+        rs = self._clamp_joint_velocity(rs)
+        return rs
+
+    def _publish_speed_factor(self):
+        """Latched broadcast of current speed_factor for cross-process recorder meta."""
+        pub = getattr(self, 'pub_speed_factor', None)
+        if pub is None:
+            return
+        from std_msgs.msg import Float32 as _Float32
+        m = _Float32()
+        m.data = float(self._active_sf)
+        pub.publish(m)
 
     def _enter_replay_mode(self):
         """Run all pre-flight gates, fill stream_buffer, ready for execution.
@@ -2621,9 +2779,16 @@ class PolicyInferenceNode(Node):
                         self._xvla_exec.load_chunk(actions)
                         t_buffer_done = time.monotonic()
                     else:
+                        # V2 油门: 按 speed_factor 时间压缩 chunk (=1.0 时为原 actions).
+                        # latency_k 头裁按 1/speed 缩放 — 压缩后同样 wall-clock 延迟 = 更少步.
+                        # 注: RTC guidance 用的 _rtc_prev_chunk 存的是【原始】actions (见上),
+                        # guidance 在 chunk-index 维, 与客户端时间压缩正交, 不受影响.
+                        sf = self._refresh_effective_sf()   # 含看门狗: 松开事件丢失也会回落
+                        actions_thr = self._apply_speed_factor(actions, sf)
+                        max_k_thr = int(round(self.latency_k / max(1e-3, sf)))
                         self.stream_buffer.integrate_new_chunk(
-                            actions,
-                            max_k=self.latency_k,
+                            actions_thr,
+                            max_k=max_k_thr,
                             min_m=self.min_smooth_steps)
                         t_buffer_done = time.monotonic()
 

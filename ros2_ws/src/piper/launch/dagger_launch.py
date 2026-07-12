@@ -22,7 +22,8 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, SetEnvironmentVariable, TimerAction
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, SetEnvironmentVariable, TimerAction
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -116,6 +117,13 @@ def generate_launch_description():
     servo_cpu_prefix_arg = DeclareLaunchArgument(
         'servo_cpu_prefix', default_value='',
         description="Launch prefix for the 2× master_servo (e.g. 'taskset -c 24-27,56-59')")
+    # 油门-only 采集 (主臂返厂 / 无人接管): 关掉 2× master_servo。策略自主跑从臂,
+    # 操作员踩脚踏板控速, recorder 停在 POLICY_RUN 只录 inference/ + inference_fast/。
+    # false 时也顺带避免缺失的 master CAN 口 (can_right_mas) 让 servo 节点启动即崩。
+    enable_master_arg = DeclareLaunchArgument(
+        'enable_master', default_value='true',
+        description="Launch the 2× master_servo (teleop/takeover). false = 油门-only "
+                    "autonomous collection (no master arms, no human takeover).")
 
     # ── Compose autonomy_launch.py: same policy + slave + cameras (no rerun) ──
     # Three key overrides:
@@ -214,12 +222,30 @@ def generate_launch_description():
         name='dagger_pedal', output='screen',
     )
 
-    # Stagger so master_servo doesn't init before CAN/cameras are stable
-    master_left_delayed  = TimerAction(period=8.0,  actions=[master_left])
-    master_right_delayed = TimerAction(period=8.5,  actions=[master_right])
+    # ── mid_head 第4相机 (WHEELTEC UVC) ──
+    # dagger/autonomy 栈的 multi_camera_node 只起 3 台 RealSense (camera_f/l/r);
+    # mid_head 是 07-08 加的第二头相机, 走独立 uvc_camera_node → /camera_m/color/image_raw。
+    # CAMERAS=4 需要它, 否则 recorder 的 mid_head 帧全黑 → finalize trim-validate 判黑 abort。
+    # (teleop 的 launch_3cam.py 已起它; dagger 路径之前漏了, 这里补上。)
+    _uvc_mid = os.path.join(_PROJECT_ROOT, 'start_scripts', 'kai', 'uvc_camera_node.py')
+    mid_head_node = ExecuteProcess(
+        cmd=['python3', _uvc_mid, '--ros-args',
+             '-p', 'device:=/dev/cam_mid_head',
+             '-p', 'ns:=/camera_m',
+             '-p', 'width:=640', '-p', 'height:=480', '-p', 'fps:=30'],
+        output='screen',
+    )
+
+    # Stagger so master_servo doesn't init before CAN/cameras are stable.
+    # Gated on enable_master → 油门-only 模式整条不启动 (IfCondition 包住 TimerAction).
+    _master_on = IfCondition(LaunchConfiguration('enable_master'))
+    master_left_delayed  = TimerAction(period=8.0,  actions=[master_left],  condition=_master_on)
+    master_right_delayed = TimerAction(period=8.5,  actions=[master_right], condition=_master_on)
     dagger_delayed       = TimerAction(period=25.0, actions=[dagger_node])
     # Pedal can come up immediately — it doesn't need CAN/cameras/policy.
     pedal_delayed        = TimerAction(period=2.0,  actions=[pedal_node])
+    # mid_head UVC 相机: 独立 /dev 设备, 不依赖 CAN, 早点起 (给 recorder 25s 前就绪)。
+    mid_head_delayed     = TimerAction(period=3.0,  actions=[mid_head_node])
 
     # Set PYTHONPATH at dagger scope BEFORE the dagger nodes so they (esp.
     # dagger_recorder → dataset_writer → av) can import from kai0/.venv. The
@@ -232,11 +258,12 @@ def generate_launch_description():
     return LaunchDescription([
         set_py,
         record_task_arg, record_prompt_arg, record_subset_arg, record_inference_arg,
-        enable_head_depth_arg,
+        enable_head_depth_arg, enable_master_arg,
         camera_cpu_prefix_arg, recorder_cpu_prefix_arg, servo_cpu_prefix_arg,
         autonomy,  # includes mode_arg/gpu_arg/config_arg/ckpt_arg/etc. transitively
         master_left_delayed,
         master_right_delayed,
         dagger_delayed,
         pedal_delayed,
+        mid_head_delayed,
     ])

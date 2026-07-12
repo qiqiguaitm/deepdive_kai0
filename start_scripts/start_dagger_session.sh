@@ -61,6 +61,8 @@ while [[ $# -gt 0 ]]; do
         --serve-port)            SERVE_PORT="$2"; shift 2 ;;
         --config-name)           CONFIG_OVERRIDE="$2"; shift 2 ;;
         --prompt)                PROMPT_OVERRIDE="$2"; shift 2 ;;
+        --speed-factor|--speed)  EXTRA+=("speed_factor:=$2"); shift 2 ;;  # V2 油门: 静态基线 (松开态)
+        --throttle-factor|--throttle) EXTRA+=("throttle_factor:=$2"); shift 2 ;;  # 瞬时油门: 踩住脚踏板的目标倍率
         -h|--help)               usage ;;
         *)                        EXTRA+=("$1"); shift ;;
     esac

@@ -77,6 +77,12 @@ def generate_launch_description():
         description='Head-trim steps of new chunk (JAX legacy 8, V1 overrides 6)')
     min_smooth_steps_arg = DeclareLaunchArgument('min_smooth_steps', default_value='8',
         description='Min blend window for chunk overlap smoothing (JAX 8, V1 8)')
+    speed_factor_arg = DeclareLaunchArgument('speed_factor', default_value='1.0',
+        description='V2 油门: 全局速度倍率 (>1 超训练集速度; 1.0=原速). dagger inference 流提速用')
+    speed_factor_max_arg = DeclareLaunchArgument('speed_factor_max', default_value='2.0',
+        description='speed_factor 硬上限 (防误设)')
+    throttle_factor_arg = DeclareLaunchArgument('throttle_factor', default_value='1.5',
+        description='瞬时油门: 操作员踩住脚踏板时的目标倍率 (松开回 speed_factor)')
     rtc_execute_horizon_arg = DeclareLaunchArgument('rtc_execute_horizon', default_value='16',
         description='RTC guidance horizon (JAX legacy 16, V1 overrides 12)')
     publish_rate_arg = DeclareLaunchArgument('publish_rate', default_value='30',
@@ -156,6 +162,9 @@ def generate_launch_description():
             'inference_rate': LaunchConfiguration('inference_rate'),
             'latency_k': LaunchConfiguration('latency_k'),
             'min_smooth_steps': LaunchConfiguration('min_smooth_steps'),
+            'speed_factor': ParameterValue(LaunchConfiguration('speed_factor'), value_type=float),
+            'speed_factor_max': ParameterValue(LaunchConfiguration('speed_factor_max'), value_type=float),
+            'throttle_factor': ParameterValue(LaunchConfiguration('throttle_factor'), value_type=float),
             'rtc_execute_horizon': LaunchConfiguration('rtc_execute_horizon'),
             'publish_rate': LaunchConfiguration('publish_rate'),
             'publish_smooth_alpha': LaunchConfiguration('publish_smooth_alpha'),
@@ -179,6 +188,7 @@ def generate_launch_description():
         execute_mode_arg, enable_rtc_arg,
         host_arg, port_arg,
         inference_rate_arg, latency_k_arg, min_smooth_steps_arg,
+        speed_factor_arg, speed_factor_max_arg, throttle_factor_arg,
         rtc_execute_horizon_arg, publish_rate_arg, publish_smooth_alpha_arg,
         rtc_smooth_method_arg, fast_obs_pipeline_arg, pipelined_obs_arg,
         transport_arg, policy_cpu_prefix_arg,

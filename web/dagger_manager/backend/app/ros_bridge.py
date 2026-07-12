@@ -41,7 +41,7 @@ try:
         QoSProfile,
         QoSReliabilityPolicy,
     )
-    from std_msgs.msg import Bool, Empty, String
+    from std_msgs.msg import Bool, Empty, Float32, String
     from sensor_msgs.msg import Image, JointState
     _ROS_OK = True
 except Exception as _e:  # noqa: BLE001
@@ -82,6 +82,9 @@ class DaggerRosBridge:
         self._button_right: bool = False
         self._policy_execute: Optional[bool] = None
         self._last_pedal_ts: Optional[float] = None
+        # 油门: policy_inference_node latched 广播的当前生效速度倍率 (1.0=默认;
+        # >1=踩住脚踏板提速中 → 数据落 inference_fast/). 供前端速度指示灯读取.
+        self._speed_factor: float = 1.0
         self._spin_thread: Optional[threading.Thread] = None
         self._node = None
         self._running = False
@@ -128,6 +131,7 @@ class DaggerRosBridge:
                                        lambda m: self._on_button("R", m), latched)
         self._node.create_subscription(Bool, "/policy/execute", self._on_execute, 5)
         self._node.create_subscription(Empty, "/dagger/pedal_toggled", self._on_pedal, 5)
+        self._node.create_subscription(Float32, "/policy/speed_factor", self._on_speed_factor, latched)
 
         # ── Live preview: cameras (BEST_EFFORT sensor QoS) + puppet joints ──
         if _IMG_OK:
@@ -206,6 +210,14 @@ class DaggerRosBridge:
     def _on_pedal(self, _msg) -> None:
         with self._lock:
             self._last_pedal_ts = time.monotonic()
+
+    def _on_speed_factor(self, msg) -> None:
+        try:
+            sf = float(msg.data)
+        except (TypeError, ValueError):
+            return
+        with self._lock:
+            self._speed_factor = sf
 
     def _on_cam_image(self, cam: str, msg) -> None:
         """Encode sensor_msgs/Image → JPEG, store latest + wake MJPEG waiters."""
@@ -297,6 +309,7 @@ class DaggerRosBridge:
                 "button_right": self._button_right,
                 "policy_execute": self._policy_execute,
                 "last_pedal_ts": self._last_pedal_ts,
+                "speed_factor": round(self._speed_factor, 3),
                 "cameras": cams,
             }
 
