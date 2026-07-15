@@ -104,6 +104,13 @@ r(o_t) = 1/(N_ep-1) · Σ_{j≠ep(t)} exp( -dmin(o_t, E_j)² / 2σ² )
 **结论**:**"低 r = 脱离 demo 流形"作为部署监控成立,且跨 12 任务近乎完美、普适**(同一 kNN/σ 机制,零 per-task 参、零失败数据)。→ C4 的"部署"这条用途**premise 验证通过**。
 **诚实保留**:off-task 帧来自**别的 LIBERO 任务**(场景/物体不同 = 视觉差异大)= **相对"易" 的跨任务 OOD**;真正难的是**同任务内的细微失败帧**(subtle OOD),那需要**失败 rollout**(部署侧数据,当前无)才能测——留 V3c-full。但机制与普适性已强证。
 
+### 4.4 V4 · robotwin2.0 抽特征(跨本体普适复核准备)🔄(2026-07-14)
+脚本 `robotwin_dinov3base_extract.py`(cam_high,frame_cache_jpeg256 → 池化 [N,768],**与 LIBERO 逐比特同 `encode_grid` 路径**,双卡 --shard 0/1)。
+- **关键验证(冒烟)**:robotwin 池化 mean=0.002/std=0.302/norm=8.36 **≈ LIBERO** mean=0.004/std=0.300/norm=8.31 → **同编码空间、跨本体可比**(跨本体普适 claim 的前提成立)。
+- **覆盖**:frame_cache_jpeg256 只缓存 **5000 ep(0–4999,~1.1M 帧)**,已覆盖 ~全部 task 类型(300ep→270 task_index);其余 22500 仅 av1 视频(需 pyav,慢)→ **先抽 5000(充分大数据),22500 av1 余量作可选后续**。
+- 输出 `lmwm/data/robotwin_dinov3base/ep{e}.npz`(key=pooled)→ rsync 到 gsy North-E `/vePFS-North-E/vis_robot/workspace/deepdive_kai0/lmvla/lmwm/data/robotwin_dinov3base`。
+- **✅ 完成(2026-07-14)**:5000 ep / **1.09M 帧** / 1.5GB / 双卡各 ~1900s(250 fr/s);格式 pooled[N,768] 尺度对齐 LIBERO(norm 8.36)。→ rsync North-E(`gsy` ssh -p16370,通道已验证)。**跨本体普适复核数据就位。**
+
 ---
 
 ## 5. 已排除(勿回头,详见各 HISTORY)
