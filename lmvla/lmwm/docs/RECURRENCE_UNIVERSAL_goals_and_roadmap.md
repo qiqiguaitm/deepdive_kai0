@@ -55,10 +55,10 @@ r(o_t) = 1/(N_ep-1) · Σ_{j≠ep(t)} exp( -dmin(o_t, E_j)² / 2σ² )
 | **V0** | r 场普适非退化(task0/6/kai0) | 聚类塌处 r 仍连续(std>0) | ✅ 见 §4.1 |
 | **V1** | r-低谷分割器全 40+kai0,单一全局阈值 | 边界数随复杂度涌现 + 跨-ep 稳定(>随机) | 🔄 跑中 §4.2 |
 | **V2** | milestone 派生读法 keep/drop | 好留坏弃(C3) | 待做 |
-| **V3a** | 用途 A:r 加权 / 无标注 advantage(训练) | vs 均权/监督 AE 的下游收益 | 待做 |
-| **V3b** | 用途 B:高脊/低谷作子目标条件 | 逐个验证(C4) | 待做 |
+| **V3a** | 用途 A:r 加权 / 无标注 advantage(训练) | r vs 动作一致性 | ✅ premise 通过 §4.5(ρ+0.21,100%正;kai0/LIBERO强/robotwin弱) |
+| **V3b** | 用途 B:高脊/低谷作子目标条件 | 逐个验证(C4) | 待做(下一个) |
 | **V3c** | 用途 C:部署 r 监控 | 低 r 命中 OOD | ✅ 跨任务 AUROC 0.999 §4.3;同任务失败帧待失败rollout |
-| **V4** | 普适复核:kai0 + robotwin2.0(先抽特征) | 同一超参跨本体成立 | 待做 |
+| **V4** | 普适复核:kai0 + robotwin2.0 特征 | 同一超参跨本体成立 | ✅ 特征抽取+同步 §4.4;robotwin V0/V1 复核待(72任务≥10ep) |
 | **V5** | 最终方案大数据再验证 + 下游 SR | 研究+落地双目标 | 待做 |
 
 **评估纪律**:每个 proxy 配随机/基线对照;宣称"普适"= 同一超参在所有场成立;最终以下游 SR 收口。
@@ -110,6 +110,19 @@ r(o_t) = 1/(N_ep-1) · Σ_{j≠ep(t)} exp( -dmin(o_t, E_j)² / 2σ² )
 - **覆盖**:frame_cache_jpeg256 只缓存 **5000 ep(0–4999,~1.1M 帧)**,已覆盖 ~全部 task 类型(300ep→270 task_index);其余 22500 仅 av1 视频(需 pyav,慢)→ **先抽 5000(充分大数据),22500 av1 余量作可选后续**。
 - 输出 `lmwm/data/robotwin_dinov3base/ep{e}.npz`(key=pooled)→ rsync 到 gsy North-E `/vePFS-North-E/vis_robot/workspace/deepdive_kai0/lmvla/lmwm/data/robotwin_dinov3base`。
 - **✅ 完成(2026-07-14)**:5000 ep / **1.09M 帧** / 1.5GB / 双卡各 ~1900s(250 fr/s);格式 pooled[N,768] 尺度对齐 LIBERO(norm 8.36)。→ rsync North-E(`gsy` ssh -p16370,通道已验证)。**跨本体普适复核数据就位。**
+
+### 4.5 V3a-proxy · 用途A(训练:r 加权/无标注 advantage)机制验证 ✅(2026-07-14,无需训练)
+脚本 `recurrence_action_consistency.py` · 图 `assets/recurrence_action_consistency.png`。测 `corr(r, −跨demo动作离散度)`:高 r 帧的近邻(同状态他demo)动作是否更一致。
+
+| 任务 | ρ(r, 动作一致) | 动作离散 低r→高r |
+|---|---|---|
+| kai0 | **+0.544** | 3.16→1.90 |
+| LIBERO-task0 | **+0.478** | 3.10→1.38 |
+| LIBERO-task6 | +0.274 | 2.07→1.01 |
+| robotwin t2851/2834/2838 | +0.085/+0.112/+0.147 | 弱降 |
+| **中位 ρ +0.210 · >0 on 100% 任务** | | |
+
+**结论**:**"高 r = 跨-demo 动作更一致 = BC target 更可靠"方向普适成立(100% 正)**→ "按 r 加权 BC / r 作无标注可靠度权重"这条训练用途 **premise 通过**。**诚实保留**:效应量**数据集依赖**——kai0/LIBERO 强(ρ 0.27–0.54,离散度降 ~2×),**robotwin 双臂弱**(ρ 0.09–0.15,14 维双臂动作本就更散,且每任务仅 ~20ep 复现弱)。→ r 是有效的无标注可靠度信号,但"加权是否真提升 SR"因本体而异,留 **V5 下游 A/B** 裁。
 
 ---
 
