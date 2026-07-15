@@ -135,7 +135,7 @@ echo "--- Step 1: 清理残留进程 ---"
 if [[ "$REPLAY" == "true" ]]; then
     KILL_PATTERNS="arm_reader_node|replay_node|replay_launch"
 else
-    KILL_PATTERNS="realsense2_camera_node|arm_reader_node|arm_teleop_node|policy_inference_node|rerun_viz_node|multi_camera_node|autonomy_launch|replay_node|replay_launch"
+    KILL_PATTERNS="realsense2_camera_node|arm_reader_node|arm_teleop_node|policy_inference_node|rerun_viz_node|multi_camera_node|dagger_pedal_node|dagger_recorder_node|arm_master_servo_node|uvc_camera_node|autonomy_launch|replay_node|replay_launch"
 fi
 PIDS=$(ps aux | grep -E "$KILL_PATTERNS" | grep -v grep | grep -v $$ | awk '{print $2}' || true)
 if [ -n "$PIDS" ]; then
@@ -192,15 +192,18 @@ if [[ "$SIM" != "true" ]]; then
     echo ""
     echo "--- Step 3: CAN activation ---"
 
+    # autonomy 只驱动 2 从臂 (autonomy_launch.py: arm_reader_node mode=1 @
+    # can_left_slave / can_right_slave). 主臂 (teleop 用) 缺失不影响部署测试,
+    # 故用 --slave-only 只激活从臂; activate_can_v2 对缺失 dongle 只告警不失败.
     if [[ -x "$CAN_ACTIVATE" ]]; then
-        info "running: $CAN_ACTIVATE ${KAI0_ROBOT_ID:+--robot $KAI0_ROBOT_ID}"
-        bash "$CAN_ACTIVATE"
+        info "running: $CAN_ACTIVATE --slave-only ${KAI0_ROBOT_ID:+--robot $KAI0_ROBOT_ID}"
+        bash "$CAN_ACTIVATE" --slave-only
     else
         fail "CAN activation script not found or not executable: $CAN_ACTIVATE"
     fi
 
     CAN_UP=0
-    IFACES="can_left_mas can_right_mas"
+    IFACES="can_left_slave can_right_slave"   # autonomy 实际使用的从臂接口
     for iface in $IFACES; do
         if ip link show "$iface" &>/dev/null; then
             CAN_UP=$((CAN_UP + 1))
@@ -209,9 +212,9 @@ if [[ "$SIM" != "true" ]]; then
     done
 
     if [ "$CAN_UP" -ge 2 ]; then
-        ok "$CAN_UP CAN interfaces up"
+        ok "$CAN_UP/2 从臂 CAN 就绪"
     else
-        warn "only $CAN_UP CAN interfaces (expected can_left_mas + can_right_mas)"
+        warn "只有 $CAN_UP/2 从臂 CAN 就绪 (autonomy 需 can_left_slave + can_right_slave); 缺臂只告警, 继续"
     fi
 else
     info "skip CAN activation (--sim: 不驱动真机)"

@@ -70,6 +70,7 @@ class StatusHub:
             "button_right": ros.get("button_right", False),
             "policy_execute": ros.get("policy_execute"),
             "last_pedal_ts": ros.get("last_pedal_ts"),
+            "speed_factor": ros.get("speed_factor", 1.0),
             "ros_alive": ros.get("ros_alive", False),
             "inference_episodes": self._cached_episodes.get("inference", 0),
             "dagger_episodes": self._cached_episodes.get("dagger", 0),

@@ -9,7 +9,9 @@ interface Props {
 }
 
 export default function EpisodesCard({ s, task, tasks, episodes, onTask }: Props) {
-  const inf = episodes.filter(e => e.subset === "inference").length;
+  const infAll = episodes.filter(e => e.subset === "inference");
+  const inf = infAll.length;
+  const fast = infAll.filter(e => e.used_throttle).length;   // 加速过的 rollout (整段标记)
   const dag = episodes.filter(e => e.subset === "dagger").length;
   const frames = episodes.reduce((a, e) => a + e.length, 0);
   const dur = episodes.reduce((a, e) => a + e.duration_s, 0);
@@ -32,7 +34,7 @@ export default function EpisodesCard({ s, task, tasks, episodes, onTask }: Props
         <div className="k">DAgger</div>
         <div className="v"><b style={{ color: "#f0c674" }}>{dag}</b> corrections</div>
         <div className="k">Inference</div>
-        <div className="v"><b style={{ color: "#79c0ff" }}>{inf}</b> rollouts</div>
+        <div className="v"><b style={{ color: "#79c0ff" }}>{inf}</b> rollouts · 其中 <b style={{ color: "#f97583" }}>{fast}</b> ⏩ 踩过油门</div>
         <div className="k">Total</div>
         <div className="v">{frames.toLocaleString()} frames · {(dur / 60).toFixed(1)} min</div>
       </div>

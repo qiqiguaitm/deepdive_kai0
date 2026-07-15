@@ -36,6 +36,8 @@ export interface DaggerStatus {
   button_right: boolean;
   policy_execute: boolean | null;
   last_pedal_ts: number | null;
+  // 油门: 当前生效速度倍率 (1.0=默认; >1=踩下脚踏板加速中, episode 会被标 used_throttle)
+  speed_factor: number;
   ros_alive: boolean;
   inference_episodes: number;
   dagger_episodes: number;
@@ -68,4 +70,7 @@ export interface EpisodeEntry {
   note: string;
   created_at: number | null;
   has_video: boolean;
+  // 油门加速标识: 本段 rollout 是否踩过油门 + 峰值倍率
+  used_throttle?: boolean;
+  speed_factor?: number;
 }

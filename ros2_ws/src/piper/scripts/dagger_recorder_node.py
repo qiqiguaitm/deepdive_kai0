@@ -100,6 +100,9 @@ from app.dataset_writer import (  # noqa: E402
 
 CAM_RGB_TOPIC = {
     "top_head":   "/camera_f/camera/color/image_raw",
+    # mid_head = WHEELTEC UVC 第二头相机 (uvc_camera_node.py, /dev/cam_mid_head)。
+    # 注意: UVC 节点发 /camera_m/color/image_raw (无 realsense 的 /camera/ 子命名)。
+    "mid_head":   "/camera_m/color/image_raw",
     "hand_left":  "/camera_l/camera/color/image_raw",
     "hand_right": "/camera_r/camera/color/image_raw",
 }
@@ -136,7 +139,7 @@ ALIGN_TOL_RAD = 0.02       # ~1.1° per joint
 ALIGN_TIMEOUT_S = 5.0
 ALIGN_PUBLISH_HZ = 10.0    # 10 Hz matches upstream; 50 Hz tended to overshoot
 ALIGN_DURATION_S = 3.0     # how long to publish each target before moving on
-MIN_EPISODE_SEC = 3.0      # drop accidental tap-toggles
+MIN_EPISODE_SEC = 1.0      # drop accidental tap-toggles (was 3.0; lowered so短 rollout 也能存)
 
 
 class State(Enum):
@@ -254,6 +257,12 @@ class DaggerRecorder(Node):
         self._inference_writer: Optional[EpisodeWriter] = None
         self._inf_started_at: float = 0.0
         self._inf_wrote_frames = 0
+        # 油门加速标识 (最小改动方案): 所有 rollout 都写单一 inference/ 数据集;
+        # 每条 episode 的 meta 记 used_throttle (本段有没有踩过油门) + speed_factor
+        # (本段峰值倍率, 油门段>1 / 普通段=1.0), 下游据此区分加速/普通, 不分目录。
+        self._inf_subset: str = "inference"
+        self._inf_speed_max: float = 1.0
+        self._inf_throttle_used: bool = False
 
         # ── Per-rollout boundary + inference↔dagger alignment ──
         # One "rollout" = one autonomous task attempt (cloth fold, pick-place,
@@ -363,6 +372,17 @@ class DaggerRecorder(Node):
         # discard}. Pedal stays a start↔save toggle; discard is web-only.
         self.create_subscription(String, "/dagger/record_cmd",
                                   self._on_record_cmd, 5)
+        # V2 油门: policy_inference_node (session 进程) latched 广播的全局速度倍率.
+        # 落进 inference/ episode meta, 让高速 rollout 数据可复现. transient_local 保证
+        # 本 infra 进程晚 join 也能收到最后一次值. 缺省 1.0 (未开油门 = 原速采集).
+        self._cur_speed_factor = 1.0
+        from std_msgs.msg import Float32 as _Float32
+        # 用模块级 QoSProfile/QoSDurabilityPolicy (line 72); 不要在此局部 re-import
+        # QoSProfile — 会把它变成 __init__ 局部变量, 令上面 sensor_qos=QoSProfile(...)
+        # 触发 UnboundLocalError。
+        _latched = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(_Float32, "/policy/speed_factor",
+                                 self._on_speed_factor, _latched)
 
         self.pub_execute = self.create_publisher(Bool, "/policy/execute", 1)
         # State machine snapshot for web/dagger_manager (latched, so a late
@@ -532,6 +552,16 @@ class DaggerRecorder(Node):
             threading.Thread(target=self._do_handback, daemon=True).start()
 
     # ── /dagger/takeover edge handler ──
+    def _on_speed_factor(self, msg) -> None:
+        """V2 油门: 缓存 policy 广播的当前速度倍率, 供 inference episode meta 记录."""
+        try:
+            sf = float(msg.data)
+        except (TypeError, ValueError):
+            return
+        if abs(sf - self._cur_speed_factor) > 1e-3:
+            self.get_logger().info(f"[SPEED] inference 采集速度倍率 → {sf:.2f}")
+        self._cur_speed_factor = sf
+
     def _on_takeover(self, msg: Bool) -> None:
         want = bool(msg.data)
         with self._lock:
@@ -869,19 +899,20 @@ class DaggerRecorder(Node):
             self.get_logger().error(f"discard abort failed: {e}")
 
     # ── inference episode lifecycle (Form C: policy rollout side) ──
-    def _open_inference_episode(self) -> None:
-        """Open an inference (policy-rollout) episode writer.
+    def _open_inference_episode(self, subset: Optional[str] = None) -> None:
+        """Open an inference (policy-rollout) episode writer under <task>/inference/.
 
-        Writes to <task>/inference/<vN>/<date-vN>/ — used by the RECAP advantage
-        estimator (see docs/deployment/strategy/awbc_implementation_plan.md
-        Stage 1) as negative / low-advantage samples.
+        单一 inference/ 数据集: 所有 rollout (加速/普通) 都写这里, 是否加速由 episode
+        meta 的 used_throttle 标识 (见 _on_record_tick / _close_inference_episode)。
+        subset 参数保留兼容, 默认 "inference"。
         """
         if not self._record_inference:
             return  # inference recording disabled by config
+        subset = subset or "inference"
         try:
-            ep = next_episode_id(self._task, "inference")
+            ep = next_episode_id(self._task, subset)
             writer = EpisodeWriter(
-                task=self._task, subset="inference", ep=ep,
+                task=self._task, subset=subset, ep=ep,
                 prompt=self._prompt, template_id="inference",
                 operator=self._operator,
             )
@@ -890,8 +921,11 @@ class DaggerRecorder(Node):
             return
         with self._lock:
             self._inference_writer = writer
+            self._inf_subset = subset
             self._inf_started_at = time.time()
             self._inf_wrote_frames = 0
+            self._inf_speed_max = self._cur_speed_factor
+            self._inf_throttle_used = self._cur_speed_factor > 1.0 + 1e-3
         self.get_logger().info(
             f"  inference ep={ep} → {writer.root}"
         )
@@ -947,13 +981,17 @@ class DaggerRecorder(Node):
             note = f"policy rollout (session_end, success unverified; {wrote} frames @ {FPS} Hz)"
             extra = {"terminal": "session_end", "rollout_id": self._rollout_id}
 
+        # 油门加速标识: used_throttle=本段有没有踩过油门 (整段标记); speed_factor=本段峰值
+        # 倍率 (踩过 >1, 没踩 =1.0)。下游据此区分加速/普通数据, 无需分目录。
+        extra = {**extra, "used_throttle": bool(self._inf_throttle_used),
+                 "speed_factor": round(float(self._inf_speed_max), 3)}
         try:
             writer.finalize()
             write_episode_meta(
                 writer, duration, success=success,
                 note=note, scene_tags=[], extra=extra,
             )
-            update_info_json(self._task, "inference")
+            update_info_json(self._task, self._inf_subset)
             self.get_logger().info(
                 f"  saved inference ep={writer.ep} frames={wrote} duration={duration:.1f}s "
                 f"→ {writer.root}"
@@ -1046,7 +1084,13 @@ class DaggerRecorder(Node):
                     action[13] = self._q_master_right[6]
             frames = {cam: self._rgb[cam] for cam in CAMERAS}
             depth_frames = {cam: self._depth.get(cam) for cam in DEPTH_CAMERAS}
+            cur_speed = self._cur_speed_factor
             now = time.time()
+
+        # 防黑帧: 任一相机还没出图就跳过本 tick — EpisodeWriter 对 None 帧填纯黑,
+        # 会让 finalize 的 trim-validate 判黑帧 abort 整段 (dagger/inference 都护到)。
+        if any(frames[cam] is None for cam in CAMERAS):
+            return
 
         # ── HUMAN_RECORD + recording branch: write to dagger ──
         if cur_state == State.HUMAN_RECORD and recording and dag_writer is not None:
@@ -1090,7 +1134,10 @@ class DaggerRecorder(Node):
             with self._lock:
                 slave_ready = (any(abs(x) > 1e-4 for x in self._q_slave_left[:6]) and
                                any(abs(x) > 1e-4 for x in self._q_slave_right[:6]))
-                rgb_ready = self._rgb.get("top_head") is not None
+                # 必须【所有】相机都到过一帧再开 episode: _emit_tick 对 None 相机帧填黑,
+                # 只等 top_head 会让手腕 D405 还没出图时首帧写成纯黑 → finalize 的
+                # trim-validate 判黑帧 abort 整段。等齐 top_head+hand_left+hand_right。
+                rgb_ready = all(self._rgb.get(cam) is not None for cam in CAMERAS)
             if not (slave_ready and rgb_ready):
                 return
             self._open_inference_episode()
@@ -1098,6 +1145,16 @@ class DaggerRecorder(Node):
                 inf_writer = self._inference_writer
             if inf_writer is None:
                 return  # _open_inference_episode logged failure already
+
+        # ── 单一 inference/ 数据集 + 整段加速标识 (最小改动方案): 所有 rollout 都写
+        #    inference/; 本段 rollout 只要有一帧生效倍率 > 1.0 (踩过油门), 就把整段
+        #    episode 的 meta 打上 used_throttle=true (整段标记, 与加速时长/占比无关),
+        #    全程没踩则 false。下游按此标识区分"加速过 / 普通"数据, 不搬文件、不分目录。 ──
+        if cur_speed > 1.0 + 1e-3 and not self._inf_throttle_used:
+            with self._lock:
+                self._inf_throttle_used = True
+            self.get_logger().info(
+                f"[SPEED] 本段 rollout 用过油门 (speed={cur_speed:.2f}) → meta used_throttle=true")
 
         try:
             inf_writer.write_tick(frames, state, action, now,
@@ -1117,6 +1174,8 @@ class DaggerRecorder(Node):
         with self._lock:
             self._inf_wrote_frames += 1
             n = self._inf_wrote_frames
+            if cur_speed > self._inf_speed_max:
+                self._inf_speed_max = cur_speed
         if n % (FPS * 10) == 0:
             self.get_logger().info(f"  inference recording {n} frames ({n / FPS:.1f}s)")
         return
@@ -1138,6 +1197,16 @@ class DaggerRecorder(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = DaggerRecorder()
+    # SIGTERM (ros2 launch / web 停止栈时发的信号, 非 Ctrl-C 的 SIGINT) 也要走
+    # finalize → 存住正在录的 episode。抛 KeyboardInterrupt 让下面 finally 收尾。
+    # (SIGKILL/-9 无法捕获 → 用 -9 杀 recorder 会丢未 finalize 的 episode。)
+    import signal
+    def _on_sigterm(signum, frame):
+        raise KeyboardInterrupt
+    try:
+        signal.signal(signal.SIGTERM, _on_sigterm)
+    except (ValueError, OSError):
+        pass  # 非主线程时无法注册, 忽略
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

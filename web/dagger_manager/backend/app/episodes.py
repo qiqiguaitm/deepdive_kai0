@@ -125,7 +125,7 @@ def list_tasks() -> list[dict]:
         return out
     for d in sorted(DATA_ROOT.iterdir()):
         if d.is_dir() and d.name.startswith("Task_"):
-            has_data = (d / "dagger").is_dir() or (d / "inference").is_dir()
+            has_data = any((d / s).is_dir() for s in SUBSETS)
             out.append({"task": d.name, "has_data": has_data})
     return out
 
@@ -170,6 +170,9 @@ def list_episodes(task: str = "Task_A") -> list[dict]:
                     "note": d.get("note", ""),
                     "created_at": d.get("created_at"),
                     "has_video": head_mp4_v4.is_file() or head_mp4_v3.is_file(),
+                    # 油门加速标识: 本段 rollout 是否踩过油门 (整段标记) + 峰值倍率
+                    "used_throttle": bool(d.get("used_throttle", False)),
+                    "speed_factor": float(d.get("speed_factor", 1.0)),
                 })
     out.sort(key=lambda e: (e["date"], e["episode_id"]), reverse=True)
     return out

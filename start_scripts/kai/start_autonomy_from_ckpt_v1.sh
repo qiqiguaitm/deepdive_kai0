@@ -25,14 +25,22 @@ shift || true
 # 统一参数形式 (与 gwp 脚本一致): --server-gpu N = 推理 server GPU (KAI0_SERVE_GPU);
 # --node-gpu N = autonomy 节点 GPU (KAI0_GPU_ID)。其余 args 透传给 autonomy_v1。
 PASS=()
+SPEED_FACTOR=""       # V2 油门: 全局速度倍率 (>1 超训练集速度). 空=不注入 (=launch 默认 1.0)
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --server-gpu) export KAI0_SERVE_GPU="$2"; shift 2 ;;
     --node-gpu)   export KAI0_GPU_ID="$2"; shift 2 ;;
+    --speed-factor|--speed) SPEED_FACTOR="$2"; shift 2 ;;
     *)            PASS+=("$1"); shift ;;
   esac
 done
 set -- "${PASS[@]+"${PASS[@]}"}"
+# 油门: 转成 autonomy_launch.py 的 launch arg, 经 start_autonomy_v1.sh 的 EXTRA_AUTONOMY 透传.
+# v1@20Hz 基座可上 2x+; 真机务必从 1.2 爬坡, 别跳变. clamp/夹爪最近邻在 policy_inference_node 内.
+if [ -n "$SPEED_FACTOR" ]; then
+  echo "[v1] 🏎  油门 speed_factor:=$SPEED_FACTOR (全局提速; 物理 vmax clamp 已在节点内保护)"
+  set -- "$@" "speed_factor:=$SPEED_FACTOR"
+fi
 
 if [ ! -d "$CKPT_DIR" ]; then
   echo "[FAIL] ckpt_dir not found: $CKPT_DIR" >&2

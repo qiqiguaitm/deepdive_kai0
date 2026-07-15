@@ -125,6 +125,12 @@ def generate_launch_description():
         default_value='-1',
         description='Per-domain token for action_head_cond/soft_prompt models (vis=1). '
                     '-1 (default) = disabled → obs unchanged, backward-compatible with plain pi05.')
+    ee_gripper_binarize_arg = DeclareLaunchArgument('ee_gripper_binarize',
+        default_value='true',
+        description='EE (PosCmd) 夹爪二值化: true=snap {0,open_m} (二值 ckpt 默认). '
+                    '连续夹爪 ckpt (ee6d_continuous/ee6d_alpha, sidecar deploy_binarize_gripper=false) '
+                    '必须设 false, 否则 [g_close,g_open] 连续行程被阈值(open_m/2)砍成二值, '
+                    '模型的渐进保持 grasp 被丢成开手 → 抓了又松.')
     execute_mode_arg = DeclareLaunchArgument('execute_mode',
         default_value='false',
         description='Start in execute mode (true) or observe-only mode (false)')
@@ -191,6 +197,15 @@ def generate_launch_description():
     min_smooth_steps_arg = DeclareLaunchArgument('min_smooth_steps',
         default_value='8',
         description='Min blend window for chunk overlap smoothing (JAX legacy 8, V1 overrides to 3)')
+    speed_factor_arg = DeclareLaunchArgument('speed_factor',
+        default_value='1.0',
+        description='V2 油门: 全局速度倍率 (>1 超训练集速度; 1.0=原速回退). v1@20Hz 可 2x+, v0@3Hz 宜 ≤1.5x')
+    speed_factor_max_arg = DeclareLaunchArgument('speed_factor_max',
+        default_value='2.0',
+        description='speed_factor 硬上限 (防误设; 真机爬坡验证后再放宽)')
+    throttle_factor_arg = DeclareLaunchArgument('throttle_factor',
+        default_value='1.5',
+        description='瞬时油门: 踩住脚踏板 (/policy/throttle_hold) 时的目标倍率, 松开回 speed_factor')
     # publish_rate = PosCmd 下发 Hz; 必须匹配 ckpt 的 action 时间分辨率 (H/qdur).
     # 默认 30 = dense-1s ckpt (p0, qdur=1.0 → 30 步/1s). qdur=2.0 的 anchor 变体
     # (d5anchor) 须传 publish_rate:=15, 否则 30 步/2s 被 30Hz 播成 2× 过快。
@@ -359,6 +374,7 @@ def generate_launch_description():
             'port': LaunchConfiguration('port'),
             'prompt': ParameterValue(LaunchConfiguration('prompt'), value_type=str),
             'dataset_id': ParameterValue(LaunchConfiguration('dataset_id'), value_type=int),
+            'ee_gripper_binarize': ParameterValue(LaunchConfiguration('ee_gripper_binarize'), value_type=bool),
             'gpu_id': LaunchConfiguration('gpu_id'),
             'img_front_topic': '/camera_f/camera/color/image_raw',
             'img_left_topic': '/camera_l/camera/color/image_raw',
@@ -374,6 +390,9 @@ def generate_launch_description():
             'inference_rate': LaunchConfiguration('inference_rate'),
             'latency_k': LaunchConfiguration('latency_k'),
             'min_smooth_steps': LaunchConfiguration('min_smooth_steps'),
+            'speed_factor': ParameterValue(LaunchConfiguration('speed_factor'), value_type=float),
+            'speed_factor_max': ParameterValue(LaunchConfiguration('speed_factor_max'), value_type=float),
+            'throttle_factor': ParameterValue(LaunchConfiguration('throttle_factor'), value_type=float),
             'publish_rate': ParameterValue(LaunchConfiguration('publish_rate'), value_type=int),
             'open_loop_chunk': ParameterValue(LaunchConfiguration('open_loop_chunk'), value_type=bool),
             'open_loop_min_remaining': ParameterValue(LaunchConfiguration('open_loop_min_remaining'), value_type=int),
@@ -452,6 +471,7 @@ def generate_launch_description():
         cmd=['bash', '-c',
              'pkill -9 -f "rerun_viz_node|multi_camera_node|policy_inference_node'
              '|arm_reader_node|arm_teleop_node|realsense2_camera_node'
+             '|dagger_pedal_node|dagger_recorder_node|arm_master_servo_node|uvc_camera_node'
              '|rerun_sdk/rerun_cli/rerun" || true; '
              'sleep 2'],
         output='screen',
@@ -490,13 +510,14 @@ def generate_launch_description():
     return LaunchDescription([
         set_ld, set_py, set_path, set_cache, set_mem_frac,
         mode_arg, gpu_arg, config_arg, ckpt_arg, host_arg, port_arg, prompt_arg,
-        dataset_id_arg,
+        dataset_id_arg, ee_gripper_binarize_arg,
         execute_mode_arg, enable_rerun_arg, enable_policy_arg, calib_arg,
         fg_enable_arg, bg_enable_arg,
         enable_rtc_arg, rtc_execute_horizon_arg,
         rtc_max_guidance_weight_arg, rtc_smooth_method_arg,
         publish_smooth_alpha_arg,
         inference_rate_arg, latency_k_arg, min_smooth_steps_arg, publish_rate_arg,
+        speed_factor_arg, speed_factor_max_arg, throttle_factor_arg,
         open_loop_chunk_arg, open_loop_min_remaining_arg, xvla_sequential_arg,
         cam_fps_arg, enable_head_depth_arg, enable_left_depth_arg, enable_right_depth_arg,
         fast_obs_pipeline_arg, pipelined_obs_arg, transport_arg,

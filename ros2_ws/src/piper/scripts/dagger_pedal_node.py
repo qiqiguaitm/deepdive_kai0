@@ -29,7 +29,7 @@ from typing import Optional
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Empty
+from std_msgs.msg import Bool, Empty
 
 try:
     import evdev
@@ -46,6 +46,14 @@ EDGE = os.environ.get("PEDAL_EDGE", "release").lower()
 DEBOUNCE_S = float(os.environ.get("PEDAL_DEBOUNCE_MS", "500")) / 1000.0
 RETRY_FIND_S = 2.0
 TRIGGER_VALUE = 0 if EDGE == "release" else 1  # evdev: 1=down, 0=up
+# 瞬时油门: 除了在 EDGE 触发一次 /dagger/pedal_toggled (录制开关), 再把踏板的
+# 按住/松开原始电平发到 /policy/throttle_hold (Bool: 踩下 True / 松开 False) 供
+# policy_inference_node 做 hold-to-accelerate. PEDAL_THROTTLE=0 可关闭该通道.
+THROTTLE_ENABLED = os.environ.get("PEDAL_THROTTLE", "1") == "1"
+THROTTLE_HEARTBEAT_HZ = float(os.environ.get("PEDAL_THROTTLE_HZ", "10"))
+# toggle (默认, 适配瞬时踏板): 每次踩下翻转持续油门状态。
+# hold  (需保持型踏板): 电平跟随物理踩下/松开。
+THROTTLE_MODE = os.environ.get("PEDAL_THROTTLE_MODE", "toggle").lower()
 
 
 class DaggerPedal(Node):
@@ -54,6 +62,11 @@ class DaggerPedal(Node):
     def __init__(self) -> None:
         super().__init__("dagger_pedal")
         self.pub = self.create_publisher(Empty, "/dagger/pedal_toggled", 5)
+        # 油门 hold 电平 + 心跳: 松开事件万一丢失时, policy 端看门狗靠心跳超时回落.
+        self.pub_hold = self.create_publisher(Bool, "/policy/throttle_hold", 10)
+        self._held = False
+        if THROTTLE_ENABLED and THROTTLE_HEARTBEAT_HZ > 0:
+            self.create_timer(1.0 / THROTTLE_HEARTBEAT_HZ, self._publish_hold)
         self._running = True
         self._dev: Optional["evdev.InputDevice"] = None
         self._thread = threading.Thread(target=self._loop, daemon=True)
@@ -138,17 +151,34 @@ class DaggerPedal(Node):
                     break
                 if ev.type != evdev.ecodes.EV_KEY or ev.code != self._trigger_key:
                     continue
+                # 这只脚踏板是【瞬时】设备: 一次踩下只发 down→up 脉冲, 无法保持电平,
+                # 所以油门做成【切换】(toggle) 而非保持(hold): 每次踩下翻转一个持续状态,
+                # 心跳定时器持续重播该状态 → /policy/throttle_hold 变成锁存的 on/off 电平。
+                # (需要保持型踏板时设 PEDAL_THROTTLE_MODE=hold 恢复逐电平跟随。)
+                if THROTTLE_MODE == "hold" and THROTTLE_ENABLED and ev.value in (0, 1):
+                    self._held = (ev.value == 1)
+                    self._publish_hold()
                 if ev.value != TRIGGER_VALUE:
                     continue
                 now = time.monotonic()
                 if now - last_fire < DEBOUNCE_S:
                     continue
                 last_fire = now
+                # toggle 模式: 每个防抖后的触发沿翻转油门状态 (踩一下开, 再踩一下关)。
+                if THROTTLE_MODE == "toggle" and THROTTLE_ENABLED:
+                    self._held = not self._held
+                    self._publish_hold()
+                    self.get_logger().info(
+                        f"pedal → throttle {'ON (加速)' if self._held else 'OFF (默认速)'}")
                 self.get_logger().info("pedal fired → /dagger/pedal_toggled")
                 self.pub.publish(Empty())
         except OSError as e:
             self.get_logger().warn(f"device read error: {e} — reconnecting")
         finally:
+            # 设备断开/异常: 强制松开电平 (fail-safe 回默认速度).
+            if self._held:
+                self._held = False
+                self._publish_hold()
             if grabbed:
                 try:
                     dev.ungrab()
@@ -158,6 +188,14 @@ class DaggerPedal(Node):
                 dev.close()
             except Exception:  # noqa: BLE001
                 pass
+
+    def _publish_hold(self) -> None:
+        """发布当前踏板电平到 /policy/throttle_hold (踩下 True / 松开 False).
+        由电平变化事件 + 心跳定时器共同调用; publisher 线程安全."""
+        try:
+            self.pub_hold.publish(Bool(data=self._held))
+        except Exception:  # noqa: BLE001
+            pass
 
     def _loop(self) -> None:
         waiting = False
