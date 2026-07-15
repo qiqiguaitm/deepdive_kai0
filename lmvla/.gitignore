@@ -49,3 +49,7 @@ crave/**/*.parquet
 
 # cloned LIBERO simulator (external repo)
 /LIBERO/
+
+# eval log files (runtime outputs, not committed)
+*.log
+*.tar.gz
