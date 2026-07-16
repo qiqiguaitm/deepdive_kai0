@@ -1,0 +1,92 @@
+# V6-T3 自适应视界目标: c(o)=检索时间一致性, idx_target=round(idx_local+c*(idx_ridge-idx_local))
+# 别名帧(c低)目标收缩向t+7(抗别名), 清晰帧(c高)够到r脊(task6红利). 单一目标场, 架构零改, vanilla推理.
+# vs M''(lmwm_rvalley_recurridge): 仅换 LMWM_CKPT/TARGET 到 libero_adaptive; 不加 hint-dropout(优雅在目标本身).
+# 依赖(North-E就位): libero_adaptive/{pairs.npz, target_compact.npz(22GB)} + checkpoints/lmwm_libero_adaptive/lmwm.pt
+# 提交: cd ~/workspace/deepdive_kai0/train_scripts/kai/volc
+#   ~/workspace/deepdive_kai0/kai0/.venv/bin/python submit_yaml.py lmwm_adaptive_horizon_8h20.yaml
+
+TaskName: "lmwm-adaptive-horizon-8h20"
+Description: "V6 adaptive-horizon target (c=检索时间一致性), 8xH20 12500steps, LIBERO"
+Tags: []
+
+ImageUrl: "dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1"
+ResourceQueueName: "Robot-North-H20"
+Framework: "PyTorch"
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 1
+    Flavor: "ml.hpcpni3ln.45xlarge"   # 8×H20 整节点
+
+ActiveDeadlineSeconds: 43200
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnbj875793a96d6b"
+    MountPath: "/vePFS-North-E/vis_robot"
+    SubPath: "/vis_robot"
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: PYTHONUNBUFFERED
+    Value: "1"
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+  - Name: TOKENIZERS_PARALLELISM
+    Value: "false"
+  - Name: OMP_NUM_THREADS
+    Value: "8"
+
+Entrypoint: |
+  set -uo pipefail
+  REPO=/vePFS-North-E/vis_robot/workspace/deepdive_kai0
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  LOG_DIR=$REPO/lmvla/lawam/logs/volc_dualarm
+  mkdir -p "$LOG_DIR"
+  LOG="$LOG_DIR/adaptive_horizon_${STAMP}.log"
+  exec >> "$LOG" 2>&1
+  set -x
+  echo "=== V6 adaptive-horizon target (8gpu) start $(date -u) ==="
+
+  export PYTHON=$REPO/kai0/.venv/bin/python
+  export PATH=$REPO/kai0/.venv/bin:$PATH
+  cd $REPO/lmvla/lawam
+
+  nvidia-smi -L | head
+  $PYTHON -c "import torch, transformers, accelerate; print(f'torch={torch.__version__} tf={transformers.__version__} acc={accelerate.__version__} cuda={torch.cuda.is_available()}')"
+  $PYTHON -c "from starVLA.model.framework.vlas.lawam import LatentWorldPolicyBackend; print('LatentWorldPolicyBackend import OK')"
+
+  LMWM=$REPO/lmvla/lmwm
+  MS=$LMWM/data/libero_adaptive
+  for f in "$LMWM/checkpoints/lmwm_libero_adaptive/lmwm.pt" "$MS/pairs.npz" "$MS/target_compact.npz"; do
+    [ -f "$f" ] || { echo "FATAL: $f missing" >&2; exit 13; }
+  done
+  echo "[$(date)] preflight OK (adaptive-horizon pairs)"
+
+  export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+  export MASTER_PORT=29515
+  export LMWM_CKPT=$LMWM/checkpoints/lmwm_libero_adaptive/lmwm.pt
+  export LMWM_MILESTONE_TARGET=$MS/pairs.npz
+  export LMWM_TARGET_COMPACT=$MS/target_compact.npz
+  export LMWM_ADAPTER_DIR=$REPO/lmvla/lawam
+  export LMWM_SWAP_TEACHER=1
+  # 不设 LMWM_HINT_DROPOUT: T3 优雅在目标本身, vanilla 训练/推理
+  export LAWAM_RUN_TIMESTAMP=${STAMP}
+
+  bash train_lawam_distributed.sh \
+    --config_yaml starVLA/config/training/train_libero.yaml \
+    --run_id=lmwm_adaptive_horizon_volc \
+    --trainer.max_train_steps=12500 \
+    --trainer.save_interval=2500
+
+  echo "=== V6 adaptive-horizon target DONE $(date -u) ==="
+
+RetryOptions:
+    EnableRetry: false
+    MaxRetryTimes: 0
+
+AccessType: "Public"
