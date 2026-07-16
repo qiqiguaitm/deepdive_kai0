@@ -1,0 +1,122 @@
+# LIBERO eval 并行能力测试: Arm M'' r-脊, libero_10, 仅10 trials/task 快速测 num_workers 并行是否可行+提速
+# 与单卡正式 job(eval_libero_armMpp_recurridge_4h20.yaml)独立, 各占 volc 节点不冲突.
+# harness 并行模型: 1 policy server(单GPU推理) + N worker 进程并行跑 env(渲染+步进).
+#   worker 并非分到不同GPU, 提速来自并行 env-stepping(CPU密集); egl下需 osmesa/glx 或 override 才允许 num_workers>1.
+# 提交: gsy 上 cd train_scripts/kai/volc && kai0/.venv/bin/python submit_yaml.py eval_libero_armMpp_recurridge_PARALLEL_test.yaml
+
+TaskName: "eval-libero-armMpp-recurridge-PARALLEL"
+Description: "LIBERO eval PARALLEL test (num_workers=4), Arm M'' r-ridge, libero_10 10trials/task"
+Tags: []
+
+ImageUrl: "dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1"
+ResourceQueueName: "Robot-North-H20"
+Framework: "Custom"
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 1
+    Flavor: "ml.pni3ln.17xlarge"
+
+ActiveDeadlineSeconds: 43200
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnbj875793a96d6b"
+    MountPath: "/vePFS-North-E/vis_robot"
+    SubPath: "/vis_robot"
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: PYTHONUNBUFFERED
+    Value: "1"
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+  - Name: TOKENIZERS_PARALLELISM
+    Value: "false"
+  - Name: OMP_NUM_THREADS
+    Value: "8"
+
+Entrypoint: |
+  set -uo pipefail
+  REPO=/vePFS-North-E/vis_robot/workspace/deepdive_kai0
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  LOG_DIR=$REPO/lmvla/lawam/logs/volc_eval
+  mkdir -p "$LOG_DIR"
+  LOG="$LOG_DIR/armMpp_recurridge_par_${STAMP}.log"
+  exec >> "$LOG" 2>&1
+  set -x
+  echo "=== ARM M'' PARALLEL test start $(date -u) ==="
+
+  # ---- Python 环境 ----
+  export PYTHON=$REPO/kai0/.venv/bin/python
+  export PATH=$REPO/kai0/.venv/bin:$PATH
+  $PYTHON -c "import torch; print('torch', torch.__version__)"
+
+  # ---- 安装 LIBERO client 依赖(aliyun镜像) ----
+  env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u all_proxy \
+    $PYTHON -m pip install -i https://mirrors.aliyun.com/pypi/simple/ \
+    'robosuite==1.4.1' mujoco opencv-python-headless 2>&1 | tail -3
+  pip install -i https://mirrors.aliyun.com/pypi/simple/ \
+    tyro websockets json-numpy 2>&1 | tail -3 || echo "[warn] some pips failed"
+  LIBERO_SRC=$REPO/lmvla/LIBERO
+  $PYTHON -m pip install -e "$LIBERO_SRC" 2>&1 | tail -2
+
+  # ---- 修 LIBERO 路径(绝对 North-E, 同正式 job) ----
+  LH=$REPO/lmvla/LIBERO
+  mkdir -p "$LH/libero"
+  {
+    echo "benchmark_root: $LH/libero/libero"
+    echo "bddl_files: $LH/libero/libero/bddl_files"
+    echo "init_states: $LH/libero/libero/init_files"
+    echo "datasets: $LH/libero/libero/../datasets"
+    echo "assets: $LH/libero/libero/assets"
+  } > "$LH/libero/config.yaml"
+  rm -f /root/.libero/config.yaml 2>/dev/null || true
+
+  # ---- 并行渲染后端: 只用官方安全的 osmesa(harness 认可的 parallel-safe 后端). ----
+  #      不使用 unsafe egl override(会导致 worker 渲染崩溃). osmesa 不可用则并行不可行, 干净报告.
+  if $PYTHON -c "import ctypes.util,sys; sys.exit(0 if ctypes.util.find_library('OSMesa') else 1)" 2>/dev/null; then
+    export MUJOCO_GL=osmesa
+    export NUM_WORKERS=4
+    echo "[parallel] backend=osmesa (safe parallel), NUM_WORKERS=4"
+  else
+    export MUJOCO_GL=egl
+    export NUM_WORKERS=1
+    echo "[parallel] osmesa UNAVAILABLE in image -> parallel NOT possible without unsafe egl override; falling back to serial (NUM_WORKERS=1) smoke run. To enable parallel: add libOSMesa to image."
+  fi
+
+  cd $REPO/lmvla/lawam
+  $PYTHON -c "from starVLA.model.framework.vlas.lawam import LatentWorldPolicyBackend; print('Backend OK')"
+
+  LMWM=$REPO/lmvla/lmwm
+  CKPT=$REPO/lmvla/lawam/results/Checkpoints/libero/20260716_030632+lmwm_rvalley_recurridge_volc/checkpoints/steps_12500_pytorch_model.pt
+  [ -f "$CKPT" ] || { echo "FATAL: ckpt missing $CKPT" >&2; exit 13; }
+
+  export LMWM_CKPT=$LMWM/checkpoints/lmwm_libero_rvalley/lmwm.pt
+  export LMWM_ADAPTER_DIR=$REPO/lmvla/lawam
+  export LMWM_SWAP_TEACHER=1
+  unset LMWM_MILESTONE_TARGET LMWM_TARGET_COMPACT
+
+  export CUDA_VISIBLE_DEVICES=0
+  export STAR_VLA_PYTHON=$PYTHON
+  export LIBERO_PYTHON=$PYTHON
+  export SUITES=libero_10
+  export NUM_TRIALS_PER_TASK=10     # 快速测: 10 trials(vs 正式50)
+  export SERVER_STARTUP_TIMEOUT_SEC=600
+  # NUM_WORKERS 已在上面按后端条件设定(osmesa->4 / 否则->1)
+
+  echo "[$(date)] preflight OK (MUJOCO_GL=$MUJOCO_GL NUM_WORKERS=$NUM_WORKERS), starting PARALLEL eval..."
+  T0=$(date +%s)
+  bash examples/LIBERO/eval_files/auto_eval_scripts/run_libero_benchmark.sh "$CKPT"
+  T1=$(date +%s)
+  echo "=== ARM M'' PARALLEL test DONE $(date -u) | wall=$((T1-T0))s | 100 rollouts, NUM_WORKERS=4 ==="
+
+RetryOptions:
+    EnableRetry: false
+    MaxRetryTimes: 0
+
+AccessType: "Public"
