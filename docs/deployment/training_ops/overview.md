@@ -41,7 +41,7 @@
 
 > **快速归类规则**:
 > - **gf0 (华东)** = vePFS 共享, 长跑单机训练
-> - **gf3 (华北)** = 火山 ML 队列 `Robot-North-H20` 中的一个 H20 单卡机, 适合 dev + smoke test; 真正多卡集群训练通过 volc submit job 启 2-7 个 `ml.hpcpni3ln.45xlarge` 节点 (16-56 卡)
+> - **gsy (华北)** = 火山北京 volc 提交节点(自身无 GPU),`ssh -p 16370 root@124.174.16.237`,是 `Robot-North-H20` 队列的数据同步/环境准备/任务提交入口;训练(含 smoke)一律通过 volc submit job 启 `ml.hpcpni3ln.45xlarge` 节点(单节点 8 卡,2-7 节点 16-56 卡)。⚠️ **原 gf3 (:7888) H20 单卡 dev 机已于 2026-07 关闭** —— 该队列**没有 1-GPU flavor**,最小单元是整 8 卡节点,单卡 smoke 只能整节点 pin 1 卡
 > - **uc 集群** = 自有机房, 完全独立, 200 Gb/s RoCEv2, 3 机 HSDP/FSDP (§13)
 
 ---
@@ -184,7 +184,7 @@ nvidia-smi --query-gpu=memory.used --format=csv,noheader
 |---|---|---|
 | **gf0** | Task_A 全参 fine-tune (主战, 华东) | 50k step 长训, vePFS 数据 |
 | ~~gf1~~ | 已退役 (2026-05-06) | — |
-| **gf3** | dev + smoke (单卡 H20) / volc 多卡集群训练入口 (华北) | 单卡 H20 跑小 batch smoke; 集群提交 2-7 节点 16-56 卡训练 |
+| **gsy** | 火山北京 volc 提交节点 (无本地 GPU) / Robot-North-H20 队列入口 (华北) | 数据同步+环境准备+`mlp` 提交/查/停; 训练提交 8-56 卡 `ml.hpcpni3ln.45xlarge` 节点。⚠️ gf3 (:7888) 单卡机已 2026-07 关闭 |
 | **uc01** | Advantage Estimator / AWBC 训练 + 3-host HSDP/FSDP (§13) | 数据本地, 24 GPU 集群训练 |
 | **uc02** | 同 uc01 (3-host 集群成员) | 同 |
 | **uc03** | 同 uc01 (3-host 集群成员, 原 gf4) | 同 |

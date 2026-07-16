@@ -7,8 +7,8 @@
 | Machine | GPUs | Use |
 |---------|------|-----|
 | **sim01** (di-*) | 2×RTX 5090 32GB | Inference, IPC (cameras/CAN/ROS2) |
-| **gf0/gf1** | 8×A100 80GB | Training (JAX full-ft, AWBC, AE) |
-| **gf3** | 8×H20 96GB | North-E training, root@124.174.16.237:7888 |
+| **gf0** | 8×A100 80GB | Training (JAX full-ft, AWBC, AE)。⚠️ gf1 已关闭 |
+| **gsy** | volc 提交节点(自身无 GPU) | 北京 Robot-North-H20 队列数据同步/环境准备/任务提交入口, `ssh -p 16370 root@124.174.16.237`;训练跑在 volc 分配的 8×H20 节点。⚠️ gf3 单卡机 (:7888) 已于 2026-07 关闭 |
 
 Source `setup_env.sh` first — auto-detects profile and sets `KAI0_DATA_ROOT`/`OPENPI_DATA_HOME`/`PYTORCH_CKPT_BASE`.
 
@@ -48,7 +48,7 @@ uv run python scripts/serve_policy.py --config <config> --checkpoint <ckpt> --po
 ### Deployment (sim01)
 `start_scripts/kai/`: `start_autonomy.sh`, `start_policy_node.sh`, `start_teleop.sh`, `start_data_collect.sh`, `test_inference_server.py --check latency|quality|all`
 
-### Training launchers (gf0/gf1/gf3)
+### Training launchers (gf0;北京队列经 gsy 提交 volc)
 `train_scripts/kai/launch/`: `run_gf{0,1}.sh`, `run_*.sh`, `start_train.sh`; `kai/eval/`: `eval_awbc_compare.py`, `auto_eval.sh`; `kai/data/`: `fix_data.py`, `to_tos_file.py`; `kai/monitor/`: `check_progress.py`
 
 ### Piper tools (CAN + cameras)

@@ -14,8 +14,9 @@
 # gf0 (从 sim01 / 任意公网机)
 ssh -p 55555 tim@14.103.44.161   # gf0 (反向隧道经 14.103.44.161 跳板)
 
-# gf3 (火山华北 H20 单卡机, root 直连)
-ssh -p 7888 root@124.174.16.237  # gf3, 密码 tim (建议改 key-based)
+# gsy (火山北京 volc 提交节点, root 直连) — 北京 Robot-North-H20 队列数据同步/环境准备/任务提交入口
+ssh -p 16370 root@124.174.16.237  # gsy, 凭据在 /root/.bashrc (VOLC_AK/SK); mlp CLI 在 /root/.volc/bin
+# ⚠️ gf3 (:7888) 单卡 H20 dev 机已于 2026-07 关闭, 勿再用
 
 # uc01 / uc02 / uc03 (2026-05-18 重装后, 直连, ubuntu 账户 key-based)
 ssh ubuntu@117.50.196.104   # uc01
@@ -24,7 +25,7 @@ ssh ubuntu@117.50.217.231   # uc03
 # (旧: sshpass -p tim ssh tim@... — 已废弃, tim 用户在 uc 上不存在)
 
 # 也可在 ~/.bashrc 设别名:
-alias gf3='ssh -p 7888 root@124.174.16.237'
+alias gsy='ssh -p 16370 root@124.174.16.237'   # 北京 volc 提交口;gf3 (:7888) 已关闭
 alias uc01='ssh ubuntu@117.50.196.104'   # 2026-05-18 后, key-based, 无需密码
 alias uc02='ssh ubuntu@106.75.68.254'
 alias uc03='ssh ubuntu@117.50.217.231'
@@ -33,7 +34,7 @@ alias uc03='ssh ubuntu@117.50.217.231'
 ### 4.2 用户
 
 - **gf0/sim01**: 用户名 `tim`, 密码 `tim` (有密码 sudo)
-- **gf3** (火山华北 H20): 用户名 **`root`**, 密码 `tim`。`/root/code/{README*,demo_project}` 是火山初始 demo, 我们的项目在 `/vePFS-North-E/vis_robot/` 下
+- **gsy** (火山北京 volc 提交节点): 用户名 **`root`**, 端口 `16370`。凭据(VOLC_AK/SK)在 `/root/.bashrc`,`mlp` CLI 在 `/root/.volc/bin`;项目在 `/vePFS-North-E/vis_robot/workspace/deepdive_kai0` 下(与 volc 北京队列共享盘)。⚠️ **gf3 (:7888, 火山华北 H20 单卡机) 已于 2026-07 关闭**,原经 gf3 直跑的 dev/smoke 改为经 gsy 提交 volc 任务
 - **uc01/02/03** (2026-05-18 重装后): 用户名 **`ubuntu`** (不再创建 tim), key-based 登录, 强密码已设
   - cloud-init pre-seed 了本地 dev pubkey + 团队 key (yihaochen / qiqiguaitm / tim@ipc01 等) 到 `/home/ubuntu/.ssh/authorized_keys`
   - 3 台 uc 间 ubuntu 用户 ed25519 互信已配 (详见 §4.4)
