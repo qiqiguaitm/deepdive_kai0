@@ -158,6 +158,18 @@ r(o_t) = 1/(N_ep-1) · Σ_{j≠ep(t)} exp( -dmin(o_t, E_j)² / 2σ² )
 - **volc 坑(已记忆)**:Robot-North-H20 **不支持 FlexibleResourceClaim**,必须整节点 flavor:4卡=`ml.pni3ln.17xlarge` / 8卡=`ml.hpcpni3ln.45xlarge`;`train_lawam_distributed.sh` 用 `nvidia-smi --list-gpus` 数卡(不看 CUDA_VISIBLE_DEVICES)→ 要用满 8 卡须 CUDA_VISIBLE_DEVICES=0..7。
 - 训完 → ckpt 在 North-E → 接 lawam LIBERO sim eval,和 Arm M(milestone)/ Arm B(baseline)同框架比 SR = V5 终判。监控:`mlp job get t-20260716105522-vsnqm`。
 
+### 4.8 视觉别名诊断 · image-only vs image⊕proprio ✅(2026-07-16)
+脚本 `recurrence_aliasing_diag.py` · 图 `assets/recurrence_aliasing_diag.png`。别名=图像近、真实时间远(近邻时间 std)。
+| 任务 | img time_spread | +proprio | 别名率>0.15 | corr(别名,r粗糙) |
+|---|---|---|---|---|
+| kai0 | 0.079 | 0.071 | 13% | +0.09 |
+| LIBERO-task0 | 0.059 | 0.029(-52%) | 10% | +0.07 |
+| LIBERO-task6 | 0.049 | 0.035(-29%) | 0% | +0.06 |
+| robotwin x2 | 0.11~0.12 | 0.05(-56%) | 32~36% | ~+0.03 |
+
+**结论**:①加 proprio 确实分开别名帧(中位 -52%);②别名是本体属性,robotwin 双臂最重(36%)、task6 反而最低(全局指标抓不到 mid≈end 局部窄别名);③别名几乎不腐蚀 r 场(corr≈0,r 对多 episode 取平均)。
+**判定**:保持 image-only 普适默认(r 对别名鲁棒 + img-only 世界模型已 +2.1× gain + proprio 增益历史证据小);proprio 列 robotwin opt-in(per-task z-score+l2 能量1:1 是同一普适规则,不破坏普适)。诚实保留:粗糙度指标抓不到别名的平滑偏置。
+
 ---
 
 ## 5. 已排除(勿回头,详见各 HISTORY)
