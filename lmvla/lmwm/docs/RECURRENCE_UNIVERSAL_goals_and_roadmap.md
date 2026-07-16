@@ -229,7 +229,7 @@ North-E 干净 eval(修 3 个环境坑:LIBERO config 绝对路径 / assets 缺 1
 **任务队列(V6 + 补齐)**:
 - [ ] **T1 同口径重eval**:用修好的 North-E harness 把 Arm B / Arm M 重跑到 step12500(同环境同step),坐实三臂 per-task 表(现成 armB/armM yaml + config/assets 修复,可两节点并行 ~1.7h)。
 - [ ] **T2 hint-dropout 训练**:训练 forward 加概率 p null-embedding 遮挡 milestone latent;出 p=0.15 / p=0.25 两版 ckpt。
-- [ ] **T3 自适应视界目标(新,取代门控)**:重写离线目标构造——`c(o)`=检索时间一致性,`idx_target=round(idx_local+c·(idx_ridge−idx_local))`;改 `p1_libero_rvalley_pairs.py` + 重建 `target_compact.npz`;同 M'' 架构重训一版 ckpt(vanilla 推理,零架构改)。
+- 🔄 **T3 自适应视界目标(新,取代门控)**:脚本 `p1_libero_adaptive_pairs.py`。**构造实测(2026-07-16,libero_adaptive/pairs.npz,137154对/100%覆盖)**:c 中位 **0.59**、别名帧(c<0.3)**24%**、清晰帧(c>0.7)**34%**;视界向脊靠拢比例中位 **0.59**(1=纯 M''/r脊,0=纯 t+7)→ **真连续场,未塌到任一极端**,别名帧确实收缩向 t+7。下一步:训 lmwm 生成器(adaptive)+ 建 target_compact → 同 M'' 架构重训 → T4 eval。
 - [ ] **T4 三选优 eval**:T2/T3 三版 + M'' 基线在 North-E 同口径 eval,看 task8/2/9 是否回升、task6 是否保住。
 
 ---
