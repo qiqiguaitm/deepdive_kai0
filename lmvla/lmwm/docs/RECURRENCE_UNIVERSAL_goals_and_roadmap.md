@@ -157,6 +157,8 @@ r(o_t) = 1/(N_ep-1) · Σ_{j≠ep(t)} exp( -dmin(o_t, E_j)² / 2σ² )
 - 三件套已在 North-E:`lmvla/lmwm/data/libero_rvalley/{pairs.npz,target_compact.npz(2.12GB)}` + `checkpoints/lmwm_libero_rvalley/lmwm.pt`;yaml=`train_scripts/kai/volc/lmwm_rvalley_recurridge_4h20.yaml`。
 - **volc 坑(已记忆)**:Robot-North-H20 **不支持 FlexibleResourceClaim**,必须整节点 flavor:4卡=`ml.pni3ln.17xlarge` / 8卡=`ml.hpcpni3ln.45xlarge`;`train_lawam_distributed.sh` 用 `nvidia-smi --list-gpus` 数卡(不看 CUDA_VISIBLE_DEVICES)→ 要用满 8 卡须 CUDA_VISIBLE_DEVICES=0..7。
 - 训完 → ckpt 在 North-E → 接 lawam LIBERO sim eval,和 Arm M(milestone)/ Arm B(baseline)同框架比 SR = V5 终判。监控:`mlp job get t-20260716105522-vsnqm`。
+- **✅ 训练完成(2026-07-16 08:27 UTC,12500步 5:18h)**:loss 收敛佳——total 0.2255→0.0102(22×)、distill(r-脊目标)0.725→**0.0023**(300×)、**val_loss_distill 0.604→0.0020**(无过拟合)。ckpt(job `t-...47pfw`,venv 版):`.../results/Checkpoints/libero/20260716_030632+lmwm_rvalley_recurridge_volc/checkpoints/steps_{2500..12500}_pytorch_model.pt` + `final_model/`。
+- **剩:V5 终判 = LIBERO sim eval**(Arm M''=steps_12500 vs Arm M=milestone vs Arm B=baseline 的 SR),需 lawam policy server + libero env(RESULTS 里那套本机 A100 infra)。
 
 ### 4.8 视觉别名诊断 · image-only vs image⊕proprio ✅(2026-07-16)
 脚本 `recurrence_aliasing_diag.py` · 图 `assets/recurrence_aliasing_diag.png`。别名=图像近、真实时间远(近邻时间 std)。
