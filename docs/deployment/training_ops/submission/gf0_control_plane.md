@@ -88,6 +88,22 @@ ssh gf0 "pip install --user volcengine volcengine-python-sdk"
 - **Robot-North-H20** (cn-beijing): 新, 大 (56 H20), **多机集群训练首选**, 走 `vepfs-cnbj875793a96d6b` (与 gf3 共享 FS), zone `cn-beijing-e`
 - **robot-task** (cn-shanghai): 旧, 中 (28 A100-80G), 2026-05-22 起**已大幅空闲** (20/28 free), 走 `vepfs-cnsh075262e1f815` (与 gf0 共享 FS), zone `cn-shanghai-a`
 
+#### 北京 Robot-North-H20 · 按卡数选 flavor 模板 ⭐
+
+提交 yaml 的 `TaskRoleSpecs[].Flavor` **按需要的 GPU 数选 Preset 实例**(submit_yaml.py 转 ResourceSpecId)。⚠️ 该队列**只认 Preset flavor,不支持 FlexibleResourceClaim 自定义 GpuCount**(报 "Customized resource spec is not allowed")。提交经 **gsy**(`ssh -p 16370 root@124.174.16.237`;gf3/gf1 已 2026-07 关闭)。
+
+| GPU 数 | Flavor | 规格 | 用途 | 参考 yaml |
+|---|---|---|---|---|
+| **1** | `ml.pni3ln.5xlarge` | 20 vCPU / 200 GiB / 1 H20 | **eval / smoke / 单卡推理**(别占整节点) | `eval_libero_arm*.yaml` |
+| **4** | `ml.pni3ln.17xlarge` | 4 H20 / 单节点 | 中等训练 | — |
+| **8** | `ml.hpcpni3ln.45xlarge` | 180 vCPU / 1960 GiB / 8 H20 / RDMA | 单节点训练 | `lmwm_rvalley_*8h20.yaml` |
+| **16-56** | `ml.hpcpni3ln.45xlarge` × N(`RoleReplicas: N`,N≤7) | N 节点 gang-scheduling | 多机集群训练 | `*_16gpu.yaml` |
+
+要点:
+- **eval 用 1 卡**(LIBERO harness 单 suite 不原生多卡,osmesa 并行反而更慢);多个 eval 可各占 1 卡并排跑满一节点。
+- **DDP 靠 `nvidia-smi --list-gpus | wc -l` 数卡**(不看 CUDA_VISIBLE_DEVICES)→ 要真用满 N 卡须 flavor 匹配 + `CUDA_VISIBLE_DEVICES=0..N-1`。DDP 固定步数下加卡不省墙钟(每步并行),要更快须减半步数(8卡×半步=4卡×全步同样本量)。
+- **16 卡=2 节点 gang-scheduling**:须同时凑齐 2 个干净整节点,碎片化(free 散在多机)会 Deploying 卡死无报错(见 `volc_ml_platform.md` §5.6.b)。
+
 **当前可启动并发**:
 - Beijing: 2 × 16 GPU job 或 1 × 32 GPU job
 - Shanghai: 2 × 8 GPU job 或 1 × 16 GPU job ⭐ 新增可用空间
