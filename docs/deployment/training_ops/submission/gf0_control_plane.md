@@ -175,7 +175,7 @@ alias vsubmit='ssh gf0 "cd /vePFS/tim/workspace/deepdive_kai0 && python train_sc
 > 1. **数据/代码上传站**: 本地 / uc / sim01 → 经 公网 SSH/rsync 推到 gf 上的 vePFS
 > 2. **shared vePFS R/W 入口**: volc 节点挂载 vePFS 后, 代码 + 数据 + ckpt + 日志立即可见
 > 3. **任务结果 tail 入口**: volc 节点的 stdout 重定向到 vePFS 上 `logs/`, 在 gf 跳板上 `tail -F` 即可实时看
-> 4. **single-GPU smoke test**: ⚠️ 原 gf3 (1 H20 dev 机) 已于 2026-07 关闭。Robot-North-H20 队列**无 1-GPU flavor**(最小单元整 8 卡节点 `ml.hpcpni3ln.45xlarge`),smoke 只能整节点提交并在 entrypoint 里 `CUDA_VISIBLE_DEVICES=0` pin 1 卡;经 gsy(`ssh -p 16370 root@124.174.16.237`)提交
+> 4. **single-GPU smoke / eval**: ⚠️ 原 gf3 (1 H20 dev 机) 已于 2026-07 关闭。改用 **单卡 Preset flavor `ml.pni3ln.5xlarge`(20 vCPU/200 GiB/1 H20)** 提交单卡任务(eval 本就单卡,不必占 4/8 卡节点);经 gsy(`ssh -p 16370 root@124.174.16.237`)提交。多卡:4 卡 `ml.pni3ln.17xlarge` / 8 卡 `ml.hpcpni3ln.45xlarge`
 
 **同步流程示例**:
 

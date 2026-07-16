@@ -41,7 +41,7 @@
 
 > **快速归类规则**:
 > - **gf0 (华东)** = vePFS 共享, 长跑单机训练
-> - **gsy (华北)** = 火山北京 volc 提交节点(自身无 GPU),`ssh -p 16370 root@124.174.16.237`,是 `Robot-North-H20` 队列的数据同步/环境准备/任务提交入口;训练(含 smoke)一律通过 volc submit job 启 `ml.hpcpni3ln.45xlarge` 节点(单节点 8 卡,2-7 节点 16-56 卡)。⚠️ **原 gf3 (:7888) H20 单卡 dev 机已于 2026-07 关闭** —— 该队列**没有 1-GPU flavor**,最小单元是整 8 卡节点,单卡 smoke 只能整节点 pin 1 卡
+> - **gsy (华北)** = 火山北京 volc 提交节点(自身无 GPU),`ssh -p 16370 root@124.174.16.237`,是 `Robot-North-H20` 队列的数据同步/环境准备/任务提交入口;训练/eval 通过 volc submit job 提交。⚠️ **原 gf3 (:7888) H20 单卡 dev 机已于 2026-07 关闭**。队列 flavor(Preset InstanceTypeId):**单卡 `ml.pni3ln.5xlarge`(20 vCPU/200 GiB/1 H20,eval·smoke 用它)** / 4 卡 `ml.pni3ln.17xlarge` / 8 卡 `ml.hpcpni3ln.45xlarge`(2-7 节点 16-56 卡集群训练)
 > - **uc 集群** = 自有机房, 完全独立, 200 Gb/s RoCEv2, 3 机 HSDP/FSDP (§13)
 
 ---

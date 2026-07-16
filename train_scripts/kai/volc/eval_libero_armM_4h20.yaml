@@ -12,7 +12,7 @@ Framework: "Custom"
 TaskRoleSpecs:
   - RoleName: "worker"
     RoleReplicas: 1
-    Flavor: "ml.pni3ln.17xlarge"
+    Flavor: "ml.pni3ln.5xlarge"    # 单卡 H20 (20 vCPU/200 GiB/1 GPU) — eval 本就单卡
 
 ActiveDeadlineSeconds: 43200
 EnableTensorBoard: false
