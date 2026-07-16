@@ -6,8 +6,8 @@
 # 提交: cd ~/workspace/deepdive_kai0/train_scripts/kai/volc
 #   /vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/.venv/bin/python submit_yaml.py lmwm_rvalley_recurridge_4h20.yaml
 
-TaskName: "lmwm-rvalley-recurridge-4h20"
-Description: "LMWM r-ridge recurrence Path A [V5a structural], 4×H20, 25000steps, LIBERO"
+TaskName: "lmwm-rvalley-recurridge-8h20"
+Description: "LMWM r-ridge recurrence Path A [V5a structural], 8×H20, 12500steps(=4卡25000同样本量,~2x快), LIBERO"
 Tags: []
 
 ImageUrl: "dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1"
@@ -75,7 +75,7 @@ Entrypoint: |
   done
   echo "[$(date)] preflight OK (r-ridge recurrence pairs)"
 
-  export CUDA_VISIBLE_DEVICES=0,1,2,3
+  export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
   export MASTER_PORT=29512
   export LMWM_CKPT=$LMWM/checkpoints/lmwm_libero_rvalley/lmwm.pt      # 生成器 init(r-脊pairs训)
   export LMWM_MILESTONE_TARGET=$MS/pairs.npz
@@ -87,8 +87,8 @@ Entrypoint: |
   bash train_lawam_distributed.sh \
     --config_yaml starVLA/config/training/train_libero.yaml \
     --run_id=lmwm_rvalley_recurridge_volc \
-    --trainer.max_train_steps=25000 \
-    --trainer.save_interval=5000
+    --trainer.max_train_steps=12500 \
+    --trainer.save_interval=2500
 
   echo "=== ARM M'' (r-ridge recurrence) DONE $(date -u) ==="
 
