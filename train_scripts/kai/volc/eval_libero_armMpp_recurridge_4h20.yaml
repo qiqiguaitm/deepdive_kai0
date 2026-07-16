@@ -71,14 +71,29 @@ Entrypoint: |
     echo "FATAL: LIBERO source not found at $LIBERO_SRC" >&2; exit 13
   fi
 
-  # ---- 修 LIBERO 路径: 镜像烤进的 ~/.libero/config.yaml 存的是 /home/tim 本机路径,
-  #      set_libero_default_path() 从 __file__(=North-E 安装位置)重写为 North-E 路径 ----
-  $PYTHON -c "import libero.libero as L; L.set_libero_default_path(); print('LIBERO init_states ->', L.get_libero_path('init_states'))"
+  # ---- 修 LIBERO 路径 ----
+  # 仓库内 lmvla/LIBERO/libero/config.yaml 从本机同步来, 存的是 /home/tim 绝对路径.
+  # eval harness(run_libero_suite_benchmark.sh)读 LIBERO_CONFIG_PATH=$LIBERO_HOME/libero,
+  # ensure_libero_eval_config 见 config.yaml 已存在就 return 不重写 -> 直接用绝对 North-E 路径覆盖它.
+  # libero 由 eval server 经 PYTHONPATH=$LIBERO_HOME 导入(不走 pip), 故无需装进 kai0/.venv.
+  LH=$REPO/lmvla/LIBERO
+  mkdir -p "$LH/libero"
+  {
+    echo "benchmark_root: $LH/libero/libero"
+    echo "bddl_files: $LH/libero/libero/bddl_files"
+    echo "init_states: $LH/libero/libero/init_files"
+    echo "datasets: $LH/libero/libero/../datasets"
+    echo "assets: $LH/libero/libero/assets"
+  } > "$LH/libero/config.yaml"
+  rm -f /root/.libero/config.yaml 2>/dev/null || true
+  echo "LIBERO config.yaml -> absolute North-E ($LH/libero/libero)"
+  grep -H init_states "$LH/libero/config.yaml"
+  [ -f "$LH/libero/libero/init_files/libero_10/LIVING_ROOM_SCENE2_put_both_the_alphabet_soup_and_the_tomato_sauce_in_the_basket.pruned_init" ] \
+    && echo "init_files present OK" || echo "FATAL: init_files still missing"
 
   # ---- 验证 ----
   cd $REPO/lmvla/lawam
   $PYTHON -c "from starVLA.model.framework.vlas.lawam import LatentWorldPolicyBackend; print('Backend OK')"
-  $PYTHON -c "import libero, robosuite, mujoco; print('LIBERO OK')"
 
   # ---- ckpt: r-脊 Arm M'' steps_12500 ----
   LMWM=$REPO/lmvla/lmwm
