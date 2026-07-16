@@ -1,0 +1,91 @@
+# V6-T2 hint-dropout p=0.25: r-脊 recurrence + 训练时以概率0.25把 milestone hint 替成 null embedding
+# 目的: 策略不完全依赖 hint -> 坏 hint(别名任务 task8/2/9)不再致命, 回退 base VLA 能力(见 RECURRENCE §4.9 V6)
+# 与 lmwm_rvalley_recurridge 唯一差别: export LMWM_HINT_DROPOUT=0.25 (config_builder 覆盖 flow.cfg_drop_prob)
+# 提交: cd ~/workspace/deepdive_kai0/train_scripts/kai/volc
+#   ~/workspace/deepdive_kai0/kai0/.venv/bin/python submit_yaml.py lmwm_rvalley_hintdrop025_8h20.yaml
+
+TaskName: "lmwm-rvalley-hintdrop025-8h20"
+Description: "V6 hint-dropout p=0.25 on r-ridge, 8xH20 12500steps, LIBERO"
+Tags: []
+
+ImageUrl: "dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1"
+ResourceQueueName: "Robot-North-H20"
+Framework: "PyTorch"
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 1
+    Flavor: "ml.hpcpni3ln.45xlarge"
+
+ActiveDeadlineSeconds: 43200
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnbj875793a96d6b"
+    MountPath: "/vePFS-North-E/vis_robot"
+    SubPath: "/vis_robot"
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: PYTHONUNBUFFERED
+    Value: "1"
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+  - Name: TOKENIZERS_PARALLELISM
+    Value: "false"
+  - Name: OMP_NUM_THREADS
+    Value: "8"
+
+Entrypoint: |
+  set -uo pipefail
+  REPO=/vePFS-North-E/vis_robot/workspace/deepdive_kai0
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  LOG_DIR=$REPO/lmvla/lawam/logs/volc_dualarm
+  mkdir -p "$LOG_DIR"
+  LOG="$LOG_DIR/hintdrop025_${STAMP}.log"
+  exec >> "$LOG" 2>&1
+  set -x
+  echo "=== V6 hint-dropout p=0.25 (r-ridge, 8gpu) start $(date -u) ==="
+
+  export PYTHON=$REPO/kai0/.venv/bin/python
+  export PATH=$REPO/kai0/.venv/bin:$PATH
+  cd $REPO/lmvla/lawam
+
+  nvidia-smi -L | head
+  $PYTHON -c "import torch, transformers, accelerate; print(f'torch={torch.__version__} tf={transformers.__version__} acc={accelerate.__version__} cuda={torch.cuda.is_available()}')"
+  $PYTHON -c "from starVLA.model.framework.vlas.lawam import LatentWorldPolicyBackend; print('LatentWorldPolicyBackend import OK')"
+
+  LMWM=$REPO/lmvla/lmwm
+  MS=$LMWM/data/libero_rvalley
+  for f in "$LMWM/checkpoints/lmwm_libero_rvalley/lmwm.pt" "$MS/pairs.npz" "$MS/target_compact.npz"; do
+    [ -f "$f" ] || { echo "FATAL: $f missing" >&2; exit 13; }
+  done
+  echo "[$(date)] preflight OK (r-ridge pairs, hint-dropout p=0.25)"
+
+  export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+  export MASTER_PORT=29514
+  export LMWM_CKPT=$LMWM/checkpoints/lmwm_libero_rvalley/lmwm.pt
+  export LMWM_MILESTONE_TARGET=$MS/pairs.npz
+  export LMWM_TARGET_COMPACT=$MS/target_compact.npz
+  export LMWM_ADAPTER_DIR=$REPO/lmvla/lawam
+  export LMWM_SWAP_TEACHER=1
+  export LMWM_HINT_DROPOUT=0.25          # V6: flow cfg_drop_prob=0.25 (per-sample null-embedding hint dropout)
+  export LAWAM_RUN_TIMESTAMP=${STAMP}
+
+  bash train_lawam_distributed.sh \
+    --config_yaml starVLA/config/training/train_libero.yaml \
+    --run_id=lmwm_rvalley_hintdrop025_volc \
+    --trainer.max_train_steps=12500 \
+    --trainer.save_interval=2500
+
+  echo "=== V6 hint-dropout p=0.25 DONE $(date -u) ==="
+
+RetryOptions:
+    EnableRetry: false
+    MaxRetryTimes: 0
+
+AccessType: "Public"
