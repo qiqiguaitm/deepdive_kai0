@@ -70,14 +70,25 @@ Entrypoint: |
     echo "FATAL: LIBERO source not found at $LIBERO_SRC" >&2; exit 13
   fi
 
-  # ---- 验证 server + client 依赖 ----
+  # ---- 修 LIBERO 路径(绝对 North-E; assets PNG 已同步到共享盘) ----
+  LH=$REPO/lmvla/LIBERO
+  mkdir -p "$LH/libero"
+  {
+    echo "benchmark_root: $LH/libero/libero"
+    echo "bddl_files: $LH/libero/libero/bddl_files"
+    echo "init_states: $LH/libero/libero/init_files"
+    echo "datasets: $LH/libero/libero/../datasets"
+    echo "assets: $LH/libero/libero/assets"
+  } > "$LH/libero/config.yaml"
+  rm -f /root/.libero/config.yaml 2>/dev/null || true
+
+  # ---- 验证 ----
   cd $REPO/lmvla/lawam
   $PYTHON -c "from starVLA.model.framework.vlas.lawam import LatentWorldPolicyBackend; print('Backend OK')"
-  $PYTHON -c "import libero, robosuite, mujoco; print('LIBERO OK')"
 
-  # ---- 环境变量 ----
+  # ---- 环境变量 (Arm M milestone @ step25000 = 4卡100k样本, 与 M'' 8卡12500同口径) ----
   LMWM=$REPO/lmvla/lmwm
-  CKPT=$REPO/lmvla/lawam/results/Checkpoints/libero/20260714_044516+lmwm_milestone_pathA_volc/checkpoints/steps_20000_pytorch_model.pt
+  CKPT=$REPO/lmvla/lawam/results/Checkpoints/libero/20260714_044516+lmwm_milestone_pathA_volc/checkpoints/steps_25000_pytorch_model.pt
   [ -f "$CKPT" ] || { echo "FATAL: ckpt missing $CKPT" >&2; exit 13; }
 
   export LMWM_CKPT=$LMWM/checkpoints/lmwm_libero_dinov3base/lmwm.pt
