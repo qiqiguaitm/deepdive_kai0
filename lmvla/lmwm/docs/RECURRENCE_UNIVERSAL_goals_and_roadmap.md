@@ -321,7 +321,20 @@ North-E 干净 eval(修 3 个环境坑:LIBERO config 绝对路径 / assets 缺 1
 
 **推翻假设**:「task8 失败=时间/进度别名」站不住脚。→ ①**value-conditioned(治时间歧义)大概率救不了 task8**;②V6 adaptive 用 c=时间一致性治 task8 也是打错靶(解释其 task8 −20);③**这个便宜离线验证省下一次白跑的 5h×N VLA 重训。**
 
-**重新诊断方向**:task8 = **全场最长任务**(成功 385 步/预算 550,余量仅 30%)+ 需**精确放两个壶**。baseline(t+7 局部)98% vs LMWM(远端 milestone)84–88%。**最可能:远端语义目标在"又长又要精确"的任务上损害精度**(呼应"LMWM=大注、task8 上大注最伤精度"),而非感知别名。**→ V7 真正该修什么,待 task8 失败 rollout 细粒度诊断(卡在哪步)定夺,不盲目上 value。**
+**重新诊断方向**:task8 = **全场最长任务**(成功 385 步/预算 550,余量仅 30%)+ 需**精确放两个壶**。baseline(t+7 局部)98% vs LMWM(远端 milestone)84–88%。**最可能:远端语义目标在"又长又要精确"的任务上损害精度**(呼应"LMWM=大注、task8 上大注最伤精度"),而非感知别名。
+
+**✅ rollout 诊断确证(2026-07-17,hintdrop ckpt task8-only eval, 存失败视频, 抽帧读图)**:2 个失败 rollout **完全一致**——
+- **抓第一个壶 → 准确放上灶台 ✅**(完全懂任务,抓放无问题);
+- **放第二个壶时失败** ❌:ep005 举着够不准(挨着第一个放不到位)/ ep011 掉了放偏(壶不在灶台)→ 磨蹭超时。
+- **不是**抓错壶/时间别名/不懂任务;**是第二个物体的精确放置失败**(场景被第一个壶占、需更精细定位)。
+- **机理坐实**:LMWM 远端 milestone hint **损害精细控制精度**(尤其第二放置);baseline 局部 t+7 让夹爪贴地保精度 → 98%。hint-dropout task8=84>adaptive78 也因偶尔回退 base 局部精度。
+
+**→ V7 重定调(2026-07-17):不是感知(value/历史治的是 task8 根本没有的感知别名),而是「远端 hint 管高层导航(task6弥散受益)、精确操控该交给局部控制(t+7式保精度)」的交接问题。**
+- ⚠️ **"距离子目标门控"不优雅**(又一个 hand-designed gate,同被否的 r/c 门控)。要**架构内生**的优雅交接:
+  - **①CFG guidance 权重(最便宜,零重训)**:hint-dropout 已训好 null embedding → 推理时 `a=a_uncond+w·(a_cond−a_uncond)`,`w<1` 降 hint 干扰。单旋钮、无逐步 gate、复用现成。先扫 w∈{0.5,0.75,1.0} 看 task8 能否升(task6 不掉太多)。
+  - **②flow 时间步内生 coarse→fine 交接(架构优雅)**:flow/diffusion 本就是**粗到精**去噪——让 hint 只在**高噪(粗)步**起强作用、**低噪(精)步**弱化 → hint 定粗轨迹、局部 obs 精修落点。**用扩散固有的 coarse-to-fine 轴当"交接",不是手写门控。**
+  - **③action-chunk 位置内生**:hint 天然更关远端 action(去哪)、近端 action 靠局部(精修);让 cross-attn 自学(hint-dropout 给激励)。
+  - value/历史(§4.11)**降级**:治感知别名,而 task8 非感知问题。
 
 **判据**:**task8 从 84 → 向 baseline 98 靠(核心)**;task6/9 红利不掉;聚合超 baseline 更多。多 seed 收口(C5)。
 **history-gate**:动手前扫 CRAVE HISTORY / §5,确认"循环 WM belief / stateful world model"未撞旧方案。
