@@ -10,8 +10,10 @@ import numpy as np
 ENC = sys.argv[1]; N_EP = int(sys.argv[2]) if len(sys.argv) > 2 else 110
 VID = "/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_base/videos/chunk-000/observation.images.top_head"
 GT  = "/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_advantage/data/chunk-000"
-OUT = f"/vePFS/tim/tmp/claude-1000/-vePFS-tim-workspace-deepdive-kai0/52e86d52-cd8c-4dfd-9952-1594aae894a2/scratchpad/kai0_aligned/{ENC}"
-STRIDE = 20
+STRIDE = int(os.environ.get("STRIDE", "20"))         # 生产协议(v1)=10(3Hz@30fps); gate 用 20
+SHARD  = os.environ.get("SHARD", "")                  # "i/n" 双卡分片, 如 0/2, 1/2
+suffix = f"_s{STRIDE}" if STRIDE != 20 else ""
+OUT = os.environ.get("OUT_DIR", f"/vePFS/tim/tmp/claude-1000/-vePFS-tim-workspace-deepdive-kai0/52e86d52-cd8c-4dfd-9952-1594aae894a2/scratchpad/kai0_aligned/{ENC}{suffix}")
 os.makedirs(OUT, exist_ok=True)
 
 # 选 ep: 从 0 号起, 有视频+有 GT parquet 的前 N_EP 条
@@ -20,7 +22,9 @@ for e in range(4000):
     if len(eps) >= N_EP: break
     if os.path.exists(f"{VID}/episode_{e:06d}.mp4") and os.path.exists(f"{GT}/episode_{e:06d}.parquet"):
         eps.append(e)
-print(f"[sel] {len(eps)} eps: {eps[0]}..{eps[-1]}", flush=True)
+if SHARD:
+    i, n = map(int, SHARD.split("/")); eps = eps[i::n]
+print(f"[sel] {len(eps)} eps: {eps[0]}..{eps[-1]} stride={STRIDE} shard={SHARD or '-'}", flush=True)
 
 def decode_stride(mp4, stride):
     import av
