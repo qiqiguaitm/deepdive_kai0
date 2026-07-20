@@ -45,7 +45,13 @@
 - DINOv3 的 HF 与 standalone 两条代码路径经实测**比特级一致**,不构成环境约束
 
 ⇒ 只要给 gf0 的 `kai0/.venv` 补 `scikit-learn==1.7.2`(与 srpo 同版本),即可统一到 2 个环境。
-**合并前应先确认**「同一脚本在两个环境产出逐字段一致」——该验证正在进行,结论落在本文件 §6。
+
+**✅ 逐字段一致性已验(2026-07-20)**:
+- **rvalley 分段/建对**:同一批 DINOv3 特征、149 ep,srpo(tf4.57.6)vs kai0/.venv(tf5.13.1)
+  段数/边界/段脊指纹**零差异**(scipy 两侧同为 1.15.3;`find_peaks`/`gaussian_filter1d` 无版本漂移)。
+  核查脚本 `lmwm/scripts/check_rvalley_env_consistency.py`。
+- **So400m 编码器**:逐行 cos=1.00000000(见 §1 备注)。
+- ⇒ **合并的技术障碍已清除**,只差给 gf0 补 sklearn 这一步操作(§6)。**srpo 仍保留**直到补包完成。
 
 ---
 
@@ -84,7 +90,7 @@
 
 ## 6. 待办
 
-- [ ] 「rvalley 在 `kai0/.venv` vs `srpo` 产出是否逐字段一致」验证完成后,决定是否合并 srpo(§3)
-- [ ] 给 gf0 的 `kai0/.venv` 补 `scikit-learn==1.7.2`(合并的前置)
+- [x] ~~「rvalley 在 `kai0/.venv` vs `srpo` 产出是否逐字段一致」~~ → **✅ 149 ep 零差异**(§3),障碍已清除
+- [ ] 给 gf0 的 `kai0/.venv` 补 `scikit-learn==1.7.2`(合并的唯一前置,纯操作)→ 补完即可退役 srpo
 - [ ] 在关键脚本头部加 transformers 版本断言
 - [ ] 落实 `_env.json` 产物元数据
