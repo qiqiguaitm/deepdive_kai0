@@ -8,8 +8,9 @@ import os, sys, glob
 import numpy as np
 
 ENC = sys.argv[1]; N_EP = int(sys.argv[2]) if len(sys.argv) > 2 else 110
-VID = "/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_base/videos/chunk-000/observation.images.top_head"
-GT  = "/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_advantage/data/chunk-000"
+CSQ = 1000  # LeRobot chunk 大小: ep e 在 chunk-{e//1000}
+VID = lambda e: f"/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_base/videos/chunk-{e//CSQ:03d}/observation.images.top_head/episode_{e:06d}.mp4"
+GT  = lambda e: f"/vePFS/tim/workspace/deepdive_kai0/kai0/data/Task_A/kai0_advantage/data/chunk-{e//CSQ:03d}/episode_{e:06d}.parquet"
 STRIDE = int(os.environ.get("STRIDE", "20"))         # 生产协议(v1)=10(3Hz@30fps); gate 用 20
 SHARD  = os.environ.get("SHARD", "")                  # "i/n" 双卡分片, 如 0/2, 1/2
 suffix = f"_s{STRIDE}" if STRIDE != 20 else ""
@@ -20,7 +21,7 @@ os.makedirs(OUT, exist_ok=True)
 eps = []
 for e in range(4000):
     if len(eps) >= N_EP: break
-    if os.path.exists(f"{VID}/episode_{e:06d}.mp4") and os.path.exists(f"{GT}/episode_{e:06d}.parquet"):
+    if os.path.exists(VID(e)) and os.path.exists(GT(e)):
         eps.append(e)
 if SHARD:
     i, n = map(int, SHARD.split("/")); eps = eps[i::n]
@@ -69,7 +70,7 @@ else:
 for n, e in enumerate(eps):
     dst = f"{OUT}/ep{e}.npz"
     if os.path.exists(dst): continue
-    frames, fidx = decode_stride(f"{VID}/episode_{e:06d}.mp4", STRIDE)
+    frames, fidx = decode_stride(VID(e), STRIDE)
     np.savez_compressed(dst, pooled=embed(frames).astype(np.float32), fidx=fidx)
     if n % 10 == 0: print(f"[{ENC}] {n+1}/{len(eps)} ep{e} n={len(fidx)}", flush=True)
 print(f"[{ENC}] ALL DONE {len(eps)} eps -> {OUT}", flush=True)
