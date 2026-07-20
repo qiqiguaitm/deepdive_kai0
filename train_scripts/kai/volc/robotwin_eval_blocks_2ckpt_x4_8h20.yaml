@@ -1,0 +1,219 @@
+# [B/RoboTwin 判决实验] 积木族 6 任务 eval, 北京 Robot-North-H20 4卡 × 4 路并行(每路独立 seed)
+#
+# 动机: LIBERO-10 已饱和(8/10 任务在 93~100, 聚合 SEM 0.3~0.6, 所有效应 <1.5pt 测不出),
+#   外部文献亦指其 "almost saturated"(LIBERO-Plus 2510.13626 / LIBERO-PRO 2510.03827)。
+#   RoboTwin 积木族的成功判据正是**相对空间关系**(谁在谁上/按尺寸排序), 且基线远未饱和,
+#   是目前唯一可能给出判决的场地。
+#
+# ★ seed 必须逐路不同 ★
+#   batched_eval_runner.py:458 `seed = int(os.getenv("SEED","0"))` —— 与 LIBERO 同款默认 0 陷阱。
+#   同 seed 重复会给出假的紧误差棒(LIBERO 实测有效 σ 差 5 倍), 故每路 SEED=$i。
+#
+# 口径: 6 任务 × ROBOTWIN_TEST_NUM 局/路 × 4 路。两个 ckpt 各提交一个本模板的实例, 完全同口径。
+
+TaskName: "robotwin-eval-blocks-2ckpt-x4"
+Description: "RoboTwin积木6任务: LMWM dual2q vs LaWM baseline, 8卡=2ckpt×4变seed, 同一环境同口径"
+Tags: []
+
+ImageUrl: "dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1"
+ResourceQueueName: "Robot-North-H20"
+Framework: "PyTorch"
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 1
+    Flavor: "ml.hpcpni3ln.45xlarge"   # 8×H20 整节点(已验证; 该队列无可用 4 卡规格,
+    #   实测 ml.pni3ln.20xlarge 报 InvalidParameter: flavorId; 5xlarge=1卡)
+
+ActiveDeadlineSeconds: 86400
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnbj875793a96d6b"
+    SubPath: "/vis_robot"
+    MountPath: "/vePFS-North-E/vis_robot"
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: PYTHONUNBUFFERED
+    Value: "1"
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+  - Name: TOKENIZERS_PARALLELISM
+    Value: "false"
+
+Entrypoint: |
+  set -uo pipefail
+  REPO=/vePFS-North-E/vis_robot/workspace/deepdive_kai0
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  LOG_DIR=$REPO/lmvla/lawam/logs/volc_rteval
+  mkdir -p "$LOG_DIR"
+  LOG="$LOG_DIR/rteval2x4_${STAMP}.log"
+  exec >> "$LOG" 2>&1
+  set -x
+  echo "=== RoboTwin 积木6任务 eval: 2ckpt×4seed start $(date -u) ==="
+
+  mkdir -p /home/tim/workspace && ln -sfn $REPO /home/tim/workspace/deepdive_kai0
+
+  export PYTHON=$REPO/kai0/.venv/bin/python
+  export PATH=$REPO/kai0/.venv/bin:$PATH
+  export STAR_VLA_PYTHON=$PYTHON
+  cd $REPO/lmvla/lawam
+
+  NE=$REPO/lmvla/lawam/results/Checkpoints/robotwin
+  CKPT_A=$NE/20260719_123516+robotwin_baseline_lawm_northe/checkpoints/steps_20000_pytorch_model.pt   # LaWM baseline
+  CKPT_B=$NE/rt_lmwm_dual2q_20k/checkpoints/steps_20000_pytorch_model.pt                              # LMWM dual2q
+  NREP=4
+
+  nvidia-smi -L | head -8
+  for C in "$CKPT_A" "$CKPT_B"; do
+    [ -f "$C" ] || { echo "FATAL: ckpt 不存在 $C" >&2; exit 13; }
+    D=$(dirname $(dirname "$C"))
+    for f in config.yaml dataset_statistics.json; do
+      [ -f "$D/$f" ] || { echo "FATAL: 缺 $D/$f (from_pretrained 必需, 不是 config.json)" >&2; exit 13; }
+    done
+  done
+
+  export ROBOTWIN_PATH=/vePFS-North-E/vis_robot/huanqian/RoboTwin   # 与 huanqian conda env 配套(curobo 解析到此)
+  [ -d "$ROBOTWIN_PATH/envs" ] || { echo "FATAL: RoboTwin 不存在 $ROBOTWIN_PATH" >&2; exit 13; }
+  export ROBOTWIN_TASKS="beat_block_hammer blocks_ranking_size blocks_ranking_rgb handover_block stack_blocks_two stack_blocks_three"
+  for t in $ROBOTWIN_TASKS; do
+    [ -f "$ROBOTWIN_PATH/envs/$t.py" ] || { echo "FATAL: 缺任务 $t" >&2; exit 13; }
+  done
+  export TASK_CONFIG=demo_clean
+  export ROBOTWIN_TEST_NUM=50          # 每任务每路 50 局 → 6×50×4 = 1200 局/ckpt
+  # ★ 每路只给 1 张卡, 故 slots=1: 上一版 slots=7 让**每路内部又起 8 个 worker、各自加载一份 policy server**
+  #   (8路×8worker=64 份模型), 且 6 个任务分给 8 个 worker 时后两个空转。
+  export ROBOTWIN_NUM_SLOTS=1
+  # ★ 真正控制 worker 数的是 NUM_WORKERS(batched_eval_runner.py:667 默认 len(gpu_ids)*3;
+  #   实测每路仍起 8 个 worker、各自加载一份 policy server)。每路独占 1 卡, 故设 1。
+  export NUM_WORKERS=1
+  # 端口回退搜索上限压到 < 各路端口间距(40), 防止某路占用冲突时向前漫游进邻路段位
+  # 而连上错误的 server —— 宁可 fail-fast 也不要再出现 client/server 串台。
+  export PORT_SEARCH_LIMIT=30
+  export ROBOTWIN_SAVE_VIDEO=0
+
+  # ★★ RoboTwin 仿真侧必须用**独立解释器**(sapien/mplib/curobo 不在 kai0 venv 里) ★★
+  #   仓库自带的 robotwin_python_wrapper.sh 全是 cnsh 路径(/vePFS/HuanQian/...), 本集群不存在,
+  #   故用 North-E 版 wrapper(huanqian conda env + vulkan icd + tim/robotwin_client_deps)。
+  #   不设此项 → 报 ModuleNotFoundError: No module named 'sapien'(2026-07-20 踩过)。
+  export ROBOTWIN_PYTHON=$REPO/lmvla/lawam/robotwin_python_wrapper_northe.sh
+  [ -x "$ROBOTWIN_PYTHON" ] || { echo "FATAL: wrapper 不可执行 $ROBOTWIN_PYTHON" >&2; exit 13; }
+  "$ROBOTWIN_PYTHON" -c "import sapien, mplib, json_numpy" 2>/dev/null || { echo "FATAL: wrapper 缺 sapien/mplib/json_numpy" >&2; exit 13; }
+  # curobo 需 JIT 编译 CUDA 扩展; 显式给 H20 架构避免 arch 探测为空
+  export TORCH_CUDA_ARCH_LIST="9.0"
+
+  echo "[$(date)] preflight OK; A=$CKPT_A"
+  echo "[$(date)] preflight OK; B=$CKPT_B"
+  echo "[$(date)] tasks=$ROBOTWIN_TASKS"
+
+  LMWM_PT=$REPO/lmvla/lmwm/checkpoints/lmwm_robotwin_rvalley/lmwm.pt
+  [ -f "$LMWM_PT" ] || { echo "FATAL: LMWM 权重不存在 $LMWM_PT" >&2; exit 13; }
+
+  pids=""
+  for i in $(seq 0 $((NREP-1))); do
+    # ---- A 臂: LaWM baseline (GPU 0..3) ----
+    (
+      export CUDA_VISIBLE_DEVICES=$i
+      export SEED=$i
+      # ★★ 每路必须独立端口段 ★★ batched_eval_runner.py:453 `PORT_BASE` 默认 6694,
+      #   requested_port = PORT_BASE + worker_index。8 路全用默认值 → 客户端连到别路的 server,
+      #   实测报 "Checkpoint mismatch between eval client and server"(A 臂连上了 B 臂的模型)。
+      #   幸有该校验拦截, 否则会产出"baseline 成绩实为 LMWM 跑出"的污染数据且表面正常。
+      export PORT_BASE=$((6700 + i*40))
+      # ★ 纯 LaWM: 清空所有 LMWM 注入(留任何一个都会 state_dict size mismatch)
+      unset LMWM_CKPT LMWM_ADAPTER_DIR LMWM_SWAP_TEACHER LMWM_DUAL LMWM_DUAL_2Q \
+            LMWM_MILESTONE_TARGET LMWM_TARGET_COMPACT LMWM_MS_TSCHED LMWM_HINT_DROPOUT LMWM_FEAT_STRIDE
+      export ROBOTWIN_EVAL_ROOT=$REPO/lmvla/lawam/results/eval_runs/robotwin/rt_baseline_lawm/seed$i
+      mkdir -p "$ROBOTWIN_EVAL_ROOT"
+      echo "[A/baseline seed$i] GPU=$i 启动 $(date -u)"
+      bash examples/Robotwin/eval_files/auto_eval_scripts/auto_eval_robotwin.sh "$CKPT_A" "$TASK_CONFIG" "seed$i"
+      echo "[A/baseline seed$i] 结束 rc=$? $(date -u)"
+    ) > "$LOG_DIR/rteval2x4_${STAMP}_A_seed${i}.log" 2>&1 &
+    pids="$pids $!"
+    # ---- B 臂: LMWM dual2q (GPU 4..7) ----
+    (
+      export CUDA_VISIBLE_DEVICES=$((i+NREP))
+      export SEED=$i
+      export PORT_BASE=$((6700 + (i+NREP)*40))   # 与 A 臂错开(见 A 臂注释)
+      # ★ 架构相关 env 必须与训练一致; 训练期目标(MILESTONE_TARGET/TARGET_COMPACT)推理不需要
+      export LMWM_CKPT=$LMWM_PT
+      export LMWM_ADAPTER_DIR=$REPO/lmvla/lawam
+      export LMWM_SWAP_TEACHER=1
+      export LMWM_DUAL=1
+      export LMWM_DUAL_2Q=1
+      export LMWM_FEAT_STRIDE=1
+      unset LMWM_MILESTONE_TARGET LMWM_TARGET_COMPACT LMWM_MS_TSCHED LMWM_HINT_DROPOUT
+      export ROBOTWIN_EVAL_ROOT=$REPO/lmvla/lawam/results/eval_runs/robotwin/rt_lmwm_dual2q/seed$i
+      mkdir -p "$ROBOTWIN_EVAL_ROOT"
+      echo "[B/lmwm seed$i] GPU=$((i+NREP)) 启动 $(date -u)"
+      bash examples/Robotwin/eval_files/auto_eval_scripts/auto_eval_robotwin.sh "$CKPT_B" "$TASK_CONFIG" "seed$i"
+      echo "[B/lmwm seed$i] 结束 rc=$? $(date -u)"
+    ) > "$LOG_DIR/rteval2x4_${STAMP}_B_seed${i}.log" 2>&1 &
+    pids="$pids $!"
+    sleep 25
+  done
+  echo "[$(date)] 已起 8 路(2ckpt×4seed): $pids"
+  for p in $pids; do wait $p; done
+  echo "[$(date)] 全部 8 路结束"
+
+  $PYTHON - <<'PYEOF'
+  import json, glob, os, statistics as st
+  base = f"{os.environ['REPO']}/lmvla/lawam/results/eval_runs/robotwin"
+  def collect(group):
+      out = {}
+      for f in sorted(glob.glob(f"{base}/{group}/seed*/**/*.json", recursive=True)):
+          try: d = json.load(open(f))
+          except Exception: continue
+          if not isinstance(d, dict): continue
+          sd = f.split("/seed")[1].split("/")[0]
+          for k, v in d.items():
+              if isinstance(v, dict) and "success_rate" in v:
+                  out.setdefault(sd, {})[k] = float(v["success_rate"])
+      return out
+  A, B = collect("rt_baseline_lawm"), collect("rt_lmwm_dual2q")
+  print("\n========== RoboTwin 积木6任务 · 2ckpt × 4变seed ==========")
+  if not A and not B:
+      print("⚠️ 未解析到结果 json —— 人工查看 results/eval_runs/robotwin/ 输出结构")
+  for name, D in (("A: LaWM baseline", A), ("B: LMWM dual2q", B)):
+      print(f"\n--- {name} (n={len(D)} seeds)")
+      tasks = sorted({t for v in D.values() for t in v})
+      for sd in sorted(D):
+          print(f"  seed{sd}: " + " ".join(f"{t}={D[sd].get(t, float('nan')):.2f}" for t in tasks))
+      for t in tasks:
+          vs = [D[s][t] for s in D if t in D[s]]
+          if len(vs) >= 2:
+              print(f"    {t:24s} 均值={st.mean(vs):6.3f} std={st.pstdev(vs):5.3f}")
+  ta = sorted(set(t for v in A.values() for t in v) & set(t for v in B.values() for t in v))
+  if ta and len(A) >= 2 and len(B) >= 2:
+      import math
+      print("\n--- B(LMWM) − A(baseline) 逐任务 Welch t ---")
+      for t in ta:
+          a = [A[s][t] for s in A if t in A[s]]; b = [B[s][t] for s in B if t in B[s]]
+          if len(a) < 2 or len(b) < 2: continue
+          se = math.sqrt(st.stdev(a)**2/len(a) + st.stdev(b)**2/len(b))
+          d = st.mean(b) - st.mean(a)
+          tt = d/se if se > 1e-9 else float('inf')
+          sig = "***" if abs(tt) > 4 else "**" if abs(tt) > 2.8 else "*" if abs(tt) > 2.1 else "ns"
+          print(f"  {t:24s} Δ={d:+7.3f} SE={se:5.3f} t={tt:+6.2f} {sig}")
+      aa = [st.mean([A[s][t] for t in ta if t in A[s]]) for s in A]
+      bb = [st.mean([B[s][t] for t in ta if t in B[s]]) for s in B]
+      se = math.sqrt(st.stdev(aa)**2/len(aa) + st.stdev(bb)**2/len(bb))
+      d = st.mean(bb) - st.mean(aa); tt = d/se if se > 1e-9 else float('inf')
+      print(f"\n  聚合(6任务均值): A={st.mean(aa):.3f}±{st.pstdev(aa):.3f}  B={st.mean(bb):.3f}±{st.pstdev(bb):.3f}")
+      print(f"  Δ(B−A)={d:+.3f} SE={se:.3f} t={tt:+.2f}")
+      print("\n  ★判据: 本基准未饱和, 若 LMWM 在此仍无显著增益, 则应停止继续加 LMWM 变体。")
+  print("==========================================================\n")
+  PYEOF
+
+  echo "=== RoboTwin eval 2ckpt×4seed DONE $(date -u) ==="
+
+RetryOptions:
+    EnableRetry: false
+    MaxRetryTimes: 0
+
+AccessType: "Public"

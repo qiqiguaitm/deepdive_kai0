@@ -1,0 +1,132 @@
+# [2026-07-20] ★★ 官方配方精确复刻 —— 排查"我方 LaWM 比官方低 5pt(t6)"的根因 ★★
+#
+# 已排除: 样本量(8卡×12500 = 4卡×25000 = 3.2M, 相同)、配置文件(与官方逐字节同)、代码版本、依赖版本。
+# 现存假设: **8卡×12500 与 4卡×25000 在优化上并不等价**
+#   · global batch 128 → 256, 而 lr 恒 1e-4 且训练器**无任何 world_size 缩放逻辑**(已 grep 确认)
+#     → 线性缩放律下等效 lr 偏低约 2×
+#   · warmup 占比 1500/25000=6.0% → 1500/12500=12.0%, cosine 衰减被压进一半步数 → 调度形状不同
+# 这可同时解释: 我方**全部**臂(均 8卡×12500)聚合低官方 1~2pt, 而最难的 t6 低 5pt。
+#
+# 本任务: 一个 8 卡节点跑两个 4 卡训练, 精确复刻官方 4卡×25000:
+#   GPU 0-3 = armB 纯 LaWM   GPU 4-7 = dual2q LMWM
+# 判据: ① armB t6 若回到 ~85 ⇒ 根因确为优化不等价, 此前所有跨臂结论须在此配方下重测
+#       ② 同配方下 LMWM vs LaWM 的差值 = LMWM 的**真实**收益(不再被弱基线夸大)
+
+TaskName: "libero-official-recipe-4gpu25000-2arms"
+Description: "官方配方精确复刻: 4卡x25000 x2臂(armB LaWM / dual2q LMWM), 同节点8卡"
+Tags: []
+
+ImageUrl: "dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1"
+ResourceQueueName: "Robot-North-H20"
+Framework: "PyTorch"
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 1
+    Flavor: "ml.hpcpni3ln.45xlarge"   # 8×H20 整节点(Robot-North-H20 不支持 FlexibleResourceClaim)
+
+ActiveDeadlineSeconds: 43200   # 12h
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnbj875793a96d6b"
+    MountPath: "/vePFS-North-E/vis_robot"
+    SubPath: "/vis_robot"
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: PYTHONUNBUFFERED
+    Value: "1"
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+  - Name: TOKENIZERS_PARALLELISM
+    Value: "false"
+  - Name: OMP_NUM_THREADS
+    Value: "8"
+
+Entrypoint: |
+  set -uo pipefail
+  REPO=/vePFS-North-E/vis_robot/workspace/deepdive_kai0
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  LOG_DIR=$REPO/lmvla/lawam/logs/volc_dualarm
+  mkdir -p "$LOG_DIR"
+  LOG="$LOG_DIR/officialrecipe_dual_2q_tsched_cnbj_${STAMP}.log"
+  exec >> "$LOG" 2>&1
+  set -x
+  echo "=== V8 机制2 tsched (cnbj 8×H20) start $(date -u) ==="
+
+  export PYTHON=$REPO/kai0/.venv/bin/python
+  export PATH=$REPO/kai0/.venv/bin:$PATH
+  cd $REPO/lmvla/lawam
+
+  nvidia-smi -L | head
+  $PYTHON -c "import torch, transformers, accelerate; print(f'torch={torch.__version__} tf={transformers.__version__} acc={accelerate.__version__} cuda={torch.cuda.is_available()}')"
+  $PYTHON -c "from starVLA.model.framework.vlas.lawam import LatentWorldPolicyBackend; print('LatentWorldPolicyBackend import OK')"
+
+  LMWM=$REPO/lmvla/lmwm
+  MS=$LMWM/data/libero_rvalley
+  for f in "$LMWM/checkpoints/lmwm_libero_rvalley/lmwm.pt" "$MS/pairs.npz" "$MS/target_compact.npz"; do
+    [ -f "$f" ] || { echo "FATAL: $f missing" >&2; exit 13; }
+  done
+  echo "[$(date)] preflight OK (dual-2q-tsched, rvalley pairs)"
+
+  export LAWAM_RUN_TIMESTAMP=${STAMP}
+  LMWM_PT=$LMWM/checkpoints/lmwm_libero_rvalley/lmwm.pt
+
+  pids=""
+  # ---------- A 臂: armB 纯 LaWM, GPU 0-3 ----------
+  (
+    export CUDA_VISIBLE_DEVICES=0,1,2,3
+    export MASTER_PORT=29601
+    # 纯 LaWM: 清空全部 LMWM 注入(留任何一个都会改变架构/变成 LMWM 臂)
+    unset LMWM_CKPT LMWM_MILESTONE_TARGET LMWM_TARGET_COMPACT LMWM_ADAPTER_DIR LMWM_SWAP_TEACHER \
+          LMWM_DUAL LMWM_DUAL_2Q LMWM_MS_TSCHED LMWM_HINT_DROPOUT LMWM_FEAT_STRIDE
+    echo "[A/armB] 4卡 x 25000 启动 $(date -u)"
+    bash train_lawam_distributed.sh \
+      --config_yaml starVLA/config/training/train_libero.yaml \
+      --run_id=armB_lawm_official_recipe \
+      --trainer.max_train_steps=25000 \
+      --trainer.save_interval=5000
+    echo "[A/armB] 结束 rc=$? $(date -u)"
+  ) > "$LOG_DIR/officialrecipe_${STAMP}_A_armB.log" 2>&1 &
+  pids="$pids $!"
+  sleep 30
+
+  # ---------- B 臂: dual2q LMWM, GPU 4-7 ----------
+  (
+    export CUDA_VISIBLE_DEVICES=4,5,6,7
+    export MASTER_PORT=29611
+    export LMWM_CKPT=$LMWM_PT
+    export LMWM_MILESTONE_TARGET=$MS/pairs.npz
+    export LMWM_TARGET_COMPACT=$MS/target_compact.npz
+    export LMWM_ADAPTER_DIR=$REPO/lmvla/lawam
+    export LMWM_SWAP_TEACHER=1
+    export LMWM_DUAL=1
+    export LMWM_DUAL_2Q=1
+    export LMWM_HINT_DROPOUT=0.15
+    unset LMWM_MS_TSCHED
+    echo "[B/dual2q] 4卡 x 25000 启动 $(date -u)"
+    bash train_lawam_distributed.sh \
+      --config_yaml starVLA/config/training/train_libero.yaml \
+      --run_id=dual2q_lmwm_official_recipe \
+      --trainer.max_train_steps=25000 \
+      --trainer.save_interval=5000
+    echo "[B/dual2q] 结束 rc=$? $(date -u)"
+  ) > "$LOG_DIR/officialrecipe_${STAMP}_B_dual2q.log" 2>&1 &
+  pids="$pids $!"
+
+  echo "[$(date)] 已起 2 臂(各4卡x25000 = 官方配方): $pids"
+  for p in $pids; do wait $p; done
+  echo "[$(date)] 两臂均结束"
+
+  echo "=== V8 机制2 tsched (cnbj) DONE $(date -u) ==="
+
+RetryOptions:
+    EnableRetry: false
+    MaxRetryTimes: 0
+
+AccessType: "Public"
