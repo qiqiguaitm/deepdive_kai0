@@ -558,6 +558,11 @@ kai0 末帧被机械臂**回 home** 污染,而 home 姿态跨 ep 复现度极高
 3. 幅值细腻度:So400m-mean ≈ DINOv3 的 70%(std .064 vs .091),可接受;SigLIP2-base 最钝。
 **下一步(层3)**:So400m-mean 重建 kai0/LIBERO 的 r-谷/r-脊 pairs → LMWM 生成器在该空间重训 → kai0 value/AWBC 或 pi05 条件化实验。(注意:LMWM×LaWAM P1 线保持 DINOv3 不动——那是与 LaWM 同空间对照的设计要求。)
 
+**层3-A线 gate(2026-07-20,用户拍板走 A线=kai0 pi05-AWBC)**:v1 value 管线(gen_final_v3 配方逐行照抄)换特征空间,同协议 A/B:
+- @110ep/stride20(8k帧):**协议无效**——BGMM 双空间全塌(dino eff=1!),样本量不足,非空间问题。教训:v1 配方有最低样本量门槛。
+- @800ep/stride20(59k帧):结构恢复(dino M=10 / so400m-mean M=8),corr(med) **0.457 vs 0.429(−6%)** → **So400m-mean 保住 ~94% 标签质量,绿灯**。绝对值低于生产 0.943 是协议差(1.5Hz vs 3Hz+样本),两空间同等受制不影响判定。
+- 全量:3055ep×**stride10(3Hz 生产协议)** so400m-mean 双卡抽取中 → `kai0_aligned_urvc/so400m-mean_s10/`;后接 v1 管线出 So400m-value 标签 → AWBC 训 pi05(volc,mkyaml.py 生成 yaml)vs 现行 DINOv3-value 臂。脚本 `kai0_v1gate_space.py`(hash 0cc3e1a 起含 STRIDE/SHARD)。
+
 ---
 
 ## 5. 已排除(勿回头,详见各 HISTORY)
