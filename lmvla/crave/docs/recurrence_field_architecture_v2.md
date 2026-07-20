@@ -52,3 +52,10 @@ r(o_t) = 1/(N_ep−1) · Σ_{j≠ep(t)} exp( −dmin(o_t, E_j)² / 2σ² )
 | 阶段代表 | 簇(coverage 筛选的 mode) | **r-脊帧**(无聚类) |
 | 已知失效 | LIBERO 塌 M=1;coverage 门槛塌 M=2 | task8 型"同物二次操作"别名(V7/V8 在解) |
 | 后续 | 维持现状,不再迭代 | 主线,见 lmwm roadmap §3 路线图 |
+
+## 5. ⚠️ 直接对标:UR-VC(2026-07-14 先发,必读)
+
+**UR-VC**(arXiv 2607.12892,HKU/OpenDriveLab,Ping Luo 组):免训练跨-ep 检索(SigLIP-2,**per-episode 1-NN**,时间带 τ=0.3,ρ=0.90)→ **平均匹配帧的归一化时间** = 修正 progress → advantage 喂 π0.5,真机双臂布料折叠。
+- **对 v1 的冲击最大**:它 ≈ "无聚类版的 v1 value 读出"(v1 的 milestone median-T ≈ 它的匹配帧时间均值),且"零训练+跨-ep+无标签"叙事已被先发。
+- **v2 的差异仍在**:密度场(时间无关)vs 时间标签去噪;三读法结构 vs 标量;无时间带 vs τ-hack;跨本体 + 蒸馏 LMWM。
+- **行动**:UR-VC = 必做 baseline(6 公式可复现)+ 前置引用。positioning 详见 lmwm roadmap §6.2/6.4/6.5(2026-07-20 更新)。
