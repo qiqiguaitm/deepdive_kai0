@@ -14,7 +14,7 @@ from scipy.ndimage import gaussian_filter1d
 REPO = "/vePFS/tim/workspace/deepdive_kai0"
 FEAT = f"{REPO}/lmvla/lmwm/data/kai0_aligned_urvc/so400m-mean_s10"
 OUTD = f"{REPO}/lmvla/lmwm/data/kai0_so400m_value_labels"
-PROD = f"{REPO}/lmvla/crave/temp/crave_ae_labels/final"     # 生产 DINOv3 标签(参照)
+PROD = f"{REPO}/lmvla/crave/temp/crave_ae_labels/polyline"  # 生产 DINOv3 标签(polyline 去阶梯版=喂 AWBC CRAVE_POLY 的那份)
 CSQ, MIN_COV, LAM = 1000, 0.50, 16.0
 DS = lambda e: f"{REPO}/kai0/data/Task_A/kai0_base/data/chunk-{e//CSQ:03d}/episode_{e:06d}.parquet"
 GTP = lambda e: f"{REPO}/kai0/data/Task_A/kai0_advantage/data/chunk-{e//CSQ:03d}/episode_{e:06d}.parquet"
