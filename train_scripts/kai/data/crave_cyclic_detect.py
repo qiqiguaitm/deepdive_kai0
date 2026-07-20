@@ -1,6 +1,6 @@
 """步骤1: 量化循环簇(成员时间多峰=重复动作)。全量 image⊕proprio 聚类, 每簇成员时间 GMM 1vs2 峰检测。
 统计: 循环簇数 / 其中多少被纯度闸(tstd≤P60)滤掉 / 典型动作。出图: top 循环簇 medoid + 时间双峰直方。
-跑法: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_cyclic_detect.py
+跑法: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_cyclic_detect.py
 """
 import sys, glob, time
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")

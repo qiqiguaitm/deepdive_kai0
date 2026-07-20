@@ -1,7 +1,7 @@
 """聚类质量对比:DINOv2-large vs 全-Wan2.2-latent,谁的 milestone 更"按任务相位"(决定要不要上 8 卡全 Wan)。
 同一批 ep:train 聚类 → held-out test 上 value=最近簇 tpos,测 corr(value,时间)+ 单调性 + 时间纯度。
 高 corr / 高单调 / 低簇内时间std = milestone 更贴进度 = "提升"。
-跑法: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_cluster_quality.py [--n 140]
+跑法: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_cluster_quality.py [--n 140]
 """
 import sys, argparse, time, json
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")

@@ -1,6 +1,6 @@
 """步骤2: 多模态 milestone 放置(循环簇=相对value)。对循环簇按成员时间 GMM 取多峰, 每峰放一个 emit 锚点。
 ep2302 对比: 单模态(Pord 一个bin) vs 多模态(循环簇多bin)。验证 value 是否更顺 + advantage 密度是否升 + 仍 0→1。
-跑法: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_multimode_test.py
+跑法: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_multimode_test.py
 """
 import sys, glob, time
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")

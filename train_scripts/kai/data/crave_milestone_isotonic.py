@@ -2,7 +2,7 @@
   - 改了哪几个 milestone 的 value、改多少
   - advantage(相邻 milestone 间距)是否保住:原间距 vs isotonic 间距
 isotonic = 把度量 value Pk 沿 precedence 序做保序回归(PAVA)→ 仅把逆序的几个并到单调水平, 其余精确保留。
-跑法: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_milestone_isotonic.py
+跑法: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_milestone_isotonic.py
 """
 import sys, glob, json, time
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")

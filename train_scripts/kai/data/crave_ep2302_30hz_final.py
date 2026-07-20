@@ -4,7 +4,7 @@
   02_truncation_validate.png  裁剪验证(截30/50/70/90/100% → value停在真实进度 + is_complete flag)
   03_visitation_validate.png  到访验证(逐帧 value/milestone到访/完成残差de_end/ood)
   ep2302_fwd_vs_reverse_30hz.mp4  正放裁剪 vs 倒放 对齐(各带value游标+完成状态)
-跑法: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_ep2302_30hz_final.py
+跑法: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_ep2302_30hz_final.py
 """
 import sys, glob, time, subprocess, tempfile, os
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")

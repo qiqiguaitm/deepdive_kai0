@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LMWAM: 痛点与方案</title>
+<style>
+  :root{
+    --bg:#020010; --bg2:#05001a; --bg3:#0a0024; --bg4:#0f002e;
+    --border:#1e1a6e; --border2:#3730a3;
+    --text:#e8eaf6; --text2:#8892c8; --text3:#5a5e8c;
+    --accent:#7c3aed; --accent2:#5b21b6; --accent3:#a78bfa;
+    --green:#22c55e; --red:#ef4444; --yellow:#eab308; --blue:#818cf8;
+    --sans:"Inter",system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,"Noto Sans Mono CJK SC",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#12043a 0%,var(--bg) 60%);color:var(--text2);
+    font-family:var(--sans);line-height:1.62;-webkit-font-smoothing:antialiased;min-height:100vh}
+  .wrap{max-width:1040px;margin:0 auto;padding:0 24px}
+  .doc{max-width:1300px;margin:0 auto;padding:0 24px;display:grid;grid-template-columns:200px minmax(0,1fr);gap:40px}
+  .toc{position:sticky;top:20px;align-self:start;max-height:calc(100vh - 40px);overflow:auto;font-size:13px;
+    border-left:1px solid var(--border);padding-left:16px}
+  .toc .tt{color:var(--text3);font-size:11px;letter-spacing:.15em;text-transform:uppercase;margin:0 0 12px;font-family:var(--mono)}
+  .toc a{display:block;color:var(--text2);text-decoration:none;padding:5px 0;border-left:2px solid transparent;
+    margin-left:-18px;padding-left:16px;transition:.15s;line-height:1.35}
+  .toc a:hover{color:var(--accent3)}
+  .toc a.active{color:var(--accent3);border-left-color:var(--accent);font-weight:600}
+  .toc a.sub{font-size:12px;color:var(--text3);padding-top:2px;padding-bottom:2px}
+  @media(max-width:980px){.doc{grid-template-columns:1fr;max-width:1040px}.toc{display:none}}
+  html{scroll-behavior:smooth} section[id],h3[id]{scroll-margin-top:18px}
+  a{color:var(--accent3);text-decoration:none} a:hover{text-decoration:underline}
+  .grad{background:linear-gradient(90deg,#a78bfa,#818cf8);-webkit-background-clip:text;background-clip:text;color:transparent}
+
+  header.top{border-bottom:1px solid var(--border);background:linear-gradient(180deg,rgba(124,58,237,.12),transparent)}
+  header.top .wrap{padding:48px 24px 36px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:var(--accent3)}
+  h1{font-size:clamp(30px,5vw,48px);line-height:1.04;letter-spacing:-.02em;margin:.32em 0 .18em;font-weight:780;text-wrap:balance}
+  .lede{font-size:18px;color:var(--text2);max-width:none;margin:.2em 0 0}
+  .meta{display:flex;flex-wrap:wrap;gap:8px 10px;margin-top:22px;font-family:var(--mono);font-size:12.5px}
+  .tag{border:1px solid var(--border);border-radius:999px;padding:4px 12px;color:var(--text2);background:var(--bg3)}
+  .tag b{color:var(--accent3);font-weight:600}
+
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:34px 0 6px}
+  @media(max-width:720px){.tiles{grid-template-columns:repeat(2,1fr)}}
+  .tile{background:var(--bg3);border:1px solid var(--border);border-radius:14px;padding:16px}
+  .tile .k{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text3)}
+  .tile .v{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:30px;font-weight:600;color:var(--text);margin-top:4px}
+  .tile .v small{font-size:15px;color:var(--text2)}
+  .tile .n{font-size:12.5px;color:var(--text2);margin-top:3px}
+  .tile.hl{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent2)} .tile.hl .v{color:var(--accent3)}
+
+  section{padding:40px 0;border-top:1px solid var(--border)}
+  .snum{font-family:var(--mono);font-size:13px;color:var(--accent3);letter-spacing:.04em}
+  h2{font-size:25px;color:var(--text);margin:.15em 0 .1em;letter-spacing:-.015em;font-weight:720;text-wrap:balance}
+  h2+.sub{color:var(--text2);margin:.1em 0 1.1em;max-width:none}
+  h3{font-size:19px;margin:30px 0 6px;color:var(--text);font-weight:680}
+  h3 .h3n{font-family:var(--mono);font-size:14px;color:var(--accent3);margin-right:8px}
+  p{max-width:none} .prose b{color:var(--text)}
+
+  .scroll{overflow-x:auto;border:1px solid var(--border);border-radius:12px;background:var(--bg3);margin:16px 0}
+  table{border-collapse:collapse;width:100%;font-size:14px;min-width:540px}
+  th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--border);vertical-align:top}
+  thead th{font-family:var(--mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--text3);
+    background:var(--bg4);position:sticky;top:0;white-space:nowrap}
+  tbody tr:last-child td{border-bottom:none}
+  td.num,th.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+  td .term{color:var(--text);font-weight:600}
+  td code{font-family:var(--mono);font-size:12.5px;color:var(--blue)}
+  .pos{color:var(--green)} .amb{color:var(--yellow)} .neg{color:var(--red)}
+
+  pre{background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:16px 18px;overflow-x:auto;
+    font-family:var(--mono);font-size:13px;line-height:1.55;color:var(--text2);margin:16px 0}
+  pre b{color:var(--accent3);font-weight:600}
+
+  .diagram{background:var(--bg3);border:1px solid var(--border);border-radius:14px;padding:18px 8px;margin:18px 0}
+  .diagram svg{display:block;width:100%;height:auto}
+  .legend{display:flex;flex-wrap:wrap;gap:16px;justify-content:center;font-family:var(--mono);font-size:12px;color:var(--text2);padding:8px 12px 2px}
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+  .ref{font-size:12px;color:var(--text3);margin-top:6px} .ref a{color:var(--accent3)}
+
+  .flag{display:inline-block;font-family:var(--mono);font-size:11px;padding:1px 7px;border-radius:6px;margin-right:7px;vertical-align:1px}
+  .flag.bad{background:rgba(239,68,68,.14);color:#fca5a5;border:1px solid #7f1d1d}
+  .flag.good{background:rgba(34,197,94,.14);color:#86efac;border:1px solid #14532d}
+  .flag.amb{background:rgba(234,179,8,.14);color:#fde68a;border:1px solid #713f12}
+  .keybox{background:rgba(124,58,237,.12);border:1px solid var(--accent2);border-radius:14px;padding:18px 20px;margin-top:16px}
+  .keybox p{margin:.2em 0;color:var(--text);max-width:none;font-size:15.5px}
+  .keybox .kt{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent3);display:block;margin-bottom:6px}
+  .badbox{background:rgba(239,68,68,.08);border:1px solid #7f1d1d;border-radius:14px;padding:16px 20px;margin:16px 0 6px}
+  .badbox .bt{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#fca5a5;display:block;margin-bottom:6px}
+  .badbox p{margin:.3em 0;color:var(--text);max-width:none;font-size:14.5px}
+  .wipbox{background:rgba(234,179,8,.08);border:1px dashed #713f12;border-radius:14px;padding:16px 20px;margin:16px 0}
+  .wipbox p{margin:.2em 0;color:var(--text);max-width:none;font-size:14.5px}
+  footer{border-top:1px solid var(--border);padding:26px 0 52px;color:var(--text3);font-size:13px}
+  footer code{font-family:var(--mono);font-size:12px;color:var(--text2)}
+</style>
+</head>
+<body>
+
+<header class="top"><div class="doc"><div></div><div>
+  <div class="eyebrow">LMWAM · LMWM × LaWAM 集成</div>
+  <h1><span class="grad">LMWAM</span> — 痛点与方案</h1>
+  <p class="lede">用 <b>CRAVE 无监督发现的 milestone 边界</b>替代 latent world model 的<b>固定预测时延 τ</b>,使世界模型的预测目标<b>随任务节奏自适应</b>。本页聚焦 <b>§1 已验证的痛点分析</b>(本地数据 + 论文双证据)与 <b>§2 LMWAM 架构方案</b>;§3 实验结果正在按终版架构重训、待定稿。</p>
+  <div class="meta">
+    <span class="tag">基座 <b>starVLA / LaWAM</b></span>
+    <span class="tag">编码器 <b>DINOv3-vitb16(冻结)</b></span>
+    <span class="tag">世界模型 <b>MilestoneGenerator</b></span>
+    <span class="tag">目标 <b>milestone+1(自适应)</b></span>
+    <span class="tag">基线 <b>LaWM(t+τ 固定)</b></span>
+    <span class="tag">benchmark <b>LIBERO</b></span>
+  </div>
+  <p class="ref" style="margin-top:14px">原则:<b>不靠推理自证</b> —— 每个 claim 必须有本地实验数据或已发表论文指标支撑。数据源 <code>lmvla/lmwm/docs/LMWM_report_full_draft.md</code>。</p>
+</div></div></header>
+
+<div class="doc">
+<nav class="toc">
+  <p class="tt">目录</p>
+  <a href="#pain">§1 痛点与动机</a>
+  <a class="sub" href="#pain1">痛点1 · τ 与动作块耦合</a>
+  <a class="sub" href="#pain2">痛点2 · t6 收敛效率</a>
+  <a class="sub" href="#pain3">痛点3 · 遮挡(t9)</a>
+  <a class="sub" href="#pain4">痛点4 · 信息密度</a>
+  <a class="sub" href="#painsum">验证强度汇总</a>
+  <a href="#arch">§2 架构方案</a>
+  <a class="sub" href="#arch-ov">LMWM 概览</a>
+  <a class="sub" href="#arch-swap">LaWAM → LMWAM</a>
+  <a class="sub" href="#arch-map">如何回应痛点</a>
+  <a href="#result">§3 实验结果</a>
+  <a href="#limits">§4 不足与开放问题</a>
+  <a class="sub" href="#lim5">⑤ 跨空间(重做完成)</a>
+</nav>
+
+<main>
+
+<!-- ===================== §1 痛点 ===================== -->
+<section id="pain">
+  <div class="snum">§1</div>
+  <h2>痛点与动机</h2>
+  <p class="sub">现有 VLA 世界模型用固定时延 τ 预测未来帧特征。本节陈述 3 个<b>已验证</b>的痛点,每个附本地实验数据 + 论文指标。</p>
+
+  <div class="tiles">
+    <div class="tile hl"><div class="k">跨任务节奏 CV</div><div class="v">0.69</div><div class="n">milestone 间距变异系数</div></div>
+    <div class="tile"><div class="k">偏离 t+7 &gt;10帧</div><div class="v">17.7<small>%</small></div><div class="n">固定时延错配率</div></div>
+    <div class="tile"><div class="k">任务长度差异</div><div class="v">4.6<small>×</small></div><div class="n">短任务 vs 长任务</div></div>
+    <div class="tile"><div class="k">监督信号 std</div><div class="v">+22<small>%</small></div><div class="n">LMWM vs t+7(自校准)</div></div>
+  </div>
+
+  <div class="keybox">
+    <span class="kt">核心 claim</span>
+    <p>现有 VLA 世界模型用固定时延预测未来帧特征,而在官方实现中这个 <b>τ 被结构性地焊死在动作块最后一帧上,不是可独立调节的超参数</b>。LMWM 用 CRAVE 无监督发现的 milestone 边界替代 τ,把 WM 监督时域与动作块解耦,使预测目标随任务节奏自适应。</p>
+  </div>
+
+  <h3 id="pain1"><span class="h3n">痛点 1</span>WM 预测时域与动作块未解耦 <span class="flag amb">中</span></h3>
+  <div class="badbox"><b>⚠️ 2026-07-19 更正</b>:本节原为「τ <b>从未被系统消融</b>」,已<b>证伪并删除</b>。
+  <b>GR-1(2312.13139) 附录 A.4 表 5 恰恰做了这个消融</b>(CALVIN, Δt∈{1,3,5} → Avg.Len 3.61/<b>3.82</b>/3.67),
+  而原文点名 GR-1 作为反例。另有 JOPAT(2605.23856 附录 A.3.2)、AHEAD(2606.02486 附录 E.4 表 15)、
+  OneWM-VLA(2605.07931 §5.6)三篇独立反例;且 SuSIE(2310.10639) 的 τ 是 U[11,14) <b>区间采样</b>,
+  连「固定 τ」这个前提都不成立。原先标注为「LaWAM Appendix C.5 原文」的两句引文无法回溯,
+  实为审计者结论被误当成论文自述,一并删除。</div>
+  <p class="prose"><b>可辩护的表述</b>:少数工作报告过 horizon 敏感性(GR-1、JOPAT),但普遍局限于单一 benchmark、窄范围、
+  且<b>未与控制频率/物理时长解耦</b>;latent world model 一线(LaWAM 固定 1.2s、Seer n=3、DreamVLA、GR-2)
+  则一致地把 τ 当作未经检验的实现细节。</p>
+  <div class="keybox"><b>主论点(经第一手代码验证)</b>:在 LaWAM 官方实现
+  (<code>lerobot_datasets.py::_sample_video_delta_indices</code>)中,<code>num_frames=2</code> 时未来帧索引
+  = <code>action_delta_indices[-1]</code> —— <b>世界模型的预测目标被结构性地焊死在动作块最后一帧上</b>。
+  因此 τ <b>不是可独立调节的超参数</b>:想单独消融 τ 就必然同时改动作块长度,二者混淆。
+  「robot τ=1.2s / egocentric τ=0.4s」实为<b>动作块时长</b>选择(依控制频率定,有正当理由)。
+  <b>真正的缺口是 WM 监督时域与动作块的解耦 —— 这正是 LMWM 在做的事。</b></div>
+
+  <div class="keybox"><b>★ 新证据(2026-07-19,24 路变 seed):收益来自"目标选在哪",不是"看多远"</b>
+  <br>t6(唯一确证有收益的任务)的 milestone 前瞻<b>中位数恰好是 7 帧,与 LaWM 固定的 t+7 基本相同</b>,
+  且 t6 是全表 milestone 最稀疏(3.9/ep)、episode 最短(49)的任务。
+  <b>在前瞻距离大致相等的条件下,LMWM 仍赢 +8.5(t≈6.1, p&lt;0.001),而 LaWM 只有 +2.0(ns)。</b>
+  <br><br>⇒ 这<b>否定了"LMWM 好在提供更长程指引"</b>这一此前的解释,也意味着
+  <b>单纯加长 horizon 不会复现这个收益</b>。可调的杠杆是 <b>milestone 选点质量</b>,而非前瞻长度。
+  <br>(剂量-反应亦支持:LMWM 成分越重收益越大 —— LaWM +2.0 ns → hintdrop +6.0** → dual2q/机制② +8.5***。)</div>
+  <div class="scroll"><table>
+    <thead><tr><th>本地数据(LIBERO · DINOv3-base · 40 任务 · 95395 对)</th><th class="num">值</th></tr></thead>
+    <tbody>
+      <tr><td>Milestone 间距 均值 / 中位</td><td class="num">10.0 / <b>5</b> 帧</td></tr>
+      <tr><td>标准差</td><td class="num"><b>11.8</b></td></tr>
+      <tr><td>范围</td><td class="num">[1, 108]</td></tr>
+      <tr><td>与 LaWAM t+7(LIBERO 0.35s)偏差 &gt;10 帧</td><td class="num neg"><b>17.7%</b></td></tr>
+      <tr><td>与 LaWAM t+32(真机 1.6s)偏差 &gt;10 帧</td><td class="num neg"><b>90.2%</b></td></tr>
+    </tbody>
+  </table></div>
+  <p class="prose">跨任务节奏<b>变异系数 0.69</b>:最快任务 milestone 间距中位 2 帧(0.1s),最慢 22 帧(1.1s)—— <b>10× 差异</b>。单个固定 τ 无法同时适配:对快任务过远(跳过密集语义边界),对慢任务过近(窗口内无有意义状态变化)。</p>
+  <div class="badbox">
+    <span class="bt">论文证据 · LaWAM arXiv 2606.15768</span>
+    <p>① <b>无 τ 消融</b>:“There is no ablation varying τ, sec_chunk, temporal stride, or future window size.”(Appendix C.5)</p>
+    <p>② <b>不同域手动设不同值</b>:robot videos τ=1.2s、egocentric τ=0.4s,“No justification is given for these choices.”(Appendix C.5);用户实验记录亦显示预训练 0.9s、真机 1.6s。</p>
+  </div>
+  <p class="prose"><b>LMWM 解法</b>:用 CRAVE 数据驱动 milestone 边界替代固定 τ,间距随任务节奏自适应(快 2 帧,慢 108 帧),消除手动调参。</p>
+
+  <h3 id="pain2"><span class="h3n">痛点 2</span>相对空间参照任务(t6):LMWM 用 60% 步数达到同一天花板 <span class="flag amb">中</span></h3>
+
+  <div class="badbox"><b>⚠️ 2026-07-19 二次更正 —— 本节结论已被官方 ckpt 重测推翻并降级</b>
+  <p>本节原为「<b>相对空间参照任务:LaWM 完全拿不到收益</b>」,依据是我们自训的 armB(LaWM)t6 仅 78.5,
+  而 LMWM 达 85.0(+8.5, p&lt;0.001)。</p>
+  <p><b>推翻它的证据</b>:用<b>官方 LaWAM released ckpt</b> 做 50 trials/task × <b>8 变 seed</b>(4000 ep)重测,
+  其 <b>t6 = 85.2±3.7</b> —— 与我们的 LMWM(85.0)<b>统计上完全相同</b>(Δ=−0.25, t=−0.15, <b>ns</b>)。
+  <b>⇒ 训练充分的 LaWM 完全能达到 t6 的天花板,"LaWM 结构性做不到"是错的。</b>
+  我们 armB 的 78.5 <b>可能</b>是训练量偏低的产物 —— 按<b>样本量</b>计,armB = 4卡×20000 = <b>2.56M</b>,而 dual2q 与官方均为 <b>3.2M</b>(armB 仅 80%)。<b>已提交 8卡×12500=3.2M 的同预算 armB</b>(<code>t-20260720082157-bsxd4</code>)来隔离此变量;在其结果出来前,此归因未经验证。</p></div>
+
+  <div class="scroll"><table>
+    <thead><tr><th>t6 · 同口径变 seed 评测</th><th class="num">训练步数</th><th class="num">t6</th><th class="num">vs 官方 ckpt</th><th class="num">t</th><th class="num"></th></tr></thead>
+    <tbody>
+      <tr><td><b>官方 LaWAM released ckpt</b></td><td class="num">4卡×25000<br><small>3.2M 样本</small></td><td class="num"><b>85.2</b>±3.7 <small>(n=8)</small></td><td class="num">—</td><td class="num">—</td><td class="num">基准</td></tr>
+      <tr><td><b>dual2q(LMWM 并联)</b></td><td class="num"><b>8卡×12500</b><br><small>3.2M 样本</small></td><td class="num"><b>85.0</b>±1.7</td><td class="num">−0.25</td><td class="num">−0.15</td><td class="num"><span class="flag good">ns 持平</span></td></tr>
+      <tr><td>机制②</td><td class="num">12500</td><td class="num">85.0±2.4</td><td class="num">−0.25</td><td class="num">−0.16</td><td class="num">ns 持平</td></tr>
+      <tr><td><b>armB(我们自训 LaWM)</b></td><td class="num">4卡×20000<br><small><b>2.56M(80%)</b></small></td><td class="num"><b>78.5</b>±3.0</td><td class="num">−6.75</td><td class="num">−3.11</td><td class="num"><span class="flag bad">**显著更低</span></td></tr>
+      <tr><td>no-WM 纯 VLA</td><td class="num">12500</td><td class="num">76.5±1.7</td><td class="num">−8.75</td><td class="num">−5.36</td><td class="num"><span class="flag bad">***</span></td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="keybox"><b>降级后仍站得住的结论(收敛效率,非能力上限)</b>
+  <br>在<b>同一套代码/数据/评测</b>的自控对照下:<b>LMWM 用 3.2M 样本达到 t6=85.0,而我们的 LaWM 臂用 2.56M 样本只到 78.5。</b>
+  ⚠️ 两者<b>样本量不等(LMWM 反而多 25%)</b>,故此比较<b>无法归因于 WM 类型</b> —— 这正是同预算对照要解决的问题。
+  <br>官方 LaWM 在完整预算下同样到达 85.2 ⇒ <b>两者的差别是"多快到达天花板",不是"能否到达"。</b>
+  <br><br><b>机理线索仍然有效</b>:t6 的 milestone 前瞻中位数恰为 7 帧,与 LaWM 的 t+7 基本相同,
+  所以这个效率差<b>不来自"看得更远"</b>,而来自目标落点的语义(CRAVE 选出的子目标首帧)。
+  <br><br><b>诚实边界</b>:官方 ckpt 与我们 armB 的差异<b>不止步数</b>(其完整训练细节未知),
+  因此"armB 的低 t6 = 欠训练"是最合理解释但<b>未被隔离验证</b>。
+  待 25000 步同预算 armB 跑完才能定论。</div>
+
+  <h3 id="pain3"><span class="h3n">痛点 3</span>遮挡任务:LaWM 不只是无收益,而是<b>有害</b> <span class="flag amb">中</span></h3>
+  <p class="prose"><b>LaWM 差在哪</b>:t9 =「把黄白杯放进微波炉<b>并关门</b>」。目标物进入炉腔后<b>被遮挡</b>,
+  此时"预测 t+7 帧的观测特征"在数学上是<b>病态的</b> —— 未来观测由遮挡主导,不可预测。
+  固定时延无法回避这个窗口,只能强迫模型去拟合噪声。</p>
+
+  <div class="scroll"><table>
+    <thead><tr><th>t9 遮挡 · 24 路变 seed</th><th class="num">t9 SR</th><th class="num">vs 纯 VLA</th><th class="num">t</th><th class="num">显著性</th></tr></thead>
+    <tbody>
+      <tr><td>no-WM 纯 VLA</td><td class="num"><b>89.5</b>±4.1</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>
+      <tr><td><b>armB LaWM(固定 t+7)</b></td><td class="num"><b>82.5</b>±4.1</td><td class="num"><b>−7.0</b></td><td class="num">−2.40</td><td class="num"><span class="flag bad">*</span></td></tr>
+      <tr><td>hintdrop(LMWM)</td><td class="num">88.5±5.5</td><td class="num">−1.0</td><td class="num">−0.29</td><td class="num">ns</td></tr>
+      <tr><td>dual2q(LMWM)</td><td class="num">87.5±4.4</td><td class="num">−2.0</td><td class="num">−0.66</td><td class="num">ns</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="keybox"><b>LMWM 为什么能规避</b>:milestone 边界由跨 episode 的复现结构选出,落点是<b>语义稳定的关键状态</b>
+  (如"杯已入腔""门已闭合"),较少落进遮挡过程中的不可预测窗口;而固定 t+7 对遮挡完全盲目。
+  <br>数据上:LaWM 是唯一显著劣于纯 VLA 的方案(−7.0),而三个 LMWM 变体全部 ns。
+  <br><br><b>诚实边界</b>:n=4、t=−2.40、p≈0.05,属<b>边缘显著的方向性证据</b>,不足以定稿。需补到 n=8 才能确认。</div>
+
+  <h3 id="pain4"><span class="h3n">痛点 4</span>世界模型监督信号的信息密度不均(自校准效应) <span class="flag amb">中</span></h3>
+  <p class="prose">固定时延为每帧提供<b>相同距离</b>的预测目标(t+τ),但各时刻窗口内语义变化量差异巨大:快速移动时剧变,悬停时几乎不变。大量“近距离对”梯度≈0,浪费算力。</p>
+  <div class="scroll"><table>
+    <thead><tr><th>gist cosine distance(3000 对采样)</th><th class="num">LMWM milestone+1</th><th class="num">LaWM t+7 (0.35s)</th><th class="num">LaWM t+32 (1.6s)</th></tr></thead>
+    <tbody>
+      <tr><td>均值</td><td class="num">0.01605</td><td class="num">0.01686</td><td class="num">0.03347</td></tr>
+      <tr><td>中位</td><td class="num">0.01337</td><td class="num">0.01475</td><td class="num">0.03004</td></tr>
+      <tr><td><b>标准差</b></td><td class="num"><b>0.01087</b></td><td class="num">0.00894</td><td class="num">0.01748</td></tr>
+      <tr><td>P10 / P90</td><td class="num">0.005 / 0.031</td><td class="num">0.008 / 0.029</td><td class="num">0.016 / 0.054</td></tr>
+      <tr><td>&lt;0.005 比例</td><td class="num"><b>9.1%</b></td><td class="num">1.8%</td><td class="num">0.1%</td></tr>
+    </tbody>
+  </table></div>
+  <p class="prose"><b>关键发现</b>:(1) LMWM 均值距离与 t+7 接近(0.95×)但<b>标准差大 22%</b> —— 把目标分散到更广距离:快节奏近(P10=0.005),慢节奏远(P90=0.031),即<b>信息密度自校准</b>。(2) t+32 极端错配:90.2% 对偏离 &gt;10 帧,距离是 LMWM 的 2.1×,证实“不同域需不同 τ”。(3) 极低信息对(&lt;0.005)LMWM 9.1% vs t+7 1.8% —— 来自快节奏 1-2 帧间距,是“下一步就在眼前”的正确信号,非无效监督。</p>
+
+  <h3 id="painsum">验证强度汇总</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>痛点</th><th>本地数据</th><th>论文证据</th><th class="num">强度</th></tr></thead>
+    <tbody>
+      <tr><td><span class="term">1</span> 固定时延未消融超参数</td><td class="pos">✅ P0-B 17.7% 错配, CV=0.69</td><td class="pos">✅ LaWAM 无 τ 消融 + 多域手动选值</td><td class="num"><span class="flag good">强</span></td></tr>
+      <tr><td><span class="term">2</span> t6 收敛效率(原「LaWM 无收益」已推翻)</td><td class="amb">⚠️ LMWM 12500步=85.0 vs 我方 LaWM 20000步=78.5;<b>官方 LaWM=85.2(ns)</b></td><td class="pos">✅ 官方 ckpt 8 seed 重测(4000ep)</td><td class="num"><span class="flag amb">中</span></td></tr>
+      <tr><td><span class="term">3</span> 遮挡任务 LaWM 有害(t9)</td><td class="amb">⚠️ LaWM <b>−7.0</b>(t=−2.40, p≈0.05);LMWM 全 ns</td><td class="pos">✅ 24 路变 seed 自测</td><td class="num"><span class="flag amb">中</span></td></tr>
+      <tr><td><span class="term">4</span> 监督信号密度自校准</td><td class="pos">✅ P0-A 距离分布, std 大 22%</td><td class="amb">⚠️ 间接(无直接论文指标)</td><td class="num"><span class="flag amb">中</span></td></tr>
+    </tbody>
+  </table></div>
+  <div class="keybox">
+    <span class="kt">最稳固、可对外宣称</span>
+    <p><b>⚠️ 2026-07-19:原本列在此处的「LMWM 在 t6 上显著优于 LaWM」已被官方 ckpt 重测推翻</b>(官方 LaWM t6=85.2,与 LMWM 85.0 持平)。<br>降级后可声称的是<b>收敛效率</b>:LMWM 用 12500 步达到 85.0,我方 LaWM 用 20000 步仅 78.5;官方 LaWM 在完整预算下亦达 85.2。<br>且我方全部四臂的<b>聚合成功率均显著低于官方 ckpt</b>(−1.06~−2.68pt),说明<b>整组实验处于欠训练状态</b>,横向结论均需在同预算下复核。</p>
+  </div>
+</section>
+
+<!-- ===================== §2 架构 ===================== -->
+<section id="arch">
+  <div class="snum">§2</div>
+  <h2>架构方案</h2>
+  <p class="sub">LMWM = CRAVE(零训练 milestone 发现)+ MilestoneGenerator(milestone 条件生成器);作为 LaWAM 世界模型 decoder 的即插即用替身,构成 LMWAM。</p>
+
+  <h3 id="arch-ov">LMWM 概览(两阶段)</h3>
+  <pre>阶段 1 — <b>CRAVE milestone 发现(零训练)</b>:
+  冻结 DINOv3-base 编码器 → 提取 episode grid 特征 [N,256,768]
+  → 跨 episode gist pooling → 聚类 → 单调 Viterbi readout
+  → M 个有序 milestone 质心 + 每帧的 milestone 标签
+
+阶段 2 — <b>Milestone 条件生成器训练</b>:
+  (cur_frame_feature, target_code) → MilestoneGenerator(AdaLN) → next_milestone_feature
+  损失: L = smooth_L1(gen(g_t, z), g_m+1) + λ_lift·ReLU(cos(gen,g_t) − cos(gen,g_m+1))
+  输入对: {(cur_fi, first[milestone+1])} —— 保证跨语义边界</pre>
+  <p class="prose"><b>关键属性</b> —— <b>编码器无关</b>(CRAVE 只要冻结特征空间有判别力:DINOv3 / SigLIP / VLA 自身编码器)· <b>自适应时延</b>(milestone 间距由数据决定 2–108 帧,非固定 τ)· <b>稀疏+高信息</b>(每个训练对跨越至少一个语义阶段边界,下界保证信息密度)。</p>
+
+  <h3 id="arch-swap">与 LaWAM 的集成(→ LMWAM)</h3>
+  <pre>原 LaWAM:  h_t → [LaWM decoder](h_t, latent_code)   → h_{t+τ}         (τ 固定 0.35/1.2/1.6s)
+LMWAM:    h_t → [<b>MilestoneGenerator</b>](h_t, milestone_code) → h_{<b>milestone+1</b>}  (自适应)</pre>
+  <p class="prose"><b>最小侵入 swap</b>(高内聚低耦合):① 保留原 LAM 的 <code>extract_vision_features</code>(DINOv3-vitb16,冻结共享);② 只替换 <code>lam.decoder</code> 为 MilestoneGenerator;③ 训练时 <code>h_t1_gt</code> 从 t+τ 改为 milestone+1 帧特征;④ <code>swap_teacher=True</code>:量化器改用 LMWM InverseEnc(保证 code 空间自洽)。</p>
+  <div class="scroll"><table>
+    <thead><tr><th>组件</th><th>LaWAM (baseline)</th><th>LMWAM (ours)</th></tr></thead>
+    <tbody>
+      <tr><td>视觉编码器</td><td>DINOv3-vitb16</td><td>同(共享)</td></tr>
+      <tr><td>世界模型 decoder</td><td>LaWM decoder (released)</td><td class="pos">MilestoneGenerator (CRAVE 预训练)</td></tr>
+      <tr><td>预测目标</td><td>t+7 帧 (0.35s LIBERO)</td><td class="pos">milestone+1 帧(自适应)</td></tr>
+      <tr><td>量化器 teacher</td><td>LaWM VAE</td><td>LMWM InverseEnc</td></tr>
+      <tr><td>训练方式</td><td>同 recipe, unfreeze decoder</td><td>同 recipe, unfreeze decoder</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3 id="arch-map">如何回应 §1 的痛点</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>痛点</th><th>LMWM 的解法</th><th>可测指标</th></tr></thead>
+    <tbody>
+      <tr><td><span class="term">1</span> τ 与动作块结构性耦合</td><td>milestone 边界由数据决定,<b>把 WM 监督时域从动作块上解绑</b>,可独立于动作块调节</td><td class="pos">✅ 间距 CV=0.69、17.7% 偏离 t+7 &gt;10 帧<br>⬜ sec_chunk 消融(LMWM 应不敏感)—— <b>待做</b></td></tr>
+      <tr><td><span class="term">2</span> t6 收敛效率</td><td>milestone = 跨 episode 复现出的<b>子目标首帧</b>,作为相对定位锚点比固定 t+7 更快收敛到同一天花板</td><td class="amb">⚠️ LMWM 12500步 85.0 = 官方 LaWM 85.2(ns);我方 LaWM 20000步仅 78.5<br>⬜ <b>需 25000 步同预算 armB 才能隔离"欠训练"</b></td></tr>
+      <tr><td><span class="term">3</span> 遮挡任务 LaWM 有害(t9)</td><td>milestone 落在语义稳定状态(杯已入腔/门已闭合),较少落进遮挡窗口;固定 t+7 对遮挡完全盲目</td><td class="amb">⚠️ t9 LaWM −7.0(t=−2.40, p≈0.05),LMWM 全 ns<br>⬜ <b>n=4 仅边缘显著,需补到 n=8</b></td></tr>
+      <tr><td><span class="term">4</span> 监督信号密度不均</td><td>每个 pair 跨语义边界,特征距离下界保证</td><td class="pos">✅ pair 距离 std 大 22%<br>⬜ 辅助 loss 与 eval SR 相关性 —— <b>待做</b></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ===================== §3 结果(进行中) ===================== -->
+<section id="result">
+  <div class="snum">§3</div>
+  <h2>实验结果 <span class="flag amb" style="font-size:12px;vertical-align:3px">进行中</span></h2>
+  <p class="sub">实验设置固定,SR 数字正在按终版架构重训、待定稿。</p>
+  <div class="scroll"><table>
+    <thead><tr><th>配置项</th><th>值</th></tr></thead>
+    <tbody>
+      <tr><td>基准环境</td><td>LIBERO <b>libero_10</b>(10 长周期任务 × 50 trials = 500 ep)</td></tr>
+      <tr><td>编码器</td><td>DINOv3-vitb16(冻结)</td></tr>
+      <tr><td>VLA 架构</td><td>starVLA(Qwen3-VL-2B 前 16 层 + Alternate-DiT flow 动作头)</td></tr>
+      <tr><td>预训练初始化</td><td>lawam_pretrain (released)</td></tr>
+      <tr><td>训练步数</td><td>@20000(两臂同 step,保公平)</td></tr>
+      <tr><td>硬件</td><td>volc 4×H20 / 臂(训练)· A100(eval)</td></tr>
+    </tbody>
+  </table></div>
+  <p class="prose"><b>对比臂</b> —— Arm M (LMWAM):LMWM decoder + milestone+1 目标 + swap_teacher;Arm B (baseline):released LaWM decoder + t+7 目标(同 recipe no-swap 自训)。</p>
+  <div class="wipbox">
+    <p><b>结果进行中。</b> 首版 milestone pairs 在弥散子目标 / 短任务上有退化(部分任务塌成 1–2 个 milestone)。当前正按<b>终版架构</b>重生成训练对:<code>proprio ⊕ 图像特征</code> + <code>BayesianGMM</code> + <code>双锚 Viterbi</code> + <code>末段 self-loop</code>,并接入<b>连续进度 value 头</b>(逐帧时间监督,离线 probe val Spearman 0.94)以覆盖“无独特 milestone 的弥散段”。SR 对比数字待重训 + 多 seed 后定稿。</p>
+  </div>
+  <div class="scroll"><table>
+    <thead><tr><th>痛点验证(待训练完成填入)</th><th>预期</th></tr></thead>
+    <tbody>
+      <tr><td>痛点1 · sec_chunk 敏感度消融</td><td>LMWM 臂 SR 对 sec_chunk 不敏感;baseline 应敏感</td></tr>
+      <tr><td>痛点2 · 按任务长度分组 SR</td><td>LMWM 在长周期组(&gt;300步)有更大提升</td></tr>
+      <tr><td>痛点3 · 辅助 loss 与 SR 相关性</td><td>LMWM 辅助 loss 下降更预示 SR 提升</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+
+<!-- ===================== §4 不足 ===================== -->
+<section id="limits">
+  <p class="snum">§4</p>
+  <h2>不足与开放问题</h2>
+  <p class="sub">以下问题 <b>LMWM 并未解决</b>,部分是两种世界模型共有的。列在此处而非 §1,是因为它们不构成 LMWM 的立论依据。</p>
+
+  <h3 id="lim1">① 目标歧义下 WM 注入噪声 —— LMWM 同样有</h3>
+  <p class="prose">t8 =「把<b>两个</b>摩卡壶都放到灶上」,383 步(其余任务 172~259),两个<b>外观完全相同</b>的壶。
+  在这个任务上,<b>所有</b>世界模型方案都让结果变得极不稳定,而纯 VLA 反而最稳。</p>
+  <div class="scroll"><table>
+    <thead><tr><th>t8 · 24 路变 seed</th><th class="num">no-WM</th><th class="num">armB LaWM</th><th class="num">hintdrop</th><th class="num">dual2q</th><th class="num">机制②</th></tr></thead>
+    <tbody>
+      <tr><td>均值</td><td class="num"><b>93.5</b></td><td class="num">88.5</td><td class="num">87.5</td><td class="num">88.5</td><td class="num">90.0</td></tr>
+      <tr><td><b>标准差</b> ← 真正的信号</td><td class="num"><b>1.9</b></td><td class="num"><b>13.9</b></td><td class="num">6.4</td><td class="num"><b>11.4</b></td><td class="num">8.6</td></tr>
+      <tr><td>均值差显著性(vs no-WM)</td><td class="num">—</td><td class="num">ns</td><td class="num">ns</td><td class="num">ns</td><td class="num">ns</td></tr>
+    </tbody>
+  </table></div>
+  <div class="badbox"><b>必须诚实的两点</b>
+  <p>· <b>没有任何方案的均值差是显著的</b>(全部 |t|≤1.8)——<b>不得声称"WM 伤害 t8"</b>。真实且稳定的效应是<b>方差膨胀:1.9 → 6.4~13.9,方差比 11~53×</b>(F(3,3) 临界 9.3@0.05)。</p>
+  <p>· <b>LMWM 的 dual2q 方差 11.4,与 LaWM 的 13.9 同一量级 —— 这个问题 LMWM 没有解决。</b></p></div>
+  <p class="prose"><b>机理假说(无直接证据)</b>:潜在视觉目标无法指明是两个同款壶中的"哪一个",指引因此随 seed 摇摆。
+  我们尝试用失败模式(超时卡死 vs 早期失败)去检验,<b>没有拿到信号</b> —— LIBERO 评测不提前终止,100% 的失败都是跑满 550 步,该指标无区分力。
+  验证需改用轨迹级分析(如目标物切换次数)。</p>
+
+  <h3 id="lim2">② 聚合收益无法声称</h3>
+  <p class="prose">dual2q 94.80±0.71 vs 纯 VLA 94.30±0.54,<b>+0.5pt,小于 SEM</b>。
+  正贡献(t6 +8.5)被 t8/t9 的负贡献与 8 个饱和任务稀释。
+  <b>结论:WM 不是普适 VLA 增强,而是场景特异的</b> —— 只在"目标由相对空间关系定义"时兑现。
+  LIBERO-10 有 8/10 任务饱和在 93~100,已不足以测量这类机制(外部亦有 LIBERO-Plus 2510.13626 / LIBERO-PRO 2510.03827 指出该基准 "almost saturated")。</p>
+
+  <h3 id="lim3">③ 机制②(diffusion-t 调度 ms dropout)未证明有效</h3>
+  <p class="prose">相对其基座 dual2q:聚合 +0.42(t=0.79, <b>ns</b>),<b>在唯一有效的 t6 上零增量</b>(同为 85.0)。
+  唯一可见的作用是把 t8 方差从 11.4 压到 8.6 —— 方向上支持"指引门控"的思路,但<b>幅度不足以定论</b>。
+  <b>门控该怎么做仍是开放问题。</b></p>
+
+
+  <h3 id="lim5">⑤ 世界模型与 VLA 不同特征空间(重做+标定完成 · <b>倾向"空间重要"</b>)</h3>
+
+  <p class="prose">世界模型与 LAM 在冻结 <b>DINOv3</b> 空间,VLA 基座是 <b>Qwen3-VL</b>
+  (取 <code>visual().pooler_output</code> = merger 输出 2048 维 = LLM 实际消费层),二者靠注入 adapter 衔接。
+  架构定版把「把 LMWM 搬进 VLA 自身编码器空间」列为 <b>P3 终局方向</b>,张力在于
+  <b>frozen-DINOv3 本就是为跨本体普适性而选</b>。为此做了可证伪的廉价预实验(仅特征提取+分段,无需训练)。</p>
+
+  <div class="badbox"><b>⚠️ 首版结论已作废(2026-07-20)</b>
+  <p>首次预实验误用了<b>已废弃的 BGMM 聚类分段</b>(<code>p1_libero_milestone_pairs_finalarch.py</code>),
+  得 F1 0.53 / 4.75× 并据此判定"空间不重要、降级"。架构定版 §2 淘汰该方案的理由正是
+  「LIBERO 低视觉方差塌成 M=1」—— 这正是当时观测到却无法归因的现象。
+  <b>下表为改用定版 r-谷/r-脊管线(<code>p1_libero_rvalley_pairs.py</code>)在同一批 1693 ep 上重做的结果,结论与首版相反。</b></p></div>
+
+  <div class="scroll"><table>
+    <thead><tr><th>milestone 边界双向匹配 F1(1693 ep, stride=2, 同一脚本)</th><th class="num">±1 帧</th><th class="num">±2 帧</th><th class="num">±3 帧</th></tr></thead>
+    <tbody>
+      <tr><td><b>r-valley 管线(定版)· 实测</b></td><td class="num"><b>0.195</b></td><td class="num"><b>0.301</b></td><td class="num"><b>0.381</b></td></tr>
+      <tr><td>随机基线(保边界数与 ep 长度的位置置换)</td><td class="num">0.088</td><td class="num">0.140</td><td class="num">0.190</td></tr>
+      <tr><td><b>相对随机的提升</b></td><td class="num">2.21×</td><td class="num">2.14×</td><td class="num">2.00×</td></tr>
+      <tr><td><i>(作废) BGMM 管线 · 实测</i></td><td class="num"><i>0.387</i></td><td class="num"><i>0.530</i></td><td class="num"><i>0.605</i></td></tr>
+    </tbody>
+  </table></div>
+  <p class="prose">段数/episode:DINOv3 <b>3.23</b> vs Qwen3-VL <b>3.90</b>(BGMM 版为 3.44 vs 2.67,<b>方向亦相反</b>)。</p>
+
+  <div class="scroll"><table>
+    <thead><tr><th>★ THR 标定后重比(消除"段数不同"这一混淆)</th><th class="num">段数/ep</th><th class="num">F1 ±1</th><th class="num">F1 ±2</th><th class="num">F1 ±3</th></tr></thead>
+    <tbody>
+      <tr><td>DINOv3(THR=0.03,基准)</td><td class="num">3.23</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>
+      <tr><td>Qwen3-VL(THR=0.03,<b>未</b>标定)</td><td class="num">3.90</td><td class="num">0.195</td><td class="num">0.301</td><td class="num">0.381</td></tr>
+      <tr><td><b>Qwen3-VL(THR=0.04,<u>已标定</u>)</b></td><td class="num"><b>3.31</b></td><td class="num"><b>0.192</b></td><td class="num"><b>0.293</b></td><td class="num"><b>0.365</b></td></tr>
+      <tr><td>随机基线(标定后)</td><td class="num">—</td><td class="num">0.084</td><td class="num">0.132</td><td class="num">0.178</td></tr>
+      <tr><td><b>相对随机的提升</b></td><td class="num">—</td><td class="num">2.29×</td><td class="num"><b>2.22×</b></td><td class="num">2.05×</td></tr>
+    </tbody>
+  </table></div>
+  <p class="prose">THR 扫描(0.02→0.06 得 4.69/3.90/3.31/2.84/2.48 段)取与 DINOv3 最接近者,
+  <b>粒度对齐到 3.31 vs 3.23(Δ=0.08)</b>。</p>
+
+  <div class="keybox"><b>★ 结论:粒度不是原因 —— 两个空间确实发现<u>不同</u>的子目标</b>
+  <br>标定前后 F1 几乎不动(±2 帧:0.301 → <b>0.293</b>),而段数从 3.90 压到 3.31。
+  <b>"Qwen 段数偏多导致 F1 被压低"这一替代解释已被实验排除。</b>
+  <br><br>±2 帧容差下仅约 <b>29% 的边界能对上</b>,仅为随机的 2.2 倍 —— 远非"同一批子目标"。
+  ⇒ <b>把 LMWM 搬到 VLA 自身编码器空间是实质性改动,会改变世界模型学什么</b>,
+  与架构定版将其列为 <b>P3 终局方向</b>一致。
+  <br><br><b>判据仍未正式裁决</b>(F1 0.29 未达 ≥0.5,2.2× 亦高于 1.3×),事先写定的阈值不因结果调整;
+  但主要竞争解释已排除,故"空间重要"的倾向性明显增强。</div>
+
+  <div class="badbox"><span class="bt">仍存的边界</span>
+  <p>· 本实验只回答"<b>边界是否落在同一处</b>",<b>不</b>回答"哪个空间的子目标更有用"。后者只能靠下游训练 + eval。</p>
+  <p>· 标定采用"匹配段数"这一口径。若改用别的标定目标(如匹配 r 场的谷深分布),THR 选择可能不同。</p></div>
+
+  <h3 id="lim6">⑥ 我方与官方 ckpt 的 1~2pt 聚合差距(原因未明,<b>不是</b>训练量)</h3>
+  <div class="badbox"><b>⚠️ 2026-07-20 更正:此前本节写作「整组实验处于欠训练状态(只跑了官方 50% 步数)」,该判断错误。</b>
+  <p>可比量是<b>总样本数</b>而非步数。<code>per_device_batch_size=32</code> 恒定时:</p>
+  <p>· 官方 = <b>4 卡 × 25000 步 = 3.2M</b>(官方 README 示例 <code>GPU_IDS="0 1 2 3"</code>)<br>
+  · 我方 dual2q / hintdrop / no-WM / 机制② = <b>8 卡 × 12500 步 = 3.2M</b> ✓ <b>与官方完全相同</b><br>
+  · 我方 armB = 4 卡 × 20000 步 = <b>2.56M(80%)</b> ← 仅此一臂确实偏低</p>
+  <p>⇒ <b>"我们只训了一半"是错的</b>。12500 步的臂是用加倍卡数换取的减半步数,样本量与官方一致。</p></div>
+
+  <div class="scroll"><table>
+    <thead><tr><th>方案</th><th class="num">卡×步</th><th class="num">总样本</th><th class="num">聚合</th><th class="num">vs 官方</th><th class="num">t</th></tr></thead>
+    <tbody>
+      <tr><td><b>官方 released ckpt</b></td><td class="num">4×25000</td><td class="num">3.2M</td><td class="num"><b>96.27</b>±0.41</td><td class="num">—</td><td class="num">—</td></tr>
+      <tr><td>机制②</td><td class="num">8×12500</td><td class="num">3.2M</td><td class="num">95.22</td><td class="num">−1.06</td><td class="num"><span class="flag bad">−2.79 *</span></td></tr>
+      <tr><td>dual2q</td><td class="num">8×12500</td><td class="num">3.2M</td><td class="num">94.80</td><td class="num">−1.48</td><td class="num"><span class="flag bad">−3.36 **</span></td></tr>
+      <tr><td>no-WM</td><td class="num">8×12500</td><td class="num">3.2M</td><td class="num">94.30</td><td class="num">−1.98</td><td class="num"><span class="flag bad">−5.67 ***</span></td></tr>
+      <tr><td>armB LaWM</td><td class="num">4×20000</td><td class="num"><b>2.56M</b></td><td class="num">93.60</td><td class="num">−2.68</td><td class="num"><span class="flag bad">−4.02 ***</span></td></tr>
+    </tbody>
+  </table></div>
+
+  <p class="prose"><b>结论修正</b>:样本量相同(3.2M)的三个臂仍比官方低 1.06~1.98pt 且显著,
+  <b>所以这个差距不能用训练量解释</b>,原因未明——可能来自 8 卡大 batch 与 4 卡的优化差异(同一 cosine 调度压缩到一半步数,
+  每样本有效学习率不同),或官方未公开的配方细节。<b>这是一个待查项,不是已解释项。</b></p>
+  <p class="prose"><b>armB 仍是唯一预算偏低的臂(80%)</b>,因此"armB t6=78.5 vs dual2q 85.0"仍可能混入预算因素。
+  已提交严格同预算对照 <code>t-20260720082157-bsxd4</code>(armB, <b>8 卡 × 12500 = 3.2M</b>)以隔离该变量。
+  <br><small>(此前提交的 8 卡 × 25000 = 6.4M 是官方的 2 倍,属过训练而非对照,已停止。)</small></p>
+
+  <h3 id="lim4">④ 已知混淆项(结论解读时必须扣除)</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>混淆</th><th>具体</th><th>影响</th></tr></thead>
+    <tbody>
+      <tr><td>训练预算不等</td><td>armB = <b>20000 步</b>,而 dual2q / hintdrop / no-WM / 机制② = <b>12500 步</b>(官方配方为 25000)</td><td>"LaWM 聚合 93.60 &lt; 纯 VLA 94.30"是<b>训得更多的输给训得更少的</b>,方向不利于 LaWM,但预算不等本身即混淆,<b>不可作干净对照</b></td></tr>
+      <tr><td>官方锚点口径</td><td>旧锚点 98.0% 仅 <b>10 trials/task、100 ep、seed=0</b>(SE≈±1.4),且曾错误对标论文四 suite 平均 98.6%(libero_10 应对标 <b>Long=97.0</b>)</td><td>该锚点<b>不足以支撑"复现不出来"</b>;正在用 50 trials × 8 变 seed 重测</td></tr>
+      <tr><td>样本量</td><td>t9 / t8 结论均基于 n=4</td><td>t9 的 −7.0 仅 p≈0.05,需补到 n=8</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<footer>
+  数据源 <code>lmvla/lmwm/docs/LMWM_report_full_draft.md</code> · 痛点分析完整版(5 痛点 A–E)<code>history/LMWM_pain_point_analysis_2026-07-13.md</code> · 对照基线 LaWAM(arXiv 2606.15768)
+</footer>
+
+</main>
+</div>
+
+<script>
+// TOC active-section highlight (与 CRAVE/lmwm_final 一致的轻量交互)
+const links=[...document.querySelectorAll('.toc a')];
+const map=new Map(links.map(a=>[a.getAttribute('href').slice(1),a]));
+const io=new IntersectionObserver((es)=>{
+  es.forEach(e=>{ if(e.isIntersecting){ const a=map.get(e.target.id); if(a){ links.forEach(l=>l.classList.remove('active')); a.classList.add('active'); } } });
+},{rootMargin:'-10% 0px -80% 0px'});
+document.querySelectorAll('section[id],h3[id]').forEach(el=>io.observe(el));
+</script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 """剖析某 milestone(默认 precedence rank 23, value≈0.6)为何 value 偏低(用户觉得应在 ~0.86)。
 3path-lite(image⊕proprio)聚类, 看该簇:成员进度 Tv 分布(是否双峰/宽)+ 每 ep 首达分布 + 抽样成员真实帧。
-跑法: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_milestone23_diag.py [rank]
+跑法: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_milestone23_diag.py [rank]
 """
 import sys, glob, time
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")

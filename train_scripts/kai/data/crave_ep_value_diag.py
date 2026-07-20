@@ -1,6 +1,6 @@
 """诊断: 为何某些 ep 最终 value 不到 1.0。看末帧真实图 + 末帧最近 milestone 的 value + 全程达到的最高 milestone。
 判定: 末帧已折好但 value 低 = 读出/锚点问题; 末帧本就没折完 = value 正确(短/未完成 demo)。
-跑法: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_ep_value_diag.py
+跑法: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_ep_value_diag.py
 """
 import sys, glob, time
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")

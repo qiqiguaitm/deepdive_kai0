@@ -1,0 +1,175 @@
+# 【可复用模板】LIBERO-10 N 路并行重复评测 — 北京 Robot-North-H20 8×H20 整节点
+#
+# 动机(2026-07-19): 同 checkpoint 重复评测实测 聚合摆动 0.2~2.0pt、per-task 摆动 6~10pt
+#   (见 lmvla/lmwm/docs/RESULTS_libero10_all_variants_matrix_2026-07-19.md §1)。
+#   单次 eval 无法区分 <2pt 的方案差异 → 此后所有方案必须 **≥4 路重复取 均值±std**。
+#
+# 用法: 改下面 ★ 三行(CKPT / RUN_GROUP / LMWM env 段), 然后:
+#   cd ~/workspace/deepdive_kai0/train_scripts/kai/volc
+#   /vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/.venv/bin/python submit_yaml.py libero_eval_x4_8h20.yaml
+#
+# 隔离保证: 每路独占 GPU i → CUDA_VISIBLE_DEVICES=i 且 MUJOCO_EGL_DEVICE_ID=i(脚本 99/222 行原生支持),
+#   PORT_BASE=5694+i*20 避免 policy server 端口抢占, RUN_TAG=rep$i 避免输出目录互覆盖。
+#   (本机曾出现两 eval 互撞 = 当时被塞在同一张卡上, 非框架限制。)
+
+TaskName: "lmwm-mech2-eval-x8seeds"
+Description: "机制2 LIBERO-10 8个seed并行重复评测(8卡), 真误差棒"
+Tags: []
+
+ImageUrl: "dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1"
+ResourceQueueName: "Robot-North-H20"
+Framework: "PyTorch"
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 1
+    Flavor: "ml.hpcpni3ln.45xlarge"   # 8×H20 整节点
+    # 备选: "ml.pni3ln.5xlarge" = 单卡 H20(20vCPU/200GiB/1GPU), 见 eval_libero_armB_4h20.yaml。
+    #   队列不支持 FlexibleResourceClaim, 但支持这些固定档位。
+    #   → 排队紧张时可改投多个单卡任务(每任务1路), 调度更灵活; 8卡整节点则可 2 ckpt × 4 路 一次跑完。
+
+ActiveDeadlineSeconds: 28800   # 8h(单路 ~2h, 4 路并行 ~2.5h, 留足余量)
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnbj875793a96d6b"
+    MountPath: "/vePFS-North-E/vis_robot"
+    SubPath: "/vis_robot"
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: PYTHONUNBUFFERED
+    Value: "1"
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+  - Name: TOKENIZERS_PARALLELISM
+    Value: "false"
+
+Entrypoint: |
+  set -uo pipefail
+  REPO=/vePFS-North-E/vis_robot/workspace/deepdive_kai0
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  LOG_DIR=$REPO/lmvla/lawam/logs/volc_eval
+  mkdir -p "$LOG_DIR"
+  LOG="$LOG_DIR/evalmech2x8_${STAMP}.log"
+  exec >> "$LOG" 2>&1
+  set -x
+  echo "=== LIBERO-10 4路并行重复评测 start $(date -u) ==="
+
+  # ★1 待评 checkpoint
+  CKPT=$REPO/lmvla/lawam/results/Checkpoints/libero/20260718_231838+lmwm_dual_2q_tsched_cnbj_volc/checkpoints/steps_12500_pytorch_model.pt
+  # ★2 结果分组名(输出到 results/eval_runs/libero/$RUN_GROUP/rep{0..3}/)
+  export RUN_GROUP=mech2_tsched_x8seed
+  NREP=8
+
+  export PYTHON=$REPO/kai0/.venv/bin/python
+  export PATH=$REPO/kai0/.venv/bin:$PATH
+  export STAR_VLA_PYTHON=$PYTHON
+  export LIBERO_PYTHON=$PYTHON
+  cd $REPO/lmvla/lawam
+
+  nvidia-smi -L | head -8
+  [ -f "$CKPT" ] || { echo "FATAL: ckpt 不存在 $CKPT" >&2; exit 13; }
+
+  # ---- 环境自愈(幂等; 依赖装在共享盘 venv 上会持久化, 已装则秒过) ----
+  # 取自已验证的 eval_libero_armB_4h20.yaml。LIBERO 本身走 PYTHONPATH 注入(非 pip), 但
+  # robosuite/mujoco/tyro/websockets/json-numpy 必须在 venv 里, 否则 policy server / eval client 起不来。
+  env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u all_proxy \
+    $PYTHON -m pip install -q -i https://mirrors.aliyun.com/pypi/simple/ \
+    'robosuite==1.4.1' mujoco opencv-python-headless tyro websockets json-numpy 2>&1 | tail -2
+  # LIBERO 路径配置(绝对 North-E 路径; 每次重写保证不被别处的相对路径污染)
+  LH=$REPO/lmvla/LIBERO
+  mkdir -p "$LH/libero"
+  {
+    echo "benchmark_root: $LH/libero/libero"
+    echo "bddl_files: $LH/libero/libero/bddl_files"
+    echo "init_states: $LH/libero/libero/init_files"
+    echo "datasets: $LH/libero/libero/../datasets"
+    echo "assets: $LH/libero/libero/assets"
+  } > "$LH/libero/config.yaml"
+  rm -f /root/.libero/config.yaml 2>/dev/null || true
+  $PYTHON -c "from starVLA.model.framework.vlas.lawam import LatentWorldPolicyBackend; print('Backend OK')"
+
+  # ★3 LMWM 注入 env —— 必须与该 ckpt 的训练架构一致, 否则 state_dict size mismatch
+  #    (LMWM_DUAL/DUAL_2Q 改变 num_action_queries 与投影头 = 架构相关, 必设;
+  #     LMWM_MS_TSCHED 只作用于训练期 ms-drop 调度, 推理不需要)
+  export LMWM_CKPT=$REPO/lmvla/lmwm/checkpoints/lmwm_libero_rvalley/lmwm.pt
+  export LMWM_ADAPTER_DIR=$REPO/lmvla/lawam
+  export LMWM_SWAP_TEACHER=1
+  export LMWM_DUAL=1
+  export LMWM_DUAL_2Q=1
+  unset LMWM_MILESTONE_TARGET LMWM_TARGET_COMPACT LMWM_MS_TSCHED LMWM_HINT_DROPOUT
+  [ -f "$LMWM_CKPT" ] || { echo "FATAL: LMWM ckpt 不存在 $LMWM_CKPT" >&2; exit 13; }
+
+  export SUITES=libero_10
+  export NUM_TRIALS_PER_TASK=50      # 与本机历史 eval 同口径(500 ep/路)
+  export NUM_WORKERS=25              # 同口径
+  export MUJOCO_GL=egl
+  export SERVER_STARTUP_TIMEOUT_SEC=1200
+  export OUTPUT_ROOT=$REPO/lmvla/lawam/results/eval_runs/libero
+
+  echo "[$(date)] preflight OK; ckpt=$CKPT group=$RUN_GROUP nrep=$NREP"
+
+  # ---- 起 NREP 路, 每路独占一张卡 ----
+  pids=""
+  for i in $(seq 0 $((NREP-1))); do
+    (
+      export GPU_IDS=$i
+      export EVAL_GPU_IDS=$i
+      export PORT_BASE=$((5694 + i*20))
+      export EVAL_SEED=$i          # ★ 每路不同 seed → 真独立样本
+      export LIBERO_RUN_GROUP=$RUN_GROUP
+      export RUN_TAG=seed$i
+      echo "[seed$i] GPU=$i PORT_BASE=$PORT_BASE 启动 $(date -u)"
+      bash examples/LIBERO/eval_files/auto_eval_scripts/run_libero_benchmark.sh "$CKPT"
+      echo "[rep$i] 结束 rc=$? $(date -u)"
+    ) > "$LOG_DIR/evalmech2x8_${STAMP}_seed${i}.log" 2>&1 &
+    pids="$pids $!"
+    sleep 20   # 错开启动, 避免 4 个 server 同时抢 GPU/端口
+  done
+  echo "[$(date)] 已起 $NREP 路: $pids"
+  for p in $pids; do wait $p; done
+  echo "[$(date)] 全部 $NREP 路结束"
+
+  # ---- 汇总: 逐路 per-task + 均值±std ----
+  $PYTHON - <<'PYEOF'
+  import json, glob, os
+  from collections import defaultdict
+  import statistics as st
+  root = os.environ.get("OUTPUT_ROOT")
+  group = os.environ.get("RUN_GROUP", "mech2_tsched_x8seed")
+  reps = []
+  for f in sorted(glob.glob(f"{root}/{group}/seed*/suites/libero_10/episodes.jsonl")):
+      s = defaultdict(list)
+      for line in open(f):
+          d = json.loads(line); s[d["task_id"]].append(bool(d["success"]))
+      tot = sum(len(v) for v in s.values()); ns = sum(sum(v) for v in s.values())
+      if tot == 0: continue
+      per = {k: sum(v)/len(v)*100 for k, v in s.items()}
+      reps.append((f.split("/suites/")[0].split("/")[-1], ns/tot*100, tot, per))
+  print("\n================ 8-seed重复评测汇总 ================")
+  for tag, agg, tot, per in reps:
+      print(f"{tag}: agg={agg:.1f} (n={tot}) | " + " ".join(f"t{k}={per[k]:.0f}" for k in sorted(per)))
+  if len(reps) >= 2:
+      aggs = [r[1] for r in reps]
+      print(f"\n聚合: 均值={st.mean(aggs):.2f} std={st.pstdev(aggs):.2f} 范围=[{min(aggs):.1f},{max(aggs):.1f}]")
+      tasks = sorted(reps[0][3])
+      print("per-task 均值±std:")
+      for k in tasks:
+          vs = [r[3].get(k, float('nan')) for r in reps]
+          print(f"  t{k}: 均值={st.mean(vs):5.1f} std={st.pstdev(vs):4.1f} 范围=[{min(vs):.0f},{max(vs):.0f}]")
+      print("\n★判据(见 RESULTS_libero10_all_variants_matrix): 机制2 成功的标志 = t8 均值显著>90 (LaWM=100/LMWM替换=84)")
+  print("================================================\n")
+  PYEOF
+
+  echo "=== LIBERO-10 4路并行重复评测 DONE $(date -u) ==="
+
+RetryOptions:
+    EnableRetry: false
+    MaxRetryTimes: 0
+
+AccessType: "Public"

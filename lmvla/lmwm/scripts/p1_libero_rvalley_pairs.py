@@ -11,7 +11,13 @@ from scipy.spatial.distance import cdist
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 
-ROOT = "/vePFS/tim/workspace/deepdive_kai0/lmvla/lawam/dataset/libero_merged_no_noops_20hz"
+# [2026-07-20] ROOT 原为 cnsh 绝对路径, North-E 上不存在 → glob 空 → dpar[0] IndexError。
+#   注意本文件与 p1_libero_dinov3base_extract.py 硬编码了**两个不同的根**(后者用 /home/tim/... ,
+#   靠 volc entrypoint 建的软链恰好能解析), 跨集群时只有本文件会炸。改为可覆盖。
+ROOT = os.environ.get(
+    "LMVLA_LIBERO_ROOT",
+    os.path.join(os.environ.get("CRAVE_REPO", "/vePFS/tim/workspace/deepdive_kai0"),
+                 "lmvla/lawam/dataset/libero_merged_no_noops_20hz"))
 FEAT = "/vePFS/tim/workspace/deepdive_kai0/lmvla/lmwm/data/libero_dinov3base"
 OUT = "/vePFS/tim/workspace/deepdive_kai0/lmvla/lmwm/data/libero_rvalley"
 THR = 0.03
@@ -35,7 +41,20 @@ def r_and_segments(gd):
     return res
 
 def main():
-    import sys
+    global FEAT, OUT
+    import sys, argparse
+    ap = argparse.ArgumentParser()
+    # [2026-07-20] 跨空间对照: 允许换特征来源(Qwen3-VL 视觉塔 = VLA 自身编码器空间)。
+    #   两侧必须同为 stride=2、同一批 episode, 否则结论不可归因于特征空间。
+    ap.add_argument("--feat", default=FEAT)
+    ap.add_argument("--out", default=OUT)
+    # [2026-07-20] THR 原为 DINOv3 上调定的常数。跨空间对照时需在新空间重新标定,
+    #   否则"段数不同"会与"边界位置不同"混淆(Qwen 用 DINOv3 的 THR 得 3.90 段 vs DINOv3 3.23)。
+    ap.add_argument("--thr", type=float, default=THR)
+    a = ap.parse_args()
+    FEAT, OUT = a.feat, a.out
+    globals()["THR"] = a.thr
+    print(f"[cfg] FEAT={FEAT}\n[cfg] OUT={OUT}\n[cfg] THR={THR}", flush=True)
     files = sorted(glob.glob(f"{FEAT}/ep*.npz"), key=lambda p: int(os.path.basename(p)[2:-4]))
     dpar = sorted(glob.glob(f"{ROOT}/data/**/*.parquet", recursive=True))
     ep2task = pd.read_parquet(dpar[0], columns=["episode_index", "task_index"]).groupby("episode_index")["task_index"].first().to_dict()

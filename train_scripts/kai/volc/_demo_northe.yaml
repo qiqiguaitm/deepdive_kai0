@@ -1,0 +1,36 @@
+TaskName: portable-demo-northe
+Description: '可移植 body 示例: entrypoint 只用变量, 不含集群字面量'
+Tags: []
+Framework: PyTorch
+TaskRoleSpecs:
+- RoleName: worker
+  RoleReplicas: 1
+  Flavor: ml.hpcpni3ln.45xlarge
+ActiveDeadlineSeconds: 3600
+EnableTensorBoard: false
+CacheType: Cloudfs
+Envs:
+- Name: PYTHONUNBUFFERED
+  Value: '1'
+Entrypoint: 'set -uo pipefail
+
+  source /vePFS-North-E/vis_robot/workspace/deepdive_kai0/train_scripts/kai/volc/_cluster_env.sh
+
+  echo "cluster=$CLUSTER repo=$REPO"
+
+  $PYTHON -c "import torch;print(''torch'',torch.__version__)"
+
+  ls $LMVLA_LIBERO_ROOT/data >/dev/null && echo "数据集可达"
+
+  '
+RetryOptions:
+  EnableRetry: false
+  MaxRetryTimes: 0
+AccessType: Public
+ImageUrl: dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1
+ResourceQueueName: Robot-North-H20
+Storages:
+- Type: Vepfs
+  VepfsId: vepfs-cnbj875793a96d6b
+  SubPath: /vis_robot
+  MountPath: /vePFS-North-E/vis_robot

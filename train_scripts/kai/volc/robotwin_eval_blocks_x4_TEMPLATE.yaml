@@ -1,0 +1,152 @@
+# [B/RoboTwin 判决实验] 积木族 6 任务 eval, 北京 Robot-North-H20 4卡 × 4 路并行(每路独立 seed)
+#
+# 动机: LIBERO-10 已饱和(8/10 任务在 93~100, 聚合 SEM 0.3~0.6, 所有效应 <1.5pt 测不出),
+#   外部文献亦指其 "almost saturated"(LIBERO-Plus 2510.13626 / LIBERO-PRO 2510.03827)。
+#   RoboTwin 积木族的成功判据正是**相对空间关系**(谁在谁上/按尺寸排序), 且基线远未饱和,
+#   是目前唯一可能给出判决的场地。
+#
+# ★ seed 必须逐路不同 ★
+#   batched_eval_runner.py:458 `seed = int(os.getenv("SEED","0"))` —— 与 LIBERO 同款默认 0 陷阱。
+#   同 seed 重复会给出假的紧误差棒(LIBERO 实测有效 σ 差 5 倍), 故每路 SEED=$i。
+#
+# 口径: 6 任务 × ROBOTWIN_TEST_NUM 局/路 × 4 路。两个 ckpt 各提交一个本模板的实例, 完全同口径。
+
+TaskName: "__TASKNAME__"
+Description: "__DESC__"
+Tags: []
+
+ImageUrl: "dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1"
+ResourceQueueName: "Robot-North-H20"
+Framework: "PyTorch"
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 1
+    Flavor: "ml.pni3ln.20xlarge"   # 4×H20
+
+ActiveDeadlineSeconds: 86400
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnbj875793a96d6b"
+    SubPath: "/vis_robot"
+    MountPath: "/vePFS-North-E/vis_robot"
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: PYTHONUNBUFFERED
+    Value: "1"
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+  - Name: TOKENIZERS_PARALLELISM
+    Value: "false"
+
+Entrypoint: |
+  set -uo pipefail
+  REPO=/vePFS-North-E/vis_robot/workspace/deepdive_kai0
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  LOG_DIR=$REPO/lmvla/lawam/logs/volc_rteval
+  mkdir -p "$LOG_DIR"
+  LOG="$LOG_DIR/__TAG___${STAMP}.log"
+  exec >> "$LOG" 2>&1
+  set -x
+  echo "=== RoboTwin 积木6任务 eval (__TAG__) start $(date -u) ==="
+
+  mkdir -p /home/tim/workspace && ln -sfn $REPO /home/tim/workspace/deepdive_kai0
+
+  export PYTHON=$REPO/kai0/.venv/bin/python
+  export PATH=$REPO/kai0/.venv/bin:$PATH
+  export STAR_VLA_PYTHON=$PYTHON
+  cd $REPO/lmvla/lawam
+
+  CKPT=__CKPT__
+  export RUN_GROUP=__TAG__
+  NREP=4
+
+  nvidia-smi -L | head -4
+  [ -f "$CKPT" ] || { echo "FATAL: ckpt 不存在 $CKPT" >&2; exit 13; }
+  # from_pretrained -> read_mode_config 断言 run_dir(=ckpt.parents[1]) 下有这两个文件(**不是 config.json**)
+  RUN_DIR=$(dirname $(dirname "$CKPT"))
+  for f in config.yaml dataset_statistics.json; do
+    [ -f "$RUN_DIR/$f" ] || { echo "FATAL: 缺 $RUN_DIR/$f" >&2; exit 13; }
+  done
+
+  export ROBOTWIN_PATH=/vePFS-North-E/vis_robot/tim/RoboTwin
+  [ -d "$ROBOTWIN_PATH/envs" ] || { echo "FATAL: RoboTwin 不存在 $ROBOTWIN_PATH" >&2; exit 13; }
+  export ROBOTWIN_TASKS="beat_block_hammer blocks_ranking_size blocks_ranking_rgb handover_block stack_blocks_two stack_blocks_three"
+  for t in $ROBOTWIN_TASKS; do
+    [ -f "$ROBOTWIN_PATH/envs/$t.py" ] || { echo "FATAL: 缺任务 $t" >&2; exit 13; }
+  done
+  export TASK_CONFIG=demo_clean
+  export ROBOTWIN_TEST_NUM=50          # 每任务每路 50 局 → 6×50×4 = 1200 局/ckpt
+  export ROBOTWIN_NUM_SLOTS=7
+  export ROBOTWIN_SAVE_VIDEO=0
+
+  __LMWMENV__
+
+  echo "[$(date)] preflight OK; ckpt=$CKPT group=$RUN_GROUP tasks=$ROBOTWIN_TASKS"
+
+  pids=""
+  for i in $(seq 0 $((NREP-1))); do
+    (
+      export CUDA_VISIBLE_DEVICES=$i
+      export SEED=$i                    # ★ 每路不同 seed → 真独立样本
+      export ROBOTWIN_EVAL_ROOT=$REPO/lmvla/lawam/results/eval_runs/robotwin/$RUN_GROUP/seed$i
+      mkdir -p "$ROBOTWIN_EVAL_ROOT"
+      echo "[seed$i] GPU=$i 启动 $(date -u)"
+      bash examples/Robotwin/eval_files/auto_eval_scripts/auto_eval_robotwin.sh "$CKPT" "$TASK_CONFIG" "seed$i"
+      echo "[seed$i] 结束 rc=$? $(date -u)"
+    ) > "$LOG_DIR/__TAG___${STAMP}_seed${i}.log" 2>&1 &
+    pids="$pids $!"
+    sleep 20
+  done
+  echo "[$(date)] 已起 $NREP 路: $pids"
+  for p in $pids; do wait $p; done
+  echo "[$(date)] 全部 $NREP 路结束"
+
+  export RUN_GROUP
+  $PYTHON - <<'PYEOF'
+  import json, glob, os, statistics as st
+  from collections import defaultdict
+  root = f"{os.environ['REPO']}/lmvla/lawam/results/eval_runs/robotwin/{os.environ['RUN_GROUP']}"
+  per_seed = {}
+  for f in sorted(glob.glob(f"{root}/seed*/**/*.json", recursive=True)):
+      try: d = json.load(open(f))
+      except Exception: continue
+      if not isinstance(d, dict): continue
+      sd = f.split("/seed")[1].split("/")[0]
+      for k, v in d.items():
+          if isinstance(v, dict) and "success_rate" in v:
+              per_seed.setdefault(sd, {})[k] = float(v["success_rate"])
+          elif k.endswith("success_rate") and isinstance(v, (int, float)):
+              per_seed.setdefault(sd, {})[os.path.basename(os.path.dirname(f))] = float(v)
+  print("\n============ RoboTwin 积木6任务 · 4路变seed 汇总 ============")
+  if not per_seed:
+      print("⚠️ 未解析到结果 json —— 请人工查看 results/eval_runs/robotwin/ 下的输出结构")
+  else:
+      tasks = sorted({t for v in per_seed.values() for t in v})
+      for sd in sorted(per_seed):
+          row = per_seed[sd]
+          print(f"seed{sd}: " + " ".join(f"{t}={row.get(t, float('nan')):.2f}" for t in tasks))
+      print("\nper-task 均值±std:")
+      for t in tasks:
+          vs = [per_seed[s][t] for s in per_seed if t in per_seed[s]]
+          if len(vs) >= 2:
+              print(f"  {t:24s} 均值={st.mean(vs):6.3f} std={st.pstdev(vs):5.3f} n={len(vs)}")
+      allv = [st.mean(list(v.values())) for v in per_seed.values() if v]
+      if len(allv) >= 2:
+          print(f"\n聚合(6任务均值): 均值={st.mean(allv):.3f} std={st.pstdev(allv):.3f}")
+  print("============================================================\n")
+  PYEOF
+
+  echo "=== RoboTwin eval (__TAG__) DONE $(date -u) ==="
+
+RetryOptions:
+    EnableRetry: false
+    MaxRetryTimes: 0
+
+AccessType: "Public"

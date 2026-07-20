@@ -1,7 +1,7 @@
 """全量 3055ep: 聚类用 Wan2.2-VAE latent ⊕ proprio(对照 DINOv2-large⊕proprio), 渲染解 medoid 的 Wan latent。
 看 "Wan 编码 + proprio 消歧" 在同架构(自适应K0+precedence+isotonic)下效果如何 + ep763/1527 是否到 1.0。
 复用 8卡 all-Wan 任务存的 wan shard(12288维) + parquet proprio。
-跑法: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_full_3path_wan.py
+跑法: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_full_3path_wan.py
 """
 import sys, glob, time
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")

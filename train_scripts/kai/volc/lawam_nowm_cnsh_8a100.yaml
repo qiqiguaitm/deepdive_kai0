@@ -1,0 +1,99 @@
+# 纯 VLA 底座(NO WM) — 上海 robot-task 队列 8×A100
+# 对照实验: 关闭未来特征世界模型(future_prediction=false), 无任何 LMWM/LaWM 未来注入。
+#   目的: 建立"不做任何 WM 注入的纯 VLA"地板, 归因 LaWM(t+7) / LMWM(milestone) 两种 WM 各自的 per-task 影响。
+# 消融变量: 仅 future_prediction=false(去掉 h_t1 未来通道 + perceptual 辅助损失)。
+#   保留 enable_loss_distill=true(1) 与其余 WM 运行一致只隔离 WM 一个变量, (2) 免 vlm_to_lam 无梯度触发 DDP find_unused crash。
+# recipe 同 hintdrop/E1/2Q(8×A100 cnsh 12500步), 唯一差异=无 WM。无 LMWM env。
+# 提交: gsy 上 cd train_scripts/kai/volc && kai0/.venv/bin/python submit_yaml.py lawam_nowm_cnsh_8a100.yaml
+
+TaskName: "lawam-nowm-cnsh-8a100"
+Description: "纯VLA无WM底座(future_prediction=false), 上海robot-task 8xA100 12500steps, LIBERO"
+Tags: []
+
+ImageUrl: "visincept-cn-shanghai.cr.volces.com/grasp/kai:kai0-gf0"
+ResourceQueueName: "robot-task"
+Framework: "PyTorch"
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 1
+    Flavor: "ml.hpcpni2.28xlarge"   # 8× A100-80G 整节点
+
+ActiveDeadlineSeconds: 43200
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnsh075262e1f815"
+    SubPath: ""
+    MountPath: "/vePFS"
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: PYTHONUNBUFFERED
+    Value: "1"
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+  - Name: TOKENIZERS_PARALLELISM
+    Value: "false"
+  - Name: OMP_NUM_THREADS
+    Value: "8"
+
+Entrypoint: |
+  set -uo pipefail
+  REPO=/vePFS/tim/workspace/deepdive_kai0
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  LOG_DIR=$REPO/lmvla/lawam/logs/volc_dualarm
+  mkdir -p "$LOG_DIR"
+  LOG="$LOG_DIR/nowm_cnsh_${STAMP}.log"
+  exec >> "$LOG" 2>&1
+  set -x
+  echo "=== 纯VLA NO-WM (cnsh 8xA100) start $(date -u) ==="
+
+  mkdir -p /home/tim/workspace
+  ln -sfn $REPO /home/tim/workspace/deepdive_kai0
+  ls -l /home/tim/workspace/deepdive_kai0/lmvla/lawam/latent_action_model/logs/dino_large_vae/lam_release/checkpoints/pytorch_model.pt
+
+  export PYTHON=$REPO/kai0/.venv/bin/python
+  export PATH=$REPO/kai0/.venv/bin:$PATH
+  cd $REPO/lmvla/lawam
+
+  nvidia-smi -L | head
+  $PYTHON -c "import torch, transformers, accelerate; print(f'torch={torch.__version__} tf={transformers.__version__} acc={accelerate.__version__} cuda={torch.cuda.is_available()}')"
+  $PYTHON -c "from starVLA.model.framework.vlas.lawam import LatentWorldPolicyBackend; print('LatentWorldPolicyBackend import OK')"
+
+  # 无 WM: 不设任何 LMWM env, 显式清空以防继承
+  unset LMWM_CKPT LMWM_MILESTONE_TARGET LMWM_TARGET_COMPACT LMWM_ADAPTER_DIR LMWM_SWAP_TEACHER LMWM_HINT_DROPOUT LMWM_DUAL LMWM_DUAL_2Q
+
+  for f in "results/Checkpoints/qwen3_weights/config.json" \
+           "results/Checkpoints/pretrain/lawam_pretrain/final_model/pytorch_model.pt" \
+           "latent_action_model/logs/dino_large_vae/lam_release/checkpoints/pytorch_model.pt"; do
+    [ -e "$f" ] || { echo "FATAL: $f missing/unresolved" >&2; exit 13; }
+  done
+  echo "[$(date)] preflight OK (no-WM pure VLA, base weights + symlinks resolved)"
+
+  export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+  export MASTER_PORT=29520
+  export LAWAM_RUN_TIMESTAMP=${STAMP}
+
+  # ★ 唯一消融: future_prediction=false → 去掉 h_t1 未来特征通道 + perceptual 辅助损失(纯 VLA)
+  # ddp_find_unused_parameters=true: no-WM 下 lam.decoder(WM decoder)不再被用, 成 unused param;
+  #   WM 运行(future_prediction=true)会用到它故配置默认 false, 此处必须开启否则 DDP 崩(param 494+)。
+  bash train_lawam_distributed.sh \
+    --config_yaml starVLA/config/training/train_libero.yaml \
+    --run_id=lawam_nowm_cnsh_volc \
+    --framework.action_model.future_prediction=false \
+    --trainer.ddp_find_unused_parameters=true \
+    --trainer.max_train_steps=12500 \
+    --trainer.save_interval=2500
+
+  echo "=== 纯VLA NO-WM (cnsh) DONE $(date -u) ==="
+
+RetryOptions:
+    EnableRetry: false
+    MaxRetryTimes: 0
+
+AccessType: "Public"

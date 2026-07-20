@@ -1,7 +1,7 @@
 """逐帧诊断: ep763/ep1527 为何 value 不到 1.0(用户说是标准完整折)。
 出接触印张: 全程均匀抽 ~18 帧 top_head 真实图, 每帧标注 [帧号 / 最近milestone value / 该簇coverage / 特征是否有效]。
 看: 布料是否在干净折叠 + value 在哪一步开始跟丢 + 是否特征无效/域不匹配。
-跑法: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_ep_contact.py
+跑法: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_ep_contact.py
 """
 import sys, glob, json, time
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")

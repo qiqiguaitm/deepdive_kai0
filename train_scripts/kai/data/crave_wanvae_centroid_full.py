@@ -1,7 +1,7 @@
 """全量 kai0_base @3Hz 聚类 → Wan2.2 VAE 渲染簇中心(看更大数据是否让 milestone/质心更好)。
 内存友好:分块 decode→DINOv2-large pooled(只留 pooled, 不留 32GB grids);只对入选 milestone 的成员跑 Wan。
 三行:① Wan latent 平均(合成质心) ② Wan medoid 解码(锐利) ③ 最近真实帧。
-跑法: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_wanvae_centroid_full.py [--mine-n 550]
+跑法: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_wanvae_centroid_full.py [--mine-n 550]
 """
 import sys, argparse, time
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")

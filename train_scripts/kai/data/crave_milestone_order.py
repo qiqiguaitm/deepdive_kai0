@@ -2,7 +2,7 @@
 复用全量 dino shard 特征(无需重编码)。产出:
   ① 当前 tpos 序的逆序对数 + Kendall-τ(tpos序 vs precedence序)
   ② 簇中心 medoid 画廊两行: 上=当前 tpos 序, 下=precedence 序; 逆序 milestone 红框标出
-跑法: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_milestone_order.py
+跑法: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_milestone_order.py
 """
 import sys, glob, json, time
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")

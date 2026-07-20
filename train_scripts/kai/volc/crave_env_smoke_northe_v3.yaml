@@ -1,0 +1,121 @@
+# [环境验收] North-E 上 CRAVE/LMWM 链路的 GPU 节点端到端 smoke
+#
+# 背景: 2026-07-20 勘查发现 CRAVE/LMWM 链路原本是 **gf0 单点依赖** —— North-E 无 srpo 等价环境,
+#   所有特征提取/r场/分段/LMWM训练只能在 gf0 跑, 产物靠传输同步。本任务验证补齐后的 North-E 环境。
+#
+# 已做的配置:
+#   · North-E `kai0/.venv` 补装 scikit-learn==1.7.2(与 gf0 srpo 同版本 —— sklearn 版本会改变
+#     BayesianGMM/PCA 输出, 不钉死则跨集群产物不可比)。numpy/scipy 经 dry-run 确认未被改动。
+#   · DINOv3 加载路径实测为 **HF AutoModel(DINOv3ViTModel)**, 与 gf0 一致;
+#     注意 transformers < 4.56 会静默回退到 `DINOv3ViTStandalone` 纯 torch 移植版(两条路预处理
+#     是否等价**未经实证**), 故 py311_bak(4.53.2)禁用于特征提取。
+#
+# 必需环境变量(两者缺一不可):
+#   CRAVE_REPO=<本集群 repo 根>   —— crave/config/paths.py 默认写死 cnsh 路径
+#   PYTHONPATH=<repo>/lmvla/crave/src
+
+TaskName: "crave-env-smoke-northe-v3"
+Description: "验收 North-E 的 CRAVE/LMWM 环境: DINOv3抽特征 + rvalley分段 全链路"
+Tags: []
+
+ImageUrl: "dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1"
+ResourceQueueName: "Robot-North-H20"
+Framework: "PyTorch"
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 1
+    Flavor: "ml.pni3ln.5xlarge"   # 单卡 H20 足够(smoke 只抽 4 个 ep)
+
+ActiveDeadlineSeconds: 7200
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnbj875793a96d6b"
+    SubPath: "/vis_robot"
+    MountPath: "/vePFS-North-E/vis_robot"
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: PYTHONUNBUFFERED
+    Value: "1"
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+
+Entrypoint: |
+  set -uo pipefail
+  REPO=/vePFS-North-E/vis_robot/workspace/deepdive_kai0
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  LOG_DIR=$REPO/lmvla/lmwm/logs
+  mkdir -p "$LOG_DIR"
+  LOG="$LOG_DIR/crave_env_smoke_${STAMP}.log"
+  exec >> "$LOG" 2>&1
+  set -x
+  echo "=== North-E CRAVE 环境验收 start $(date -u) ==="
+
+  mkdir -p /home/tim/workspace && ln -sfn $REPO /home/tim/workspace/deepdive_kai0
+
+  export REPO
+  export PYTHON=$REPO/kai0/.venv/bin/python
+  export CRAVE_REPO=$REPO
+  export PYTHONPATH=$REPO/lmvla/crave/src
+  cd $REPO/lmvla/lmwm
+
+  nvidia-smi -L | head -2
+
+  echo "--- ① 环境指纹(须与 gf0 一致: sklearn 1.7.2 / numpy 2.2.6 / scipy 1.15.3) ---"
+  $PYTHON - <<'PYEOF'
+  import sklearn, numpy, scipy, transformers, torch
+  print(f"sklearn={sklearn.__version__} numpy={numpy.__version__} scipy={scipy.__version__}")
+  print(f"transformers={transformers.__version__} torch={torch.__version__} cuda={torch.cuda.is_available()}")
+  assert sklearn.__version__ == "1.7.2", f"sklearn 版本漂移: {sklearn.__version__}"
+  assert numpy.__version__ == "2.2.6" and scipy.__version__ == "1.15.3", "numpy/scipy 基线被改动"
+  assert torch.cuda.is_available(), "无 GPU"
+  print("OK_FINGERPRINT")
+  PYEOF
+
+  echo "--- ② DINOv3 必须走 HF 路径(回退 standalone 即判失败) ---"
+  $PYTHON - <<'PYEOF'
+  import os, torch
+  from transformers import AutoModel
+  p = os.environ["CRAVE_REPO"] + "/temp/dinov3_vitb16"
+  m = AutoModel.from_pretrained(p, dtype=torch.bfloat16)
+  assert type(m).__name__ == "DINOv3ViTModel", type(m).__name__
+  print("OK_HF_PATH", type(m).__name__)
+  PYEOF
+
+  echo "--- ③ 抽 10 个 ep 特征(真实 GPU 前向) ---"
+  # ★ 必须 ≥5 个**同 task** 的 ep: rvalley 有 `if len(teps) < 5: continue`, 不足则分组为空 → IndexError。
+  #   ⚠️ LIBERO 的 episode 是**按 task 交错编号**的(ep0-19 的 task = 0,1,2,2,1,1,3,4,5,4,...),
+  #   连续 ep0:10 最多只有 3 个同 task → v1(4个)/v2(10个)都因此失败。此处显式取 task1 的 6 个 ep。
+  $PYTHON scripts/p1_libero_dinov3base_extract.py --eps 1,4,5,11,19,21 --stride 2 \
+    --out $REPO/lmvla/lmwm/data/_envsmoke_feat 2>&1 | tail -4
+
+  echo "--- ④ rvalley 分段(定版管线, 真验证) ---"
+  $PYTHON scripts/p1_libero_rvalley_pairs.py \
+    --feat $REPO/lmvla/lmwm/data/_envsmoke_feat \
+    --out  $REPO/lmvla/lmwm/data/_envsmoke_pairs 2>&1 | tail -5
+  # 硬断言: 必须真产出 pairs 且段数合理, 否则判失败
+  $PYTHON - <<'PYEOF'
+  import numpy as np, os
+  p = os.environ["REPO"] + "/lmvla/lmwm/data/_envsmoke_pairs/pairs.npz"
+  assert os.path.exists(p), "rvalley 未产出 pairs.npz"
+  d = np.load(p); ep, ms = d["cur_ep"], d["cur_ms"]
+  segs = float(np.mean([len(np.unique(ms[ep == e])) for e in np.unique(ep)]))
+  print(f"OK_RVALLEY eps={len(np.unique(ep))} pairs={len(ep)} segs/ep={segs:.2f}")
+  assert 1.5 < segs < 12, f"段数异常: {segs}"
+  PYEOF
+
+  echo "--- ⑤ 清理 ---"
+  rm -rf $REPO/lmvla/lmwm/data/_envsmoke_feat $REPO/lmvla/lmwm/data/_envsmoke_pairs
+  echo "=== North-E CRAVE 环境验收 DONE $(date -u) ==="
+
+RetryOptions:
+    EnableRetry: false
+    MaxRetryTimes: 0
+
+AccessType: "Public"

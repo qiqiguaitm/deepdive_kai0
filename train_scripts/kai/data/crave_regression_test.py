@@ -1,6 +1,6 @@
 """步骤3: 回退测试。造合成轨迹(ep2302 前进到中段再倒放回早段)= 真实操作回退/失误。
 看读出 value 是否正确"先升后降"跟踪回退。验证: value 与真实进度相关 + 倒放段 value 确实下降。
-跑法: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_regression_test.py
+跑法: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_regression_test.py
 """
 import sys, glob, time
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")

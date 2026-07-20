@@ -2,7 +2,7 @@
 对比逐帧读出: 旧 value(Pk=首达时间中位序) vs 新 value(precedence 定序 + isotonic 度量)。
 milestone centers 相同, 只改其 value 位置(bin), Viterbi-DP 读出 → smooth_monotone。
 复用全量 dino shard 特征(测试帧直接取, 无需重编码)。
-跑法: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_milestone_value_test.py
+跑法: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_milestone_value_test.py
 """
 import sys, glob, json, time
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")

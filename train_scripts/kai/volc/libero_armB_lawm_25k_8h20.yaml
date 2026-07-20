@@ -1,0 +1,91 @@
+# V8 机制② 双query + diffusion-t 调度 ms drop — 北京 Robot-North-H20 8×H20
+#   (cnsh robot-task 拥堵, 迁北京队列)
+# = cnsh 版 lmwm_dual_2q_tsched_cnsh_8a100.yaml 的北京镜像。挂 North-E vePFS。
+# 依赖(已在 North-E 就位): libero_rvalley/{pairs,target_compact}.npz + checkpoints/lmwm_libero_rvalley/lmwm.pt
+#   + 代码改动(flowmatching_expert/lawam/lmwm_adapter/dataloader 的 V8+机制② 已 scp 同步到 North-E)
+# 提交: cd ~/workspace/deepdive_kai0/train_scripts/kai/volc
+#   /vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/.venv/bin/python submit_yaml.py lmwm_dual_2q_tsched_8h20.yaml
+
+TaskName: "libero-armB-lawm-25k-samebudget"
+Description: "V8 机制2 双query+diffusion-t调度ms drop, 北京8×H20 12500steps, LIBERO"
+Tags: []
+
+ImageUrl: "dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1"
+ResourceQueueName: "Robot-North-H20"
+Framework: "PyTorch"
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 1
+    Flavor: "ml.hpcpni3ln.45xlarge"   # 8×H20 整节点(Robot-North-H20 不支持 FlexibleResourceClaim)
+
+ActiveDeadlineSeconds: 43200   # 12h
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnbj875793a96d6b"
+    MountPath: "/vePFS-North-E/vis_robot"
+    SubPath: "/vis_robot"
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: PYTHONUNBUFFERED
+    Value: "1"
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+  - Name: TOKENIZERS_PARALLELISM
+    Value: "false"
+  - Name: OMP_NUM_THREADS
+    Value: "8"
+
+Entrypoint: |
+  set -uo pipefail
+  REPO=/vePFS-North-E/vis_robot/workspace/deepdive_kai0
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  LOG_DIR=$REPO/lmvla/lawam/logs/volc_dualarm
+  mkdir -p "$LOG_DIR"
+  LOG="$LOG_DIR/dual_2q_tsched_cnbj_${STAMP}.log"
+  exec >> "$LOG" 2>&1
+  set -x
+  echo "=== V8 机制2 tsched (cnbj 8×H20) start $(date -u) ==="
+
+  export PYTHON=$REPO/kai0/.venv/bin/python
+  export PATH=$REPO/kai0/.venv/bin:$PATH
+  cd $REPO/lmvla/lawam
+
+  nvidia-smi -L | head
+  $PYTHON -c "import torch, transformers, accelerate; print(f'torch={torch.__version__} tf={transformers.__version__} acc={accelerate.__version__} cuda={torch.cuda.is_available()}')"
+  $PYTHON -c "from starVLA.model.framework.vlas.lawam import LatentWorldPolicyBackend; print('LatentWorldPolicyBackend import OK')"
+
+  LMWM=$REPO/lmvla/lmwm
+  MS=$LMWM/data/libero_rvalley
+  for f in "$LMWM/checkpoints/lmwm_libero_rvalley/lmwm.pt" "$MS/pairs.npz" "$MS/target_compact.npz"; do
+    [ -f "$f" ] || { echo "FATAL: $f missing" >&2; exit 13; }
+  done
+  echo "[$(date)] preflight OK (dual-2q-tsched, rvalley pairs)"
+
+  export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+  export MASTER_PORT=29522
+  export LAWAM_RUN_TIMESTAMP=${STAMP}
+
+  # ★ armB = 纯 LaWM(固定 t+7), 不注入任何 LMWM 组件
+  unset LMWM_CKPT LMWM_MILESTONE_TARGET LMWM_TARGET_COMPACT LMWM_ADAPTER_DIR LMWM_SWAP_TEACHER \
+        LMWM_DUAL LMWM_DUAL_2Q LMWM_MS_TSCHED LMWM_HINT_DROPOUT LMWM_FEAT_STRIDE
+
+  bash train_lawam_distributed.sh \
+    --config_yaml starVLA/config/training/train_libero.yaml \
+    --run_id=armB_lawm_25k_samebudget \
+    --trainer.max_train_steps=25000 \
+    --trainer.save_interval=2500
+
+  echo "=== V8 机制2 tsched (cnbj) DONE $(date -u) ==="
+
+RetryOptions:
+    EnableRetry: false
+    MaxRetryTimes: 0
+
+AccessType: "Public"

@@ -5,7 +5,7 @@
   - milestone 排序歧义:每帧真实进度最近的 milestone-tpos 是否就是它被分到的簇(mismatch 率)
   - held-out 读出:corr / 单调违反率 / 回退跳变幅度
 图:每编码器 全簇按 tpos 排序的成员-进度 boxplot(瘦且不重叠=一致;胖且重叠=乱)。
-跑法: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_value_consistency.py [--n 160]
+跑法: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_value_consistency.py [--n 160]
 """
 import sys, argparse, time, json
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")

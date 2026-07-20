@@ -1,0 +1,129 @@
+# [B/RoboTwin] LMWM 并联双query(dual2q) — robotwin2.0 积木族 1315ep 子集, 上海 robot-task 8×A100
+#
+# 动机: LIBERO-10 已饱和(24路变seed实测: 所有WM方案聚合都在 no-WM 地板 94.30 的噪声带内,
+#   SEM 0.3~0.6 → <1.5pt 差异不可声称)。唯一稳健信号是 t6 单任务(LMWM +8.5pt, p<0.001)。
+#   需要**未饱和基准**给 WM 聚合求和空间 → robotwin 积木族(堆叠/排序/交接, baseline 有余量)。
+#
+# 数据: dataset/robotwin2_lmwm_v30 —— 由 lmvla/lmwm/scripts/build_robotwin_v30_subset.py 把
+#   robotwin2.0(LeRobot v2.1) 的 1315 个积木族 ep 转成 v3.0(dataloader 只认 v3.0)。
+#   软链复用原 parquet/视频(省 ~80GB), **保留原始 episode_index** 使 LMWM provider 免重映射。
+#
+# ★★ LMWM_FEAT_STRIDE=1 是强制的 ★★
+#   robotwin 特征逐帧抽取(cur_fi = 真实 frame_index), 而 provider 默认 stride=2。
+#   实测(probe_align_exact): stride=1 → 目标与金标准 grid 逐元素一致 12/12;
+#                            stride=2 → 仅 6/12, 一半是错帧, **且完全静默不报错**。
+#
+# 对照组: robotwin_baseline_lawm_cnsh_8a100.yaml(同数据同步数, 仅无 LMWM 注入)
+# 提交: gsy 上 cd train_scripts/kai/volc && python submit_yaml.py robotwin_lmwm_dual2q_cnsh_8a100.yaml
+
+TaskName: "robotwin-lmwm-dual2q-cnsh-8a100"
+Description: "RoboTwin积木族1315ep: LMWM并联双query, 上海8xA100 20000steps"
+Tags: []
+
+ImageUrl: "visincept-cn-shanghai.cr.volces.com/grasp/kai:kai0-gf0"
+ResourceQueueName: "robot-task"
+Framework: "PyTorch"
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 1
+    Flavor: "ml.hpcpni2.28xlarge"   # 8× A100-80G 整节点
+
+ActiveDeadlineSeconds: 86400
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnsh075262e1f815"
+    SubPath: ""
+    MountPath: "/vePFS"
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: PYTHONUNBUFFERED
+    Value: "1"
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+  - Name: TOKENIZERS_PARALLELISM
+    Value: "false"
+  - Name: OMP_NUM_THREADS
+    Value: "8"
+
+Entrypoint: |
+  set -uo pipefail
+  REPO=/vePFS/tim/workspace/deepdive_kai0
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  LOG_DIR=$REPO/lmvla/lawam/logs/volc_robotwin
+  mkdir -p "$LOG_DIR"
+  LOG="$LOG_DIR/rt_lmwm_dual2q_${STAMP}.log"
+  exec >> "$LOG" 2>&1
+  set -x
+  echo "=== RoboTwin LMWM dual2q (cnsh 8xA100) start $(date -u) ==="
+
+  # 坑修: 仓库内符号链接(lam ckpt/yaml, dataset/data)指向 /home/tim/... 绝对路径,
+  #       容器只挂 /vePFS 无 /home/tim → 重建该链接层。
+  mkdir -p /home/tim/workspace
+  ln -sfn $REPO /home/tim/workspace/deepdive_kai0
+
+  export PYTHON=$REPO/kai0/.venv/bin/python
+  export PATH=$REPO/kai0/.venv/bin:$PATH
+  cd $REPO/lmvla/lawam
+
+  nvidia-smi -L | head
+  $PYTHON -c "import torch, transformers, accelerate; print(f'torch={torch.__version__} tf={transformers.__version__} cuda={torch.cuda.is_available()}')"
+  $PYTHON -c "from starVLA.model.framework.vlas.lawam import LatentWorldPolicyBackend; print('Backend import OK')"
+
+  LMWM=$REPO/lmvla/lmwm
+  MS=$LMWM/data/robotwin_milestone
+  DS=$REPO/lmvla/lawam/dataset/robotwin2_lmwm_v30
+  for f in "$LMWM/checkpoints/lmwm_robotwin_rvalley/lmwm.pt" "$MS/pairs.npz" "$MS/target_compact.npz" \
+           "$DS/meta/modality.json" "$DS/meta/tasks.parquet" "$DS/meta/episodes/chunk-000/file-000.parquet" \
+           "$DS/meta/info.json" \
+           "results/Checkpoints/qwen3_weights/config.json" \
+           "results/Checkpoints/pretrain/lawam_pretrain/final_model/pytorch_model.pt" \
+           "latent_action_model/logs/dino_large_vae/lam_release/checkpoints/pytorch_model.pt"; do
+    [ -e "$f" ] || { echo "FATAL: $f missing/unresolved" >&2; exit 13; }
+  done
+  # 数据集自检: v3.0 + episode 数(注意: 必须用 heredoc 且内容随块缩进,
+  #   直接在 python -c "..." 里顶格写多行会终止 YAML 字面块 → ScannerError)
+  export DS
+  $PYTHON - <<'PYEOF' || { echo "FATAL: 数据集自检失败" >&2; exit 13; }
+  import json, os, pyarrow.parquet as pq
+  DS = os.environ["DS"]
+  i = json.load(open(f"{DS}/meta/info.json"))
+  assert i["codebase_version"] == "v3.0", i["codebase_version"]
+  t = pq.read_table(f"{DS}/meta/episodes/chunk-000/file-000.parquet")
+  print(f"[preflight] v3.0 OK, episodes={t.num_rows}, frames={i['total_frames']}, tasks={i['total_tasks']}")
+  assert t.num_rows > 1000, t.num_rows
+  PYEOF
+  echo "[$(date)] preflight OK (robotwin v3.0 + LMWM assets)"
+
+  export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+  export MASTER_PORT=29531
+  export LMWM_CKPT=$LMWM/checkpoints/lmwm_robotwin_rvalley/lmwm.pt
+  export LMWM_MILESTONE_TARGET=$MS/pairs.npz
+  export LMWM_TARGET_COMPACT=$MS/target_compact.npz
+  export LMWM_ADAPTER_DIR=$REPO/lmvla/lawam
+  export LMWM_SWAP_TEACHER=1
+  export LMWM_FEAT_STRIDE=1              # ★★ robotwin 逐帧抽特征, 必须=1(默认2会静默错帧)
+  export LMWM_HINT_DROPOUT=0.15          # 全局(ms)通道的 cfg_drop_prob; 局部通道永不 drop
+  export LMWM_DUAL=1
+  export LMWM_DUAL_2Q=1                  # 并联双query(LIBERO 上表现最好的变体)
+  export LAWAM_RUN_TIMESTAMP=${STAMP}
+
+  bash train_lawam_distributed.sh \
+    --config_yaml starVLA/config/training/train_robotwin_lmwm.yaml \
+    --run_id=robotwin_lmwm_dual2q_cnsh \
+    --trainer.max_train_steps=20000 \
+    --trainer.save_interval=5000
+
+  echo "=== RoboTwin LMWM dual2q (cnsh) DONE $(date -u) ==="
+
+RetryOptions:
+    EnableRetry: false
+    MaxRetryTimes: 0
+
+AccessType: "Public"

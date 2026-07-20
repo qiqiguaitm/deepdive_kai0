@@ -1,7 +1,7 @@
 """新架构重做 ep2302 30Hz 分析:
 全量 kai0_base 聚类 = DINOv2-large 图像 ⊕ proprio(GPU KMeans)→ precedence 定序 + isotonic value;
 ep2302 用其全量 milestone 读出 value(3Hz, 复用 shard 特征)→ 升采样到 30Hz 出图 + 完整过程视频(Wan medoid 渲染)。
-跑法: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_ep2302_3path.py
+跑法: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_ep2302_3path.py
 """
 import sys, glob, time
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")

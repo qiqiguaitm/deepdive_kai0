@@ -2,7 +2,7 @@
 回答用户:"编码器解码器全用 WAN2.2 这一套" 是否给出合理/更好的 milestone + 簇中心。
 本地小样(默认 120 ep)先验证语义是否成立, 再决定是否上 8 卡全量(3055 ep)。
 三行:① Wan latent 平均→解码(合成质心) ② Wan medoid 解码(锐利) ③ 最近真实帧。
-跑法: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_wanvae_allwan.py [--mine-n 120]
+跑法: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_wanvae_allwan.py [--mine-n 120]
 """
 import sys, argparse, time
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")

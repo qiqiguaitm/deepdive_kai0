@@ -1,0 +1,39 @@
+TaskName: portability-verify
+Description: 验证同一 body 生成的 yaml 在两集群均可运行(集群自检+解释器+数据集+CRAVE)
+Tags: []
+Framework: PyTorch
+TaskRoleSpecs:
+- RoleName: worker
+  RoleReplicas: 1
+  Flavor: PLACEHOLDER
+ActiveDeadlineSeconds: 3600
+EnableTensorBoard: false
+CacheType: Cloudfs
+Envs:
+- Name: PYTHONUNBUFFERED
+  Value: '1'
+Entrypoint: 'set -uo pipefail
+
+  echo "=== 可移植性验证 ==="
+
+  echo "CLUSTER=$CLUSTER  REPO=$REPO"
+
+  $PYTHON -c "import torch,sklearn,transformers;print(f''torch={torch.__version__} sklearn={sklearn.__version__} tf={transformers.__version__}'')"
+
+  [ -d "$LMVLA_LIBERO_ROOT/data" ] || { echo "FATAL: 数据集不可达"; exit 13; }
+
+  echo "数据集可达: $(ls $LMVLA_LIBERO_ROOT/data/*/*.parquet 2>/dev/null | wc -l) 个 parquet"
+
+  [ -d "$ROBOTWIN_PATH/envs" ] || { echo "FATAL: RoboTwin 不可达"; exit 13; }
+
+  echo "RoboTwin 可达: $(ls $ROBOTWIN_PATH/envs/*.py | wc -l) 个任务"
+
+  PYTHONPATH=$REPO/lmvla/crave/src $PYTHON -c "from crave.encoders import load_encoder; print(''CRAVE 导入 OK'')"
+
+  echo "PORTABILITY_OK cluster=$CLUSTER"
+
+  '
+RetryOptions:
+  EnableRetry: false
+  MaxRetryTimes: 0
+AccessType: Public

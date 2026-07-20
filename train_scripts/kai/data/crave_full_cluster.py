@@ -5,12 +5,12 @@
 阶段:
   --stage encode --rank R --world W : 第 R 片帧 decode→编码 → temp/crave_full/<enc>/shard_R.npz
   --stage aggregate                 : 汇总所有 shard → 聚类 → Wan 渲染簇中心 → 出图+bundle
-本地小验: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python crave_full_cluster.py --encoder dino --stage encode --rank 0 --world 1 --mine-n 8
+本地小验: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python crave_full_cluster.py --encoder dino --stage encode --rank 0 --world 1 --mine-n 8
           然后 --stage aggregate --encoder dino --mine-n 8
 """
 import sys, os, argparse, time, json, glob
 KSP = "/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages"
-if KSP not in sys.path: sys.path.append(KSP)            # cluster: kai0 python; local: .venv_wanvae + 此 append
+if KSP not in sys.path: sys.path.append(KSP)            # cluster: kai0 python; local: srpo env + 此 append(.venv_wanvae 已于 2026-07-20 删除)
 import numpy as np, cv2, torch
 sys.path.insert(0, "/vePFS/tim/workspace/deepdive_kai0/train_scripts/kai/data")
 from crave_decoder_scale_ablation import REPO, DS, cs, decode_images, grab_ep

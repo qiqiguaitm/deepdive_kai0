@@ -1,5 +1,5 @@
 """Plot baseline (production) vs best (Viterbi-over-milestones) value/assignment curves for 1-2 long eps.
-Run: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_align_plot.py <ds>
+Run: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_align_plot.py <ds>
 """
 import sys, os
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")

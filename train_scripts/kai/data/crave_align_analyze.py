@@ -7,7 +7,7 @@ milestone selection (from crave_generalize.py), then:
   - evaluates fixes (direct nearest-ms, Viterbi-over-milestones, proprio upweight, temporal context)
   - keeps best, writes PNGs + JSON to temp/crave_align/
 
-Run: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_align_analyze.py <vis|xvla|coffee>
+Run: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_align_analyze.py <vis|xvla|coffee>
 """
 import sys, os, json, time
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")

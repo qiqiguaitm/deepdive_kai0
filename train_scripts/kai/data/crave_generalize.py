@@ -1,6 +1,6 @@
 """泛化验证: 当前架构(DINOv2-large 图像⊕proprio 聚类 + precedence/isotonic + 簇中心解码) 在 VIS/XVLA/coffee 全量聚类,
 每数据集抽2个偏长 ep, 渲染 图像+forward value 视频, 配簇中心解码图。
-跑法: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_generalize.py <vis|xvla|coffee>
+跑法: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_generalize.py <vis|xvla|coffee>
 """
 import sys, glob, time, json, subprocess, tempfile, os
 from pathlib import Path

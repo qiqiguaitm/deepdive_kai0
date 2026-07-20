@@ -5,7 +5,7 @@
   (3) DINOv2 small 解码器 簇中心(现方案)
   (4) 最近真实帧(medoid 原图)
 跑法(隔离 venv + kai0 site 的 torch/av/transformers):
-  HF_HUB_OFFLINE=1 PYWAN=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_wanvae_centroid.py
+  HF_HUB_OFFLINE=1 PYWAN=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_wanvae_centroid.py
 """
 import sys, os, json, time
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")  # torch/av/cv2/transformers/sklearn

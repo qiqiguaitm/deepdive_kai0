@@ -1,6 +1,6 @@
 """全量 3055ep: 聚类用 DINOv2-large 图像 ⊕ proprio(消起末别名), 渲染只取 medoid 真实图像 → Wan 解码。
 验证 ep763/1527 是否到 1.0(纯图像卡 0.15/0.32)。复用 image shard 特征 + 从 parquet 取 proprio。
-跑法: HF_HUB_OFFLINE=1 .venv_wanvae/bin/python train_scripts/kai/data/crave_full_3path.py
+跑法: HF_HUB_OFFLINE=1 /home/tim/miniconda3/envs/srpo/bin/python train_scripts/kai/data/crave_full_3path.py
 """
 import sys, glob, json, time
 sys.path.append("/vePFS/tim/workspace/deepdive_kai0/kai0/.venv/lib/python3.11/site-packages")
