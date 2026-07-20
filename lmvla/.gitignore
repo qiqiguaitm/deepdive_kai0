@@ -45,7 +45,6 @@ crave/**/*.parquet
 /xvla
 
 # vendored external LaWAM repo (own .git + HF weights, local-only)
-/lawam/
 
 # cloned LIBERO simulator (external repo)
 /LIBERO/

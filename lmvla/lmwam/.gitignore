@@ -1,0 +1,10 @@
+# lmwam = 我们对 LaWAM 的修改层。只跟踪代码/配置, 排除运行产物。
+logs/
+results/
+weights/
+ckpts_dl/
+dataset/
+wandb/
+*.log
+__pycache__/
+*.pyc

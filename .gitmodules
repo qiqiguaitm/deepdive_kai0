@@ -1,3 +1,7 @@
 [submodule "xvla/X-VLA"]
 	path = xvla/X-VLA
 	url = https://github.com/2toinf/X-VLA.git
+[submodule "lmvla/lawam"]
+	path = lmvla/lawam
+	url = https://github.com/RLinf/LaWAM.git
+	branch = main
