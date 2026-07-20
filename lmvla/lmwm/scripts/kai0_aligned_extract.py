@@ -67,10 +67,11 @@ elif ENC.split("-")[0] in ("siglip2", "so400m"):
 else:
     raise SystemExit(f"unknown encoder {ENC}")
 
+DTYPE = np.float16 if os.environ.get("FP16") == "1" else np.float32   # 全帧率(stride=1)建议 FP16=1 省一半盘
 for n, e in enumerate(eps):
     dst = f"{OUT}/ep{e}.npz"
     if os.path.exists(dst): continue
     frames, fidx = decode_stride(VID(e), STRIDE)
-    np.savez_compressed(dst, pooled=embed(frames).astype(np.float32), fidx=fidx)
+    np.savez_compressed(dst, pooled=embed(frames).astype(DTYPE), fidx=fidx)
     if n % 10 == 0: print(f"[{ENC}] {n+1}/{len(eps)} ep{e} n={len(fidx)}", flush=True)
 print(f"[{ENC}] ALL DONE {len(eps)} eps -> {OUT}", flush=True)
