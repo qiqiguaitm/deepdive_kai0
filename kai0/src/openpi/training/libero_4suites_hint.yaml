@@ -1,0 +1,8 @@
+# LIBERO 四套件 + domain_ids (A1/A2 hint 用) —— cnsh(上海 East-H20 / gf0 共享 vePFS)
+# domain_id 顺序须与 LeRobotLiberoLocalDataConfig.lmwm_suite_order 一致 (10/goal/object/spatial=0/1/2/3).
+# 上海 East-H20 挂 cnsh vePFS → 数据 + hint.npz 原生可读, 零跨集群同步.
+roots:
+  - {root: /vePFS/tim/workspace/LIBERO_fastwam/libero_10_no_noops_lerobot, domain_id: 0}
+  - {root: /vePFS/tim/workspace/LIBERO_fastwam/libero_goal_no_noops_lerobot, domain_id: 1}
+  - {root: /vePFS/tim/workspace/LIBERO_fastwam/libero_object_no_noops_lerobot, domain_id: 2}
+  - {root: /vePFS/tim/workspace/LIBERO_fastwam/libero_spatial_no_noops_lerobot, domain_id: 3}
