@@ -42,7 +42,13 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--eps", default="all", help="all | a,b,c | start:end (每 suite 内 episode 下标)")
     ap.add_argument("--smoke", action="store_true")
+    ap.add_argument("--skip-existing", action="store_true", help="跳过已产出的 ep npz (resume)")
+    ap.add_argument("--shard", default=None, help="i/N: 只处理全局 episode 序号 %% N == i 的 (多 GPU 并行)")
     args = ap.parse_args()
+
+    shard_i, shard_n = (None, None)
+    if args.shard:
+        shard_i, shard_n = (int(x) for x in args.shard.split("/"))
 
     suites = SUITES if args.suites == ["all"] else args.suites
 
@@ -54,6 +60,7 @@ def main():
     enc = load_encoder(args.encoder, dtype="bf16")
     print(f"[enc] {args.encoder} dim={enc.dim} | root={args.root}", flush=True)
 
+    gidx = -1  # 全局 episode 序号 (跨 suite), 用于 shard
     for suite in suites:
         vdir = os.path.join(args.root, f"{suite}_no_noops_lerobot", "videos", "chunk-000", CAM)
         mp4s = sorted(glob.glob(os.path.join(vdir, "episode_*.mp4")),
@@ -72,6 +79,12 @@ def main():
         print(f"[{suite}] {len(sel)}/{len(mp4s)} episodes → {outdir}", flush=True)
         for mp4 in sel:
             E = int(os.path.basename(mp4)[8:-4])
+            gidx += 1
+            if shard_n is not None and gidx % shard_n != shard_i:
+                continue
+            outp = os.path.join(outdir, f"ep{E}.npz")
+            if args.skip_existing and os.path.exists(outp):
+                continue
             frames = decode_episode_mp4(mp4)
             n = len(frames)
             grids = enc.encode_grid(frames)               # [N, dim, P, P]
@@ -82,8 +95,7 @@ def main():
                 gf = g.astype(np.float32)
                 print(f"  {suite}/ep{E}: frames={n} grid={g.shape} mean={gf.mean():.3f} std={gf.std():.3f}", flush=True)
                 break
-            np.savez_compressed(os.path.join(outdir, f"ep{E}.npz"),
-                                grid=g.astype(np.float16),
+            np.savez_compressed(outp, grid=g.astype(np.float16),
                                 frame_index=np.arange(N, dtype=np.int64))
         if args.smoke:
             break
