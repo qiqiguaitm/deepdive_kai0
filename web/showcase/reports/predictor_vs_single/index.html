@@ -124,7 +124,7 @@
   <h2>三臂设计(容量匹配,同 backbone)</h2>
   <p class="sub prose">同 So400m 空间、同 rvalley pairs、同 held-out(按 episode 20%),都用 hid=512 / nblk=4 的 conv backbone。</p>
   <div class="diagram">
-  <svg viewBox="0 0 860 300" font-family="var(--mono)" font-size="13">
+  <svg viewBox="0 0 860 300" font-family="ui-monospace,Menlo,monospace" font-size="13">
     <defs><marker id="ar" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8892c8"/></marker></defs>
     <!-- A -->
     <text x="20" y="42" fill="#a78bfa" font-weight="700">A · 单模型直接回归</text>
@@ -159,6 +159,30 @@
     <div class="tile hl"><div class="k">A 单模型</div><div class="v">0.765</div><div class="n">lift +0.100 · 不坍缩</div></div>
     <div class="tile red"><div class="k">B 两模型·单发</div><div class="v">0.744</div><div class="n">比单模型低</div></div>
     <div class="tile hl"><div class="k">B 两模型·best-of-K</div><div class="v">0.779</div><div class="n">反超单模型</div></div>
+  </div>
+
+  <div class="diagram">
+  <svg viewBox="0 0 720 250" font-family="ui-monospace,Menlo,monospace" font-size="12">
+    <!-- y 轴范围 0.64–0.80 放大差异; 映射 y = 210 - (v-0.64)/0.16*180 -->
+    <!-- persist 基线虚线 0.665 -->
+    <line x1="60" y1="181" x2="700" y2="181" stroke="#eab308" stroke-dasharray="5 4" stroke-width="1.5"/>
+    <text x="700" y="177" fill="#eab308" text-anchor="end" font-size="11">persist 0.665 (原地不动)</text>
+    <!-- 网格 -->
+    <text x="52" y="35" fill="#5a5e8c" text-anchor="end">0.80</text><line x1="60" y1="30" x2="700" y2="30" stroke="#1e1a6e"/>
+    <text x="52" y="216" fill="#5a5e8c" text-anchor="end">0.64</text><line x1="60" y1="210" x2="700" y2="210" stroke="#1e1a6e"/>
+    <!-- bars: A .765, Bd .744, Bbok .779, Boracle .793 -->
+    <!-- A -->
+    <rect x="95" y="69" width="90" height="141" rx="4" fill="#7c3aed"/><text x="140" y="63" fill="#a78bfa" text-anchor="middle" font-weight="700">0.765</text><text x="140" y="230" fill="#e8eaf6" text-anchor="middle">单模型</text><text x="140" y="245" fill="#5a5e8c" text-anchor="middle" font-size="10">直接回归</text>
+    <!-- B_deploy -->
+    <rect x="245" y="93" width="90" height="117" rx="4" fill="#5b21b6"/><text x="290" y="87" fill="#8892c8" text-anchor="middle">0.744</text><text x="290" y="230" fill="#e8eaf6" text-anchor="middle">两模型</text><text x="290" y="245" fill="#5a5e8c" text-anchor="middle" font-size="10">单发 mode</text>
+    <!-- B_bestofK -->
+    <rect x="395" y="53" width="90" height="157" rx="4" fill="#22c55e"/><text x="440" y="47" fill="#86efac" text-anchor="middle" font-weight="700">0.779</text><text x="440" y="230" fill="#e8eaf6" text-anchor="middle">两模型</text><text x="440" y="245" fill="#5a5e8c" text-anchor="middle" font-size="10">best-of-K</text>
+    <!-- B_oracle -->
+    <rect x="545" y="37" width="90" height="173" rx="4" fill="#0f002e" stroke="#3730a3" stroke-dasharray="4 3"/><text x="590" y="31" fill="#8892c8" text-anchor="middle">0.793</text><text x="590" y="230" fill="#e8eaf6" text-anchor="middle">两模型</text><text x="590" y="245" fill="#5a5e8c" text-anchor="middle" font-size="10">oracle(看未来)</text>
+  </svg>
+  <div style="text-align:center;font-size:12.5px;color:#8892c8;padding-top:4px">
+    <span class="pos">■</span> 多模态 best-of-K 反超单模型 &nbsp;·&nbsp; <span style="color:#7c3aed">■</span> 单发部署单模型领先两模型单发 &nbsp;·&nbsp; oracle=上界(部署不可得)
+  </div>
   </div>
 
   <div class="scroll"><table>
