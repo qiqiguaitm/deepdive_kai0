@@ -1,0 +1,107 @@
+# pi05 × LMWM 实验 A0 基线 — LIBERO 四套件, cnbj 1-host 8 H20, 30k
+#   plan: lmvla/lmwm/docs/PLAN_pi05_lmwm_sameencoder_2026-07-21.md (A0 = pi05 纯基线, 无 hint)
+#   Config: pi05_libero_a0_bj (LeRobotLiberoLocalDataConfig, 四套件 ConcatDataset, warm-start pi05_base)
+#   Data:   uniVP libero_{10,goal,object,spatial}_no_noops_lerobot (v2.1, 1712ep) | Init: pi05_base
+#   norm:   kai0/assets/pi05_libero_a0_bj/libero_4suites/norm_stats.json (已放置)
+#   ⚠️ 纯 openpi pi05, 无 lawam 依赖 (不需自愈三件套). JAX 训练 (scripts/train.py).
+# Submit: source ~/.volc_creds && kai0/.venv/bin/python train_scripts/kai/volc/submit_yaml.py train_scripts/kai/volc/pi05_libero_a0_bj_8h20.yaml
+TaskName: "pi05-libero-a0-bj-8h20"
+Description: "pi05 LIBERO A0 基线: JAX 1-host 8 H20, warm-start pi05_base, 30k, 闲时+resume"
+Tags: []
+
+ImageUrl: "dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1"
+ResourceQueueName: "Robot-North-H20"
+Framework: "PyTorch"
+Preemptible: true               # 闲时任务: 借空闲资源, 可被抢占 → 入口自动 resume
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 1
+    Flavor: "ml.hpcpni3ln.45xlarge"   # 8× H20-SXM5-96GB single node
+
+ActiveDeadlineSeconds: 1209600  # 14 天/run (被抢占后重提 deadline 重置)
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnbj875793a96d6b"
+    MountPath: "/vePFS-North-E/vis_robot"
+    SubPath: "/vis_robot"
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+  - Name: TOKENIZERS_PARALLELISM
+    Value: "false"
+  - Name: NCCL_DEBUG
+    Value: "WARN"
+  - Name: OMP_NUM_THREADS
+    Value: "8"
+  - Name: XLA_PYTHON_CLIENT_MEM_FRACTION
+    Value: "0.85"
+  - Name: JAX_COMPILATION_CACHE_MIN_ENTRY_SIZE_BYTES
+    Value: "-1"
+  - Name: JAX_COMPILATION_CACHE_MIN_COMPILE_TIME_SECS
+    Value: "1"
+  - Name: JAX_ENABLE_EMPTY_ARRAYS
+    Value: "true"
+
+Entrypoint: |
+  set -uo pipefail
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  NODE=${MLP_ROLE_INDEX:-0}
+  LOG_DIR=/vePFS-North-E/vis_robot/logs
+  mkdir -p "$LOG_DIR"
+  LOG="$LOG_DIR/pi05_libero_a0_bj_${STAMP}_node${NODE}.log"
+  exec >> "$LOG" 2>&1
+  echo "=== entrypoint start $(date) (1-host 8 H20, 闲时任务) ==="
+  set -x
+  nvidia-smi -L
+  REPO=/vePFS-North-E/vis_robot/workspace/deepdive_kai0
+  cd "$REPO/kai0"
+  source .venv/bin/activate
+  apt-get update 2>&1 | tail -1 && apt-get install -y ffmpeg 2>&1 | tail -2 || echo "ffmpeg best-effort"
+  python -c "import jax; print(f'jax {jax.__version__} devs={len(jax.devices())}')"
+
+  # 视频解码 preflight: openpi data_loader 用 **pyav** (非 torchcodec, 见 data_loader.py:194).
+  # 测 pyav 能真解码一帧 LIBERO 视频, 否则 fail-fast. (torchcodec 与 pytorch2.6 ABI 不兼容, 但训练不用它.)
+  python - <<'PYEOF' || { echo "FATAL: pyav 视频解码不可用 — 训练必崩, 先修镜像" >&2; exit 13; }
+  import glob
+  from lerobot.common.datasets.video_utils import decode_video_frames
+  v = sorted(glob.glob("/vePFS-North-E/vis_robot/huanqian/uniVP/data/libero_mujoco3.3.2/libero_10_no_noops_lerobot/videos/**/*.mp4", recursive=True))[:1]
+  f = decode_video_frames(v[0], [0.0, 0.05], 30.0, "pyav")
+  print("PYAV DECODE OK shape=", tuple(f.shape))
+  PYEOF
+
+  # preflight: 四套件数据 + norm + pi05_base init
+  DATA=/vePFS-North-E/vis_robot/huanqian/uniVP/data/libero_mujoco3.3.2
+  INIT=/vePFS-North-E/vis_robot/base_init_ckpts/extracted/pi05_base/params
+  NORM=$REPO/kai0/assets/pi05_libero_a0_bj/libero_4suites/norm_stats.json
+  for S in libero_10 libero_goal libero_object libero_spatial; do
+    [ -f "$DATA/${S}_no_noops_lerobot/meta/info.json" ] || { echo "FATAL: LIBERO suite missing: $S" >&2; exit 13; }
+  done
+  [ -f "$NORM" ]           || { echo "FATAL: norm_stats missing $NORM (先跑 compute_norm_states_fast)" >&2; exit 13; }
+  [ -f "$INIT/_METADATA" ] || { echo "FATAL: pi05_base init missing $INIT" >&2; exit 13; }
+  echo "[$(date)] preflight OK (4 LIBERO suites + norm + pi05_base init)"
+
+  # 自动 resume: ckpt 在共享 vePFS; 有 step 目录 → --resume, 否则 --overwrite.
+  EXP=pi05_libero_a0
+  CKPT_DIR=$REPO/kai0/checkpoints/pi05_libero_a0_bj/$EXP
+  if ls -d "$CKPT_DIR"/[0-9]*/ >/dev/null 2>&1; then RESUME_FLAG="--resume"; echo "[resume] found ckpt -> --resume"; else RESUME_FLAG="--overwrite"; echo "[resume] fresh --overwrite"; fi
+
+  # save-interval 1000: 闲时窗口内能落盘, 抢占后进度累积 (config 默认 5000, 这里覆盖).
+  exec python -u scripts/train.py pi05_libero_a0_bj \
+    --exp-name "$EXP" \
+    --no-wandb-enabled \
+    --save-interval 1000 \
+    $RESUME_FLAG
+
+RetryOptions:
+    EnableRetry: true
+    MaxRetryTimes: 10
+
+AccessType: "Public"

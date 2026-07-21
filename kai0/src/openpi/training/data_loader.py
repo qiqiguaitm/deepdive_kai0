@@ -225,6 +225,7 @@ def _create_concat_torch_dataset(
                 key: [t / meta.fps for t in range(action_horizon)]
                 for key in data_config.action_sequence_keys
             },
+            video_backend="pyav",  # 与单-repo 路径一致; torchcodec 与 pytorch2.6 ABI 不兼容会崩 (concat 路径原漏了此项)
             tolerance_s=30.0,  # match single-repo path; raw kai0 fps timestamps are jittery
         )
         transforms_to_apply: list = []

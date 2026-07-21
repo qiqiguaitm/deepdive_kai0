@@ -583,6 +583,9 @@ class LeRobotLiberoLocalDataConfig(DataConfigFactory):
             repack_transforms=repack_transform,
             data_transforms=data_transforms,
             model_transforms=model_transforms,
+            # LeRobot delta_timestamps 在 repack 之前作用于**原始列名**; LIBERO 列是 "action"(单数),
+            # 而 DataConfig 默认 action_sequence_keys=("actions",) → 每帧 KeyError 跳过 → 取不到数据.
+            action_sequence_keys=("action",),
         )
 
 
