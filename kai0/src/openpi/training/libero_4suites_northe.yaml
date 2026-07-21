@@ -1,0 +1,8 @@
+# LIBERO 四套件 (LeRobot v2.1, no_noops) —— North-E(北京)路径版
+# 与 cnsh libero_4suites.yaml 同一数据 (v2.1/franka/fps20/388+433+457+434 ep, 点号 key)
+# 数据实测: /vePFS-North-E/vis_robot/huanqian/uniVP/data/libero_mujoco3.3.2/ 四套件齐, 格式与 cnsh 逐字段一致
+roots:
+  - /vePFS-North-E/vis_robot/huanqian/uniVP/data/libero_mujoco3.3.2/libero_10_no_noops_lerobot
+  - /vePFS-North-E/vis_robot/huanqian/uniVP/data/libero_mujoco3.3.2/libero_goal_no_noops_lerobot
+  - /vePFS-North-E/vis_robot/huanqian/uniVP/data/libero_mujoco3.3.2/libero_object_no_noops_lerobot
+  - /vePFS-North-E/vis_robot/huanqian/uniVP/data/libero_mujoco3.3.2/libero_spatial_no_noops_lerobot

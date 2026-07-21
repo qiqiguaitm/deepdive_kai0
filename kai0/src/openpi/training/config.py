@@ -549,10 +549,13 @@ class LeRobotLiberoLocalDataConfig(DataConfigFactory):
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
         # Map the local dataset's flat dotted keys to the keys LiberoInputs expects.
+        # RepackTransform structure is {OUTPUT_key: INPUT_source_key}. LiberoInputs reads
+        # data["observation/image"|"observation/wrist_image"|"observation/state"|"actions"|"prompt"]
+        # (slash names), so the OUTPUT keys must be those — not the short "image"/"state".
         structure = {
-            "image": "observation.images.image",
-            "wrist_image": "observation.images.wrist_image",
-            "state": "observation.state",
+            "observation/image": "observation.images.image",
+            "observation/wrist_image": "observation.images.wrist_image",
+            "observation/state": "observation.state",
             "actions": "action",
         }
         # prompt: injected from task_index when prompt_from_task is set (default here).
@@ -1074,6 +1077,57 @@ class TrainConfig:
 
 # Use `get_config` if you need to get a config by name in your code.
 _CONFIGS = [
+    # ===== pi05 × LMWM 同编码器实验 (PLAN_pi05_lmwm_sameencoder_2026-07-21.md) =====
+    # A0 = pi05 纯基线 (无 hint), warm-start pi05_base (集成预训练知识, 不从0训; strict=False 只有 hint_proj 新增,
+    # 但 A0 lmwm_hint_dim=0 连 hint_proj 都不建). LIBERO 四套件 v2.1 (本地现成, LeRobotLiberoLocalDataConfig 点号 repack).
+    # action_horizon=8 = sec_chunk 0.4 × fps 20 (与 lawam LIBERO 一致). action_dim=32 = pi05 native (LiberoInputs 补 7→32,
+    # 才能 warm-start pi05_base 的 action_in/out_proj). norm_stats asset_id=libero_4suites (compute_norm_states 生成).
+    # cnsh 版; 北京版见 pi05_libero_a0_bj.
+    TrainConfig(
+        name="pi05_libero_a0",
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=8, max_token_len=200),
+        data=LeRobotLiberoLocalDataConfig(
+            # repo_id = asset 锚点名(非真实路径; 数据走 datasets_yaml 四套件 ConcatDataset)。
+            # 使 norm_stats 存/取都对齐 assets_dirs/libero_4suites。norm 计算传 --base_dir 指父目录。
+            repo_id="libero_4suites",
+            datasets_yaml="/vePFS/tim/workspace/deepdive_kai0/kai0/src/openpi/training/libero_4suites.yaml",
+            base_config=DataConfig(prompt_from_task=True),
+            assets=AssetsConfig(asset_id="libero_4suites"),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS/tim/workspace/deepdive_kai0/kai0/checkpoints/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30_000, decay_lr=2.5e-6),
+        ema_decay=0.999,
+        num_train_steps=30_000,
+        keep_period=10_000,
+        save_interval=5_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+    ),
+    # 北京(North-E)版: 同 A0, 仅数据/权重换 North-E 路径. LIBERO 数据实测同一份 v2.1 (uniVP 目录).
+    TrainConfig(
+        name="pi05_libero_a0_bj",
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=8, max_token_len=200),
+        data=LeRobotLiberoLocalDataConfig(
+            repo_id="libero_4suites",
+            datasets_yaml="/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/src/openpi/training/libero_4suites_northe.yaml",
+            base_config=DataConfig(prompt_from_task=True),
+            assets=AssetsConfig(asset_id="libero_4suites"),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS-North-E/vis_robot/base_init_ckpts/extracted/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30_000, decay_lr=2.5e-6),
+        ema_decay=0.999,
+        num_train_steps=30_000,
+        keep_period=10_000,
+        save_interval=5_000,
+        num_workers=8,
+        batch_size=128,
+        fsdp_devices=8,
+    ),
     # AWBC Advantage Estimator (RECAP Stage 1, PyTorch) — registered so eval.py / eval_adv_est.py can
     # get_config() to rebuild the model arch for the trained ckpt
     # kai0/checkpoints/ADVANTAGE_TORCH_KAI0_FLATTEN_FOLD/adv_est_v1 (metadata: pi05 / gemma_2b /

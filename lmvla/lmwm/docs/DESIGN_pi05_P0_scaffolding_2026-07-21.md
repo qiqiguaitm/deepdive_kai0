@@ -18,6 +18,15 @@
 - 冒烟 `scratchpad/smoke_hint.py`:dummy gemma 变体,测 dim0 / prefix-1152 / suffix-768 / best-of-K=4 前向 + dim0-guard 等价。
   **CPU 上因 gf0 满载(load~100)极慢,须用 GPU**(`CUDA_VISIBLE_DEVICES=0 XLA_PYTHON_CLIENT_MEM_FRACTION=0.15`)。
 
+### 0.1 ⭐关键 gotcha:随机初始化下注入"看似死了"是预期,非 bug
+冒烟发现三路 loss 逐位相同(prefix/suffix/dim0 全 2.5484…)。诊断 `scratchpad/diag4.py` 证:harness 灵敏
+(改 actions Δ=0.096 / 改 noise Δ=0.396 都 CHANGES),但**改 image 和改 hint 都精确 Δ=0.000e+00**。
+**根因**:`gemma.py:121/128` adaRMS 的 modulation Dense 是 `kernel_init=nn.initializers.zeros`(零初始化)
+→ `gate=0` → `_gated_residual(x,y,gate)=x+0·y=x` → 随机初始化时**每个 block 恒等映射,prefix(含 image)零影响**。
+这是 DiT/flow-transformer 标准"零门控从恒等起步"。**⇒ image 和 hint 同行为 = 我代码正确;零影响只是随机初始化产物。**
+**warm-start pi05_base 时门控是学到的非零值 → hint 从 fine-tune 第 0 步就生效。** 真 liveness = 训练 SR,不是初始化 loss。
+(若要正向铁证:载 pi05_base 真权重跑 diag,image+hint 都会动 loss——分析已充分,未做。)
+
 ---
 
 ## 1. LIBERO(P0a)—— 数据现成,无需下载/转换
