@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>为何 LMWM 用 预测器+生成器 而非 单预测器</title>
+<style>
+  :root{
+    --bg:#020010; --bg2:#05001a; --bg3:#0a0024; --bg4:#0f002e;
+    --border:#1e1a6e; --border2:#3730a3;
+    --text:#e8eaf6; --text2:#8892c8; --text3:#5a5e8c;
+    --accent:#7c3aed; --accent2:#5b21b6; --accent3:#a78bfa;
+    --green:#22c55e; --red:#ef4444; --yellow:#eab308; --blue:#818cf8;
+    --sans:"Inter",system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,"Noto Sans Mono CJK SC",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#12043a 0%,var(--bg) 60%);color:var(--text2);
+    font-family:var(--sans);line-height:1.62;-webkit-font-smoothing:antialiased;min-height:100vh}
+  .doc{max-width:1180px;margin:0 auto;padding:0 24px;display:grid;grid-template-columns:200px minmax(0,1fr);gap:40px}
+  .toc{position:sticky;top:20px;align-self:start;max-height:calc(100vh - 40px);overflow:auto;font-size:13px;
+    border-left:1px solid var(--border);padding-left:16px}
+  .toc .tt{color:var(--text3);font-size:11px;letter-spacing:.15em;text-transform:uppercase;margin:0 0 12px;font-family:var(--mono)}
+  .toc a{display:block;color:var(--text2);text-decoration:none;padding:5px 0;border-left:2px solid transparent;
+    margin-left:-18px;padding-left:16px;transition:.15s;line-height:1.35}
+  .toc a:hover{color:var(--accent3)} .toc a.active{color:var(--accent3);border-left-color:var(--accent);font-weight:600}
+  @media(max-width:980px){.doc{grid-template-columns:1fr;max-width:1040px}.toc{display:none}}
+  html{scroll-behavior:smooth} section[id]{scroll-margin-top:18px}
+  a{color:var(--accent3);text-decoration:none} a:hover{text-decoration:underline}
+  .grad{background:linear-gradient(90deg,#a78bfa,#818cf8);-webkit-background-clip:text;background-clip:text;color:transparent}
+  header.top{border-bottom:1px solid var(--border);background:linear-gradient(180deg,rgba(124,58,237,.12),transparent)}
+  header.top .doc{padding:48px 24px 36px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:var(--accent3)}
+  h1{font-size:clamp(27px,4.4vw,42px);line-height:1.06;letter-spacing:-.02em;margin:.32em 0 .18em;font-weight:780;text-wrap:balance;color:var(--text)}
+  .lede{font-size:17.5px;color:var(--text2);margin:.2em 0 0}
+  .meta{display:flex;flex-wrap:wrap;gap:8px 10px;margin-top:22px;font-family:var(--mono);font-size:12.5px}
+  .tag{border:1px solid var(--border);border-radius:999px;padding:4px 12px;color:var(--text2);background:var(--bg3)}
+  .tag b{color:var(--accent3);font-weight:600}
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:34px 0 6px}
+  @media(max-width:720px){.tiles{grid-template-columns:repeat(2,1fr)}}
+  .tile{background:var(--bg3);border:1px solid var(--border);border-radius:14px;padding:16px}
+  .tile .k{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text3)}
+  .tile .v{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:29px;font-weight:600;color:var(--text);margin-top:4px}
+  .tile .v small{font-size:14px;color:var(--text2)}
+  .tile .n{font-size:12.5px;color:var(--text2);margin-top:3px}
+  .tile.hl{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent2)} .tile.hl .v{color:var(--accent3)}
+  .tile.red{border-color:#7f1d1d} .tile.red .v{color:#fca5a5}
+  section{padding:38px 0;border-top:1px solid var(--border)}
+  .snum{font-family:var(--mono);font-size:13px;color:var(--accent3);letter-spacing:.04em}
+  h2{font-size:24px;color:var(--text);margin:.15em 0 .1em;letter-spacing:-.015em;font-weight:720;text-wrap:balance}
+  h2+.sub{color:var(--text2);margin:.1em 0 1.1em}
+  h3{font-size:18px;margin:26px 0 6px;color:var(--text);font-weight:680}
+  p{max-width:none} .prose b{color:var(--text)}
+  .scroll{overflow-x:auto;border:1px solid var(--border);border-radius:12px;background:var(--bg3);margin-top:14px}
+  table{border-collapse:collapse;width:100%;font-size:14px;min-width:560px}
+  th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--border);vertical-align:top}
+  thead th{font-family:var(--mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--text3);
+    background:var(--bg4);position:sticky;top:0;white-space:nowrap}
+  tbody tr:last-child td{border-bottom:none}
+  td.num,th.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+  td .term{color:var(--text);font-weight:600}
+  tr.hl td{background:rgba(124,58,237,.10)}
+  td code{font-family:var(--mono);font-size:12.5px;color:var(--blue)}
+  .pos{color:var(--green)} .amb{color:var(--yellow)} .neg{color:var(--red)}
+  .diagram{background:var(--bg3);border:1px solid var(--border);border-radius:14px;padding:18px 12px;margin-top:16px}
+  .diagram svg{display:block;width:100%;height:auto}
+  .flag{display:inline-block;font-family:var(--mono);font-size:11px;padding:1px 7px;border-radius:6px;margin-right:7px;vertical-align:1px}
+  .flag.bad{background:rgba(239,68,68,.14);color:#fca5a5;border:1px solid #7f1d1d}
+  .flag.good{background:rgba(34,197,94,.14);color:#86efac;border:1px solid #14532d}
+  .keybox{background:rgba(124,58,237,.12);border:1px solid var(--accent2);border-radius:14px;padding:18px 20px;margin-top:16px}
+  .keybox p{margin:.2em 0;color:var(--text);font-size:15.5px}
+  .badbox{background:rgba(239,68,68,.08);border:1px solid #7f1d1d;border-radius:14px;padding:16px 20px;margin-top:14px}
+  .badbox p{margin:.3em 0;color:var(--text);font-size:14.5px}
+  .goodbox{background:rgba(34,197,94,.08);border:1px solid #14532d;border-radius:14px;padding:16px 20px;margin-top:14px}
+  .goodbox p{margin:.3em 0;color:var(--text);font-size:14.5px}
+  ul{padding-left:20px} li{margin:.3em 0}
+  footer{border-top:1px solid var(--border);padding:26px 0 52px;color:var(--text3);font-size:13px}
+  footer code{font-family:var(--mono);font-size:12px;color:var(--text2)}
+</style>
+</head>
+<body>
+
+<header class="top"><div class="doc"><div></div><div>
+  <div class="eyebrow">LMWM 架构裁决 · 受控 A/B · So400m(pi05) 空间</div>
+  <h1>为何用 <span class="grad">预测器 + 生成器</span><br>而非 单预测器?</h1>
+  <p class="lede">单预测器(当前帧 → 直接回归 milestone+1 代表帧 latent)看似更简单。我们在同一空间、同一数据、同一 held-out 口径下做了三臂受控对比。<b>结论出人意料</b>:单发部署时单模型反而更准、且<b>不坍缩</b>——历史「持久坍缩」叙事在此设定不复现;两模型的真正价值是<b>多模态</b>。</p>
+  <div class="meta">
+    <span class="tag">空间 <b>So400m patch-token(pi05)</b></span>
+    <span class="tag">数据 <b>rvalley pairs · held-out 20%</b></span>
+    <span class="tag">seed <b>code32×8 · code128×2 · bestofK×3</b></span>
+    <span class="tag">口径 <b>recon_cos vs 目标 latent</b></span>
+    <span class="tag">2026-07-21</span>
+  </div>
+</div></div></header>
+
+<div class="doc">
+<nav class="toc">
+  <p class="tt">目录</p>
+  <a href="#q">① 问题</a>
+  <a href="#design">② 三臂设计</a>
+  <a href="#result">③ 结果</a>
+  <a href="#why">④ 机理</a>
+  <a href="#limit">⑤ 边界</a>
+</nav>
+
+<main>
+
+<section id="q">
+  <div class="snum">01</div>
+  <h2>问题:单预测器 vs 预测器+生成器</h2>
+  <p class="sub prose">LMWM 经历过 v1(单模型)→ v2(两模型)。历史转换理由是「单模型会持久坍缩」,但那是老编码器空间(DINOv3-H / SigLIP / 离散 milestone),<b>从未有干净的同空间 A/B</b>。本页补这张表。</p>
+  <div class="scroll"><table>
+    <thead><tr><th>维度</th><th>单预测器 (v1)</th><th>预测器 + 生成器 (v2, 当前)</th></tr></thead>
+    <tbody>
+      <tr><td class="term">结构</td><td>一个 MLP → 头<b>直接回归</b>目标 latent</td><td>预测器(MDN→紧凑 code)+ 生成器(AdaLN 在当前画布上<b>渲染</b>)</td></tr>
+      <tr><td class="term">部署输出</td><td><code>f(g_t)</code> 一张(确定性)</td><td>单发 = MDN mode;<b>多模态</b> = K 分量各渲一张</td></tr>
+      <tr><td class="term">源码</td><td><code>lmwm/src/lmwm/models.py:65</code></td><td><code>p1_train_lmwm_libero.py</code></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="design">
+  <div class="snum">02</div>
+  <h2>三臂设计(容量匹配,同 backbone)</h2>
+  <p class="sub prose">同 So400m 空间、同 rvalley pairs、同 held-out(按 episode 20%),都用 hid=512 / nblk=4 的 conv backbone。</p>
+  <div class="diagram">
+  <svg viewBox="0 0 860 300" font-family="var(--mono)" font-size="13">
+    <defs><marker id="ar" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8892c8"/></marker></defs>
+    <!-- A -->
+    <text x="20" y="42" fill="#a78bfa" font-weight="700">A · 单模型直接回归</text>
+    <rect x="20" y="54" width="70" height="40" rx="7" fill="#0a0024" stroke="#3730a3"/><text x="55" y="79" fill="#e8eaf6" text-anchor="middle">g_t</text>
+    <line x1="90" y1="74" x2="140" y2="74" stroke="#8892c8" marker-end="url(#ar)"/>
+    <rect x="140" y="54" width="120" height="40" rx="7" fill="#0f002e" stroke="#3730a3"/><text x="200" y="79" fill="#e8eaf6" text-anchor="middle">conv f(·)</text>
+    <line x1="260" y1="74" x2="310" y2="74" stroke="#8892c8" marker-end="url(#ar)"/>
+    <rect x="310" y="54" width="70" height="40" rx="7" fill="#0a0024" stroke="#3730a3"/><text x="345" y="79" fill="#e8eaf6" text-anchor="middle">ĝ</text>
+    <text x="400" y="79" fill="#5a5e8c">smooth_l1(ĝ, 目标) · 确定性一张</text>
+    <!-- B -->
+    <text x="20" y="150" fill="#a78bfa" font-weight="700">B · 预测器 + 生成器</text>
+    <rect x="20" y="162" width="70" height="40" rx="7" fill="#0a0024" stroke="#3730a3"/><text x="55" y="187" fill="#e8eaf6" text-anchor="middle">g_t</text>
+    <line x1="90" y1="182" x2="140" y2="182" stroke="#8892c8" marker-end="url(#ar)"/>
+    <rect x="140" y="150" width="130" height="64" rx="7" fill="#0f002e" stroke="#7c3aed"/><text x="205" y="176" fill="#e8eaf6" text-anchor="middle">预测器 MDN</text><text x="205" y="196" fill="#8892c8" text-anchor="middle" font-size="11">K=4 分支码</text>
+    <line x1="270" y1="182" x2="320" y2="182" stroke="#8892c8" marker-end="url(#ar)"/>
+    <rect x="320" y="150" width="130" height="64" rx="7" fill="#0f002e" stroke="#7c3aed"/><text x="385" y="176" fill="#e8eaf6" text-anchor="middle">生成器 AdaLN</text><text x="385" y="196" fill="#8892c8" text-anchor="middle" font-size="11">g_t 画布+码→渲染</text>
+    <line x1="450" y1="182" x2="500" y2="182" stroke="#8892c8" marker-end="url(#ar)"/>
+    <rect x="500" y="162" width="90" height="40" rx="7" fill="#0a0024" stroke="#3730a3"/><text x="545" y="187" fill="#e8eaf6" text-anchor="middle">ĝ ×K</text>
+    <text x="610" y="180" fill="#5a5e8c">单发=mode 一张</text><text x="610" y="200" fill="#86efac">best-of-K=取命中</text>
+    <text x="20" y="262" fill="#5a5e8c" font-size="12">A+ = A 加反持久 lift 项(隔离:光加 lift 够不够) · B oracle = 生成器用 teacher(看未来)码,上界参照</text>
+  </svg>
+  </div>
+</section>
+
+<section id="result">
+  <div class="snum">03</div>
+  <h2>结果:方向相反,全 seed 一致</h2>
+  <p class="sub prose">主配置 code=32,So400m,held-out。recon_cos 越高越好;persist = cos(当前, 目标) 是「原地不动」基线。</p>
+
+  <div class="tiles">
+    <div class="tile"><div class="k">persist 基线</div><div class="v">0.665</div><div class="n">原地不动</div></div>
+    <div class="tile hl"><div class="k">A 单模型</div><div class="v">0.765</div><div class="n">lift +0.100 · 不坍缩</div></div>
+    <div class="tile red"><div class="k">B 两模型·单发</div><div class="v">0.744</div><div class="n">比单模型低</div></div>
+    <div class="tile hl"><div class="k">B 两模型·best-of-K</div><div class="v">0.779</div><div class="n">反超单模型</div></div>
+  </div>
+
+  <div class="scroll"><table>
+    <thead><tr><th>臂</th><th class="num">recon_cos</th><th class="num">lift</th><th class="num">n seed</th><th>读数</th></tr></thead>
+    <tbody>
+      <tr><td>persist 基线</td><td class="num">0.6650</td><td class="num">—</td><td class="num">—</td><td>原地不动</td></tr>
+      <tr class="hl"><td class="term">A 单模型直接回归</td><td class="num">0.7654<small>±.003</small></td><td class="num pos">+0.100</td><td class="num">8</td><td>单发最准 · <span class="pos">不坍缩</span></td></tr>
+      <tr><td>B 预测器+生成器(单发 mode)</td><td class="num">0.7445<small>±.003</small></td><td class="num">+0.080</td><td class="num">8</td><td>单发弱于单模型</td></tr>
+      <tr class="hl"><td class="term">B 预测器+生成器(best-of-K)</td><td class="num">0.7793<small>±.003</small></td><td class="num pos">+0.115</td><td class="num">3</td><td><span class="pos">多模态反超</span></td></tr>
+      <tr><td>B oracle(看未来)</td><td class="num">0.7928<small>±.002</small></td><td class="num">+0.128</td><td class="num">8</td><td>上界(生成器渲染力)</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="scroll"><table>
+    <thead><tr><th>关键对比</th><th class="num">Δ</th><th class="num">一致性</th><th>谁赢</th></tr></thead>
+    <tbody>
+      <tr><td>单发部署:A − B单发</td><td class="num pos">+0.021</td><td class="num">8 / 8 seed</td><td><span class="flag good">单模型</span></td></tr>
+      <tr><td>多模态:B best-of-K − A</td><td class="num pos">+0.014</td><td class="num">3 / 3 seed</td><td><span class="flag good">两模型</span></td></tr>
+      <tr><td>code=128 复核:A − B单发</td><td class="num pos">+0.025</td><td class="num">2 / 2 seed</td><td>加大 code <b>不救</b> B单发</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="why">
+  <div class="snum">04</div>
+  <h2>机理:两模型的价值 = 多模态,不是单发精度</h2>
+  <div class="badbox"><p><span class="flag bad">证否</span><b>「单模型会持久坍缩」在此设定不成立。</b>A 的 lift <b>+0.100</b>(远 &gt; 0)、copy_cos 0.753 ≈ 自身 recon,<b>不是原地不动</b>。历史坍缩是老编码器/离散标签特有,不普适。</p></div>
+  <div class="goodbox"><p><span class="flag good">真因</span><b>分叉点是多模态的。</b>给定当前帧,下一 milestone 常有多个可能分支。单模型只能出<b>一个</b>(条件均值,分叉处必偏);两模型的 MDN 出 <b>K 个分支提议</b>,生成器各渲一张,<b>其中一个命中</b> → best-of-K 反超。<b>确定性单回归器做不到 best-of-N。</b></p></div>
+  <div class="keybox"><p><b>oracle(0.793)证明生成器渲染力足够</b> —— 真正的瓶颈在<b>预测器从当前帧推断分支</b>。而多模态提议正是绕开它的方式:<b>生成器 + 紧凑 code 的分解 = 多模态子目标提议的使能条件</b>。这才是预测器+生成器架构的正确辩护。</p></div>
+</section>
+
+<section id="limit">
+  <div class="snum">05</div>
+  <h2>诚实的边界(勿过度外推)</h2>
+  <ul class="prose">
+    <li><b>内在指标,非下游 SR。</b>recon_cos 到目标 latent ≠ VLA 用它当 hint 后的成功率。按 roadmap 教训(内在 gain 2.1× 曾未换来 SR),此结论<b>不能</b>直接推成「两模型对 VLA 更好」。真判据 = best-of-K 子目标是否提 VLA-SR,<span class="amb">待做</span>。</li>
+    <li><b>So400m/rvalley 特定。</b>老 DINOv3-H/SigLIP 空间可能不同(那里历史观察到坍缩)。</li>
+    <li><b>best-of-K 需下游能消费多个候选</b>(CFG / 采样 / 重排);若只选一个就退回 B 单发(输于单模型)。</li>
+    <li><b>A+ 不稳:</b>单模型嫁接 lift 有 seed 塌到 0.673 —— 反持久项在无 code 指向时会过罚。lift 是 v2 的项,单独用脆。</li>
+  </ul>
+</section>
+
+<footer><div>
+  数据源 <code>lmvla/lmwm/docs/ARCH_predictor_vs_single_2026-07-21.md</code> ·
+  脚本 <code>lmwm/scripts/exp_single_vs_twomodel.py</code> ·
+  产物 <code>lmwm/outputs/exp_svst_*.json</code>(带 _env.json) ·
+  2026-07-21
+</div></footer>
+
+</main>
+</div>
+
+<script>
+  const links=[...document.querySelectorAll('.toc a')], secs=links.map(a=>document.querySelector(a.getAttribute('href')));
+  const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){const i=secs.indexOf(e.target);links.forEach(l=>l.classList.remove('active'));if(i>=0)links[i].classList.add('active');}})},{rootMargin:'-20% 0px -70% 0px'});
+  secs.forEach(s=>s&&obs.observe(s));
+</script>
+</body>
+</html>
