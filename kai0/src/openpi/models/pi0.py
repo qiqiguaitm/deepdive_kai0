@@ -165,6 +165,20 @@ class Pi0(_model.BaseModel):
                 rngs=rngs,
             )
 
+        # LMWM hint injection (PLAN_pi05_lmwm_sameencoder §2.2). One learnable Linear
+        # projects the offline hint (D→width) which is then injected as extra token(s).
+        # Backward compatible: dim=0 (default) → no module created, embed_* is a no-op,
+        # forward is bit-identical to upstream pi05; old ckpts load unchanged.
+        self.lmwm_hint_dim = int(getattr(config, "lmwm_hint_dim", 0) or 0)
+        self.lmwm_hint_len = int(getattr(config, "lmwm_hint_len", 1) or 1)
+        self.lmwm_hint_target = str(getattr(config, "lmwm_hint_target", "prefix") or "prefix")
+        if self.lmwm_hint_dim > 0:
+            if self.lmwm_hint_target not in ("prefix", "suffix"):
+                raise ValueError(f"lmwm_hint_target must be 'prefix' or 'suffix', got {self.lmwm_hint_target!r}")
+            # prefix → paligemma (VLM) width; suffix → action_expert width.
+            hint_out_width = paligemma_config.width if self.lmwm_hint_target == "prefix" else action_expert_config.width
+            self.lmwm_hint_proj = nnx.Linear(self.lmwm_hint_dim, hint_out_width, rngs=rngs)
+
         # Store augment_level so compute_loss can read it (Pi0 doesn't keep full config).
         self.augment_level = getattr(config, "augment_level", "mild")
         self.use_dct_loss = getattr(config, "use_dct_loss", False)
@@ -213,6 +227,20 @@ class Pi0(_model.BaseModel):
             # image tokens attend to each other
             ar_mask += [False] * image_tokens.shape[1]
 
+        # LMWM hint (prefix target): project offline hint → prepend token(s) in the
+        # VLM stream, bidirectionally visible like images/language (ar_mask=False).
+        # Same semantic domain as So400m patch tokens → most natural placement.
+        if (
+            self.lmwm_hint_dim > 0
+            and self.lmwm_hint_target == "prefix"
+            and obs.lmwm_hint is not None
+        ):
+            hint = self.lmwm_hint_proj(obs.lmwm_hint)  # (B, hint_len, llm_width)
+            hint = hint.astype(jnp.bfloat16)
+            tokens.append(hint)
+            input_mask.append(jnp.ones(hint.shape[:2], dtype=jnp.bool_))
+            ar_mask += [False] * hint.shape[1]
+
         # add language (aka tokenized inputs)
         if obs.tokenized_prompt is not None:
             tokenized_inputs = self.PaliGemma.llm(obs.tokenized_prompt, method="embed")
@@ -252,6 +280,21 @@ class Pi0(_model.BaseModel):
             input_mask.append(jnp.ones((B, 1), dtype=jnp.bool_))
             # standalone group; action_expert tokens follow with their own ar pattern
             ar_mask += [True]
+
+        # LMWM hint (suffix target): project offline hint → prepend token(s) to the
+        # suffix. Only the action expert sees this (paligemma unaware) — conditioning
+        # only modulates action denoising, not VLM language alignment. Mirrors the
+        # action_head_cond domain token (each hint token forms its own ar group).
+        if (
+            self.lmwm_hint_dim > 0
+            and self.lmwm_hint_target == "suffix"
+            and obs.lmwm_hint is not None
+        ):
+            hint = self.lmwm_hint_proj(obs.lmwm_hint)  # (B, hint_len, action_expert_width)
+            hint = hint.astype(jnp.bfloat16)
+            tokens.append(hint)
+            input_mask.append(jnp.ones(hint.shape[:2], dtype=jnp.bool_))
+            ar_mask += [True] * hint.shape[1]
 
         if not self.pi05:
             # add a single state token

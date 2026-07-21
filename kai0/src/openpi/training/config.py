@@ -527,6 +527,62 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
             model_transforms=model_transforms,
         )
 
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotLiberoLocalDataConfig(DataConfigFactory):
+    """LIBERO config for the LOCAL v2.1 lerobot suites at /vePFS/tim/workspace/LIBERO_fastwam/.
+
+    Differs from LeRobotLiberoDataConfig (openpi example) in the repack keys: the local
+    dataset delivers FLAT dotted keys (`observation.images.image`, `observation.state`,
+    `action`, `task_index`) — openpi's flatten_dict(sep="/") keeps the dots, so the repack
+    must reference the dotted names directly (the example's `observation/image` won't match).
+    Prompt comes from task_index via prompt_from_task=True (period-separated tasks.jsonl).
+    See lmvla/lmwm/docs/DESIGN_pi05_P0_scaffolding_2026-07-21.md §1.
+
+    Used by pi05_libero_{a0,a1,a2}. lmwm_hint (A1/A2) is passed through by LiberoInputs when
+    present; A0 (model with lmwm_hint_dim=0) simply never produces the field.
+    """
+
+    # LIBERO raw actions are already deltas → no extra delta transform by default.
+    extra_delta_transform: bool = False
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        # Map the local dataset's flat dotted keys to the keys LiberoInputs expects.
+        structure = {
+            "image": "observation.images.image",
+            "wrist_image": "observation.images.wrist_image",
+            "state": "observation.state",
+            "actions": "action",
+        }
+        # prompt: injected from task_index when prompt_from_task is set (default here).
+        if not self.base_config or self.base_config.prompt_from_task:
+            structure["prompt"] = "prompt"
+        repack_transform = _transforms.Group(
+            inputs=[_transforms.RepackTransform(structure)]
+        )
+
+        data_transforms = _transforms.Group(
+            inputs=[libero_policy.LiberoInputs(model_type=model_config.model_type)],
+            outputs=[libero_policy.LiberoOutputs()],
+        )
+        if self.extra_delta_transform:
+            delta_action_mask = _transforms.make_bool_mask(6, -1)
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.DeltaActions(delta_action_mask)],
+                outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            )
+
+        model_transforms = ModelTransformFactory()(model_config)
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+        )
+
+
 @dataclasses.dataclass(frozen=True)
 class LerobotAgilexDataConfig(DataConfigFactory):
     """

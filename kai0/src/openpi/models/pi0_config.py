@@ -93,6 +93,19 @@ class Pi0Config(_model.BaseModelConfig):
     lewm_dinov3_dir: str | None = None       # DINOv3-L/16 本地权重目录 (offline)
     lewm_freeze_compactor: bool = False      # True=冻 compactor(L-freeze) / False=随策略微调(L-nofreeze)
 
+    # ===== LMWM hint 注入 (PLAN_pi05_lmwm_sameencoder_2026-07-21.md §2.2) =====
+    # 离线预计算的 LMWM 子目标 hint 向量 (obs.lmwm_hint, 逐帧 [*b, hint_len, hint_dim]),
+    # 经一层可学习 Linear 投影后作为额外 token 注入。**纯加法, 默认 dim=0 → 与上游 pi05 逐位一致**。
+    # LMWM 侧与 pi05 训练完全解耦: pi05 不 import LMWM, 只读一个数据字段; A1(DINOv3 768D)/
+    # A2(So400m 1152D) 的差别仅是喂哪个 hint 文件, pi05 代码一份不变。
+    #   lmwm_hint_dim    : hint 向量维度 (A1=768 / A2=1152); 0=禁用。
+    #   lmwm_hint_len    : 每帧注入的 token 数 (单发=1; best-of-K 候选=K)。
+    #   lmwm_hint_target : "prefix" (全 token 双向可见, vision 域自然, 仿 soft_prompt) |
+    #                      "suffix" (仅 action expert 可见, 不扰 VLM 语言对齐, 仿 action_head_cond)。
+    lmwm_hint_dim: int = 0
+    lmwm_hint_len: int = 1
+    lmwm_hint_target: str = "prefix"
+
     def __post_init__(self):
         if self.max_token_len is None:
             object.__setattr__(self, "max_token_len", 200 if self.pi05 else 48)

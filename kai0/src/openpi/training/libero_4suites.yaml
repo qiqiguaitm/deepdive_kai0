@@ -1,0 +1,10 @@
+# LIBERO 四套件 (LeRobot v2.1, no_noops) 本地路径 → ConcatDataset 训练
+# 数据勘查见 lmvla/lmwm/docs/DESIGN_pi05_P0_scaffolding_2026-07-21.md §1
+# 均 franka / fps20 / episode_*.parquet / state8 / action7
+# key: observation.images.{image,wrist_image} / observation.state / action / task_index
+# ⚠️ cnsh(gf0) 路径; North-E 需对应换 /vePFS-North-E 前缀(用 mkyaml.py 或另存)
+roots:
+  - /vePFS/tim/workspace/LIBERO_fastwam/libero_10_no_noops_lerobot
+  - /vePFS/tim/workspace/LIBERO_fastwam/libero_goal_no_noops_lerobot
+  - /vePFS/tim/workspace/LIBERO_fastwam/libero_object_no_noops_lerobot
+  - /vePFS/tim/workspace/LIBERO_fastwam/libero_spatial_no_noops_lerobot

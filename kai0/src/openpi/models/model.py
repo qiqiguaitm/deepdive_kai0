@@ -123,6 +123,12 @@ class Observation(Generic[ArrayT]):
     # None when soft_prompt disabled. ∈ [0, soft_prompt_num_domains).
     dataset_id: at.Int[ArrayT, "*b"] | None = None
 
+    # LMWM subgoal hint (PLAN_pi05_lmwm_sameencoder §2.2): offline-precomputed
+    # per-frame LMWM prediction ĝ_next, shape [*b, hint_len, hint_dim]. None when
+    # lmwm_hint_dim=0 (default) → model behaves identically to upstream pi05.
+    # NB: axis names hl/hd must not collide with image h/w/c above.
+    lmwm_hint: at.Float[ArrayT, "*b hl hd"] | None = None
+
     @classmethod
     def from_dict(cls, data: at.PyTree[ArrayT]) -> "Observation[ArrayT]":
         """This method defines the mapping between unstructured data (i.e., nested dict) to the structured Observation format."""
@@ -159,6 +165,7 @@ class Observation(Generic[ArrayT]):
             image_original=data.get("image_original", None),
             episode_index=data.get("episode_index", None),
             dataset_id=data.get("dataset_id", None),
+            lmwm_hint=data.get("lmwm_hint", None),
         )
 
     def to_dict(self) -> at.PyTree[ArrayT]:
@@ -270,6 +277,7 @@ def preprocess_observation(
         image_original=observation.image_original,
         episode_index=observation.episode_index,
         dataset_id=observation.dataset_id,
+        lmwm_hint=observation.lmwm_hint,
     )
 
 
