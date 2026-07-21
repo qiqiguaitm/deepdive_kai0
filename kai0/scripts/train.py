@@ -466,8 +466,10 @@ def main(config: _config.TrainConfig):
         # 归档 norm_stats 到 ckpt 目录. 标准 config: repo_id 是含 norm 的数据集全路径.
         # asset-based/多数据集 config (repo_id 是锚点名, norm 在 assets_dirs/asset_id): 回退到那里.
         src_file = Path(config.data.repo_id) / 'norm_stats.json'
-        if not src_file.exists() and config.data.asset_id:
-            src_file = Path(config.assets_dirs) / config.data.asset_id / 'norm_stats.json'
+        # config.data 是 DataConfigFactory: asset_id 在 .assets.asset_id (回退也认顶层 .asset_id).
+        _asset_id = getattr(config.data, "asset_id", None) or getattr(getattr(config.data, "assets", None), "asset_id", None)
+        if not src_file.exists() and _asset_id:
+            src_file = Path(config.assets_dirs) / _asset_id / 'norm_stats.json'
         if src_file.exists():
             shutil.copy(src_file, dst_dir)
         else:
