@@ -1,0 +1,76 @@
+# A2 特征抽取: v2.1 LIBERO_fastwam → DINOv3-base grid, 上海 East-H20 1-host 8 GPU 并行 shard.
+#   gf0 本地抽取被 load~200 CPU 解码瓶颈拖死 (~1.2帧/s, GPU 0% util) → 上专属节点.
+#   8 GPU 各跑 --shard i/8 --skip-existing (接续已产出), 输出/权重/数据全在 cnsh vePFS (同 gf0, 免传).
+# Submit: kai0/.venv/bin/python train_scripts/kai/volc/submit_yaml.py train_scripts/kai/volc/pi05_a2_extract_so400m_east.yaml
+TaskName: "pi05-a2-extract-so400m-east"
+Description: "A2 So400m grid 抽取 v2.1 LIBERO 4套件, 上海 East-H20 8GPU shard 并行"
+Tags: []
+
+ImageUrl: "visincept-cn-shanghai.cr.volces.com/grasp/kai:kai0-gf0"
+ResourceQueueName: "Robot-East-H20"
+Framework: "PyTorch"
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 1
+    Flavor: "ml.hpcpni3ln.45xlarge"   # 8× H20 single node (若 East-H20 flavor 不同, dry-run 会报)
+
+ActiveDeadlineSeconds: 43200
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnsh075262e1f815"
+    MountPath: "/vePFS"
+    SubPath: ""
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+  - Name: TOKENIZERS_PARALLELISM
+    Value: "false"
+
+Entrypoint: |
+  set -uo pipefail
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  LOG_DIR=/vePFS/tim/workspace/deepdive_kai0/lmvla/lmwm/logs
+  mkdir -p "$LOG_DIR"
+  MAIN="$LOG_DIR/a2_extract_so400m_${STAMP}.log"
+  exec >> "$MAIN" 2>&1
+  echo "=== a1 dino extract start $(date) (East-H20 8GPU shard) ==="
+  set -x
+  nvidia-smi -L
+  REPO=/vePFS/tim/workspace/deepdive_kai0
+  cd "$REPO/kai0"
+  source .venv/bin/activate
+  # 前置验证: torch/transformers/pyav/So400m 权重可用
+  python - <<'PYEOF' || { echo "FATAL: 抽取前置依赖缺失" >&2; exit 13; }
+  import torch, av, os
+  from transformers import AutoModel  # noqa
+  assert os.path.isdir("/vePFS/tim/workspace/deepdive_kai0/lmvla/lmwm/data/hf_so400m"), "So400m HF 目录缺"
+  print("OK torch", torch.__version__, "cuda", torch.cuda.is_available(), "av", av.__version__)
+  PYEOF
+  echo "[preflight OK]"
+
+  OUT=/vePFS/tim/workspace/deepdive_kai0/lmvla/lmwm/data/pi05_feat/libero_v2p1_so400m_grid
+  cd "$REPO/lmvla/lmwm/scripts"
+  # 8 GPU 各一 shard, 后台并行
+  for i in $(seq 0 7); do
+    CUDA_VISIBLE_DEVICES=$i python -u extract_v2p1_grid.py \
+      --encoder so400m --suites all --skip-existing --shard $i/8 \
+      --root /vePFS/tim/workspace/LIBERO_fastwam --out "$OUT" \
+      > "$LOG_DIR/a1_extract_shard${i}_${STAMP}.log" 2>&1 &
+  done
+  wait
+  echo "=== all shards done $(date) ==="
+  find "$OUT" -name "ep*.npz" | awk -F/ '{print $(NF-1)}' | sort | uniq -c
+
+RetryOptions:
+    EnableRetry: true
+    MaxRetryTimes: 3
+
+AccessType: "Public"

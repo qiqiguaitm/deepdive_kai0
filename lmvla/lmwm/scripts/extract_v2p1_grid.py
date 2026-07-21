@@ -52,13 +52,47 @@ def main():
 
     suites = SUITES if args.suites == ["all"] else args.suites
 
-    src = next((p for p in CRAVE_SRC_CANDIDATES if os.path.isdir(p)), None)
-    assert src, f"crave src 未找到: {CRAVE_SRC_CANDIDATES}"
-    sys.path.insert(0, src)
     import torch  # noqa
-    from crave.encoders import load_encoder
-    enc = load_encoder(args.encoder, dtype="bf16")
-    print(f"[enc] {args.encoder} dim={enc.dim} | root={args.root}", flush=True)
+    # 编码器抽象: encode(frames[list HxWx3 uint8]) → grid [N, 256, DIN].
+    if args.encoder == "so400m":
+        # A2: HF SigLIP-So400m patch token 层 (vision_model.last_hidden_state, 非文本对齐头);
+        # 与 p1_libero_so400m_extract.py 同源, [N, 256, 1152]. crave 不支持 so400m 故走 HF.
+        from PIL import Image
+        from transformers import AutoModel, AutoProcessor
+        SO400M_CANDIDATES = [
+            "/vePFS/tim/workspace/deepdive_kai0/lmvla/lmwm/data/hf_so400m",
+            "/vePFS-North-E/vis_robot/workspace/deepdive_kai0/lmvla/lmwm/data/hf_so400m",
+        ]
+        so = next((p for p in SO400M_CANDIDATES if os.path.isdir(p)), None)
+        assert so, f"So400m HF 目录未找到: {SO400M_CANDIDATES}"
+        proc = AutoProcessor.from_pretrained(so)
+        mdl = AutoModel.from_pretrained(so, dtype=torch.bfloat16).cuda().eval()
+        DIM = 1152
+
+        def encode(frames, batch=32):
+            outs = []
+            for i in range(0, len(frames), batch):
+                chunk = [Image.fromarray(f) for f in frames[i:i + batch]]
+                px = proc(images=chunk, return_tensors="pt")["pixel_values"].cuda().to(torch.bfloat16)
+                with torch.no_grad():
+                    h = mdl.vision_model(pixel_values=px).last_hidden_state  # [B, 256, 1152]
+                outs.append(h.float().cpu().numpy())
+            return np.concatenate(outs, 0)  # [N, 256, 1152]
+    else:
+        # A1: crave DINOv3-base → encode_grid [N, D, P, P] → [N, 256, D].
+        src = next((p for p in CRAVE_SRC_CANDIDATES if os.path.isdir(p)), None)
+        assert src, f"crave src 未找到: {CRAVE_SRC_CANDIDATES}"
+        sys.path.insert(0, src)
+        from crave.encoders import load_encoder
+        enc = load_encoder(args.encoder, dtype="bf16")
+        DIM = enc.dim
+
+        def encode(frames):
+            g = enc.encode_grid(frames)  # [N, D, P, P]
+            g = g.detach().cpu().float().numpy() if hasattr(g, "detach") else np.asarray(g)
+            N, D, P, _ = g.shape
+            return g.transpose(0, 2, 3, 1).reshape(N, P * P, D)  # [N, 256, D]
+    print(f"[enc] {args.encoder} dim={DIM} | root={args.root}", flush=True)
 
     gidx = -1  # 全局 episode 序号 (跨 suite), 用于 shard
     for suite in suites:
@@ -87,10 +121,8 @@ def main():
                 continue
             frames = decode_episode_mp4(mp4)
             n = len(frames)
-            grids = enc.encode_grid(frames)               # [N, dim, P, P]
-            g = grids.detach().cpu().float().numpy() if hasattr(grids, "detach") else np.asarray(grids)
-            N, D, P, _ = g.shape
-            g = g.transpose(0, 2, 3, 1).reshape(N, P * P, D)   # [N, 256, DIN]
+            g = encode(frames)                            # [N, 256, DIN] (crave dinov3 或 HF so400m)
+            N = len(g)
             if args.smoke:
                 gf = g.astype(np.float32)
                 print(f"  {suite}/ep{E}: frames={n} grid={g.shape} mean={gf.mean():.3f} std={gf.std():.3f}", flush=True)
