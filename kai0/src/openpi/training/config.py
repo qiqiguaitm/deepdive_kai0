@@ -546,6 +546,12 @@ class LeRobotLiberoLocalDataConfig(DataConfigFactory):
     # LIBERO raw actions are already deltas → no extra delta transform by default.
     extra_delta_transform: bool = False
 
+    # pi05 × LMWM (A1/A2): hint.npz 路径 (export_pi05_hint.py 产). 提供时: HintLookupTransform 按
+    # (dataset_id, ep, frame) 注入 obs.lmwm_hint. 需 datasets_yaml 带 domain_ids (InjectDatasetId 给 dataset_id),
+    # 且 lmwm_suite_order 与 domain_ids 顺序一致. A0 (无 hint) 留 None → 行为不变.
+    lmwm_hint_path: str | None = None
+    lmwm_suite_order: tuple = ("libero_10", "libero_goal", "libero_object", "libero_spatial")
+
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
         # Map the local dataset's flat dotted keys to the keys LiberoInputs expects.
@@ -561,9 +567,17 @@ class LeRobotLiberoLocalDataConfig(DataConfigFactory):
         # prompt: injected from task_index when prompt_from_task is set (default here).
         if not self.base_config or self.base_config.prompt_from_task:
             structure["prompt"] = "prompt"
-        repack_transform = _transforms.Group(
-            inputs=[_transforms.RepackTransform(structure)]
-        )
+        repack_inputs = []
+        if self.lmwm_hint_path:
+            # HintLookup 须在 RepackTransform 之前 (读原始 dataset_id/ep/frame); repack 保留 lmwm_hint.
+            structure["lmwm_hint"] = "lmwm_hint"
+            repack_inputs.append(
+                libero_policy.HintLookupTransform(
+                    hint_path=self.lmwm_hint_path, suite_order=self.lmwm_suite_order
+                )
+            )
+        repack_inputs.append(_transforms.RepackTransform(structure))
+        repack_transform = _transforms.Group(inputs=repack_inputs)
 
         data_transforms = _transforms.Group(
             inputs=[libero_policy.LiberoInputs(model_type=model_config.model_type)],
@@ -1131,6 +1145,48 @@ _CONFIGS = [
         batch_size=128,
         fsdp_devices=8,
     ),
+    # A1 = LMWM@外挂 DINOv3 (768D) hint 注入 pi05. warm-start pi05_base. hint 离线 (export_pi05_hint.py):
+    # extract_v2p1_grid(v2.1 DINOv3 grid) → export → hint.npz. datasets_yaml 带 domain_ids → HintLookupTransform
+    # 按 (dataset_id,ep,frame) 注入. lmwm_hint_dim=768. prefix (双向可见, 仿 soft_prompt) 与 suffix (仅 action expert)
+    # 两注入点做 A/B (PLAN §6.1). 北京版; A2 待 So400m grid 抽取后加 (lmwm_hint_dim=1152, hint_path 换 so400m).
+    TrainConfig(
+        name="pi05_libero_a1_prefix_bj",
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=8, max_token_len=200,
+                                   lmwm_hint_dim=768, lmwm_hint_len=1, lmwm_hint_target="prefix"),
+        data=LeRobotLiberoLocalDataConfig(
+            repo_id="libero_4suites",
+            datasets_yaml="/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/src/openpi/training/libero_4suites_hint_northe.yaml",
+            base_config=DataConfig(prompt_from_task=True),
+            assets=AssetsConfig(asset_id="libero_4suites"),
+            lmwm_hint_path="/vePFS-North-E/vis_robot/workspace/deepdive_kai0/lmvla/lmwm/data/pi05_hint/libero_dino/hint.npz",
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS-North-E/vis_robot/base_init_ckpts/extracted/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30_000, decay_lr=2.5e-6),
+        ema_decay=0.999, num_train_steps=30_000, keep_period=10_000, save_interval=5_000,
+        num_workers=8, batch_size=128, fsdp_devices=8,
+    ),
+    # A1-suffix: 同上, 注入点换 suffix (仅 action expert 见, 不扰 VLM 语言对齐).
+    TrainConfig(
+        name="pi05_libero_a1_suffix_bj",
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=8, max_token_len=200,
+                                   lmwm_hint_dim=768, lmwm_hint_len=1, lmwm_hint_target="suffix"),
+        data=LeRobotLiberoLocalDataConfig(
+            repo_id="libero_4suites",
+            datasets_yaml="/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/src/openpi/training/libero_4suites_hint_northe.yaml",
+            base_config=DataConfig(prompt_from_task=True),
+            assets=AssetsConfig(asset_id="libero_4suites"),
+            lmwm_hint_path="/vePFS-North-E/vis_robot/workspace/deepdive_kai0/lmvla/lmwm/data/pi05_hint/libero_dino/hint.npz",
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS-North-E/vis_robot/base_init_ckpts/extracted/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30_000, decay_lr=2.5e-6),
+        ema_decay=0.999, num_train_steps=30_000, keep_period=10_000, save_interval=5_000,
+        num_workers=8, batch_size=128, fsdp_devices=8,
+    ),
+
     # AWBC Advantage Estimator (RECAP Stage 1, PyTorch) — registered so eval.py / eval_adv_est.py can
     # get_config() to rebuild the model arch for the trained ckpt
     # kai0/checkpoints/ADVANTAGE_TORCH_KAI0_FLATTEN_FOLD/adv_est_v1 (metadata: pi05 / gemma_2b /

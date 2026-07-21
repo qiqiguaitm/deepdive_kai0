@@ -27,6 +27,54 @@ def _parse_image(image) -> np.ndarray:
 
 
 @dataclasses.dataclass(frozen=True)
+class HintLookupTransform(transforms.DataTransformFn):
+    """pi05 × LMWM (A1/A2): 按 (dataset_id, episode_index, frame_index) 查预算 hint 注入 data["lmwm_hint"].
+
+    hint.npz (export_pi05_hint.py 产) 含平行数组 suite/episode_index/frame_index/hint[N,(K,)D].
+    suite → dataset_id 由 datasets_yaml 的 domain_ids 顺序决定 (与本 transform 的 suite_order 一致).
+    须在 repack **之前**运行 (读原始样本的 episode_index/frame_index/dataset_id); repack structure
+    需含 "lmwm_hint":"lmwm_hint" 以保留. 缺失帧回退零向量 (训练不崩; 应极少).
+
+    hint_path: hint.npz 路径; suite_order: list[str] 按 dataset_id 索引 (suite_order[did]=suite 名).
+    """
+
+    hint_path: str
+    suite_order: tuple
+
+    def __post_init__(self):
+        z = np.load(self.hint_path, allow_pickle=True)
+        suites = z["suite"].astype(str)
+        eps = z["episode_index"].astype(np.int64)
+        fis = z["frame_index"].astype(np.int64)
+        hint = z["hint"]  # [N, D] 或 [N, K, D]
+        # 建 (did, ep) -> {frame: row} 的紧凑索引: per-(did,ep) 存一个 frame->row 映射.
+        name_to_did = {s: i for i, s in enumerate(self.suite_order)}
+        index: dict = {}
+        for row in range(len(hint)):
+            did = name_to_did.get(str(suites[row]))
+            if did is None:
+                continue
+            index.setdefault((did, int(eps[row])), {})[int(fis[row])] = row
+        object.__setattr__(self, "_hint", np.asarray(hint))
+        object.__setattr__(self, "_index", index)
+        object.__setattr__(self, "_dim", hint.shape[1:])  # (D,) 或 (K,D)
+
+    def __call__(self, data: dict) -> dict:
+        did = int(np.asarray(data["dataset_id"]).reshape(-1)[0])
+        ep = int(np.asarray(data["episode_index"]).reshape(-1)[0])
+        fi = int(np.asarray(data["frame_index"]).reshape(-1)[0])
+        row = self._index.get((did, ep), {}).get(fi)
+        # 模型消费形状 = [hint_len, D]: 单发 D→[1,D]; best-of-K [K,D]→[K,D].
+        if row is None:
+            shape = (1, self._dim[-1]) if len(self._dim) == 1 else self._dim
+            data["lmwm_hint"] = np.zeros(shape, dtype=np.float32)
+        else:
+            h = self._hint[row].astype(np.float32)          # [D] 或 [K, D]
+            data["lmwm_hint"] = h[None] if h.ndim == 1 else h
+        return data
+
+
+@dataclasses.dataclass(frozen=True)
 class LiberoInputs(transforms.DataTransformFn):
     """
     This class is used to convert inputs to the model to the expected format. It is used for both training and inference.
@@ -79,6 +127,11 @@ class LiberoInputs(transforms.DataTransformFn):
         # stored in "prompt"; the output dict always needs to have the key "prompt").
         if "prompt" in data:
             inputs["prompt"] = data["prompt"]
+
+        # LMWM hint (pi05 × LMWM A1/A2): offline-precomputed subgoal vector, injected by
+        # HintLookupTransform upstream (per episode/frame). Absent for A0 → pass-through no-op.
+        if "lmwm_hint" in data:
+            inputs["lmwm_hint"] = data["lmwm_hint"]
 
         return inputs
 

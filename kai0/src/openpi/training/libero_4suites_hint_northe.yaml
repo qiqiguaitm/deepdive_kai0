@@ -1,0 +1,8 @@
+# LIBERO 四套件 + domain_ids (A1/A2 hint 用) —— North-E(北京)
+# domain_id 顺序必须与 LeRobotLiberoLocalDataConfig.lmwm_suite_order 一致 (10/goal/object/spatial=0/1/2/3),
+# 使 InjectDatasetId 给样本 dataset_id, HintLookupTransform 按 (dataset_id,ep,frame) 查 hint.
+roots:
+  - {root: /vePFS-North-E/vis_robot/huanqian/uniVP/data/libero_mujoco3.3.2/libero_10_no_noops_lerobot, domain_id: 0}
+  - {root: /vePFS-North-E/vis_robot/huanqian/uniVP/data/libero_mujoco3.3.2/libero_goal_no_noops_lerobot, domain_id: 1}
+  - {root: /vePFS-North-E/vis_robot/huanqian/uniVP/data/libero_mujoco3.3.2/libero_object_no_noops_lerobot, domain_id: 2}
+  - {root: /vePFS-North-E/vis_robot/huanqian/uniVP/data/libero_mujoco3.3.2/libero_spatial_no_noops_lerobot, domain_id: 3}
