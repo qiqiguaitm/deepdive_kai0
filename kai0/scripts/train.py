@@ -463,8 +463,15 @@ def main(config: _config.TrainConfig):
 
     if jax.process_index() == 0:
         dst_dir = config.checkpoint_dir
+        # 归档 norm_stats 到 ckpt 目录. 标准 config: repo_id 是含 norm 的数据集全路径.
+        # asset-based/多数据集 config (repo_id 是锚点名, norm 在 assets_dirs/asset_id): 回退到那里.
         src_file = Path(config.data.repo_id) / 'norm_stats.json'
-        shutil.copy(src_file, dst_dir)
+        if not src_file.exists() and config.data.asset_id:
+            src_file = Path(config.assets_dirs) / config.data.asset_id / 'norm_stats.json'
+        if src_file.exists():
+            shutil.copy(src_file, dst_dir)
+        else:
+            logging.warning(f"norm_stats.json 未找到 (repo_id/asset_id 均无); ckpt 将缺归档 norm: {src_file}")
 
     init_wandb(config, resuming=resuming, enabled=(config.wandb_enabled and jax.process_index() == 0))
 
