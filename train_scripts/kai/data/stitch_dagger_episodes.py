@@ -12,29 +12,30 @@ stitch_dagger_episodes.py — 把同一天的同 rollout_id 的 inference + dagg
   完整语义/权重/文献见 docs/training/analysis/chunk001_schema.md):
     0 = robot           自主-正常     robot 自主, 正常执行             [keep,  Sirius robot]
     1 = intv_core       人控-纠错     人类遥操果断纠错核心             [keep,  Sirius intv, 上采样]
-    2 = preintv         自主-临失败   机器人"停下点"之前 ℓ 帧的失败先兆 [keep+标记, Sirius preintv,
-                                      (真运动, 非静止前奏; 见下)       P*=0 → 正训归零/AWBC 转负]
+    2 = preintv         自主-临失败   接管前真实尾巴 (裁滑行后往前 ℓ 帧) [keep+标记, Sirius preintv,
+                                      **不分动静**, 含卡死冻结; 见下    P*=0 → 正训归零/AWBC 转负]
     3 = hesitation      起手迟疑      接管后低速遥操起手 (静态伪影)     [物理裁掉]
-    4 = stationary_tail 静止尾        inf 静止前奏 / dag 末静止 (伪影)  [物理裁掉]
+    4 = stationary_tail 静止尾        inf 后halt滑行 / dag 末静止 (伪影)[物理裁掉]
     5 = demo            纯示范        base 示范 (保留码位, 本脚本不产)  [keep]
 
   设计要点 (回应 review ①, 依据 Sirius RSS2023/IJRR2025 §加权BC + IWR Mandlekar2020):
   - class 不再是 intervention 冗余死列: 保留 preintv(2) 并标记 → 落盘 class = 真 3 分类 {0,1,2}。
-  - **静态遥操伪影 (3,4) 仍物理裁掉** (双臂遥操录制伪影 + 接管前静止前奏, 非策略信号, 该删)。
-  - **⚠️ 采集流程 ≠ Sirius**: 我们是"打断→机器人停住→人接管", 实测接管前末 15 帧 90% 静止。
-    故 preintv **不能**取"接管前 ℓ 帧"(那是静止前奏伪影), 必须取**机器人停下点之前** ℓ 帧的
-    真运动 (实测 arm 速度 0.0031 ≈ 正常)。静止前奏 → stationary_tail(4) 裁掉。详见 §3.1 of schema。
-  - **ℓ 是时间尺度, 随 FPS 变**: Sirius ℓ=15 @20Hz=0.75s; 本 30 FPS → PREINTV_MARGIN=round(0.75*30)=22
-    (照抄 15 只有 0.5s, 偏短)。AWBC 侧 discretize_advantage 已把 class∈{2,3,4} 排除出 positive → 天然一致。
-  - 码位 0/1/2/3/4 与历史 chunk-001 兼容; 仅"保留 2 + 停下点切法 + ℓ 随帧率"改变 → 列变活且语义正确。
+  - **⚠️ 关键: inference 在第一个 freedrive(冻结)键关闭** (dagger_recorder_node._do_takeover:
+    execute=false → sleep(0.5) → close)。故 inf 尾 COAST_TRIM(=15,0.5s) 帧 = execute=false 后的
+    **滑行伪影** → 裁 (stationary_tail); 其前 PREINTV_MARGIN 帧 = 模型接管前**真实行为** → preintv。
+  - **preintv 不分动静**: 失败有两型 —— 运动中打断(动) + 卡死冻结(静, 模型冻结/任务未完成人打断)。
+    卡死型的静止帧正是负样本 (治"模型冻结/回折")。故 **不用运动停下点** (会误删卡死冻结帧),
+    改用固定裁滑行 (COAST_TRIM) + 其前 ℓ 帧全标 preintv。多负由 CRAVE value 判。
+  - **静态遥操伪影 (3,4) 仍物理裁掉**; AWBC 侧 discretize_advantage 已把 class∈{2,3,4} 排除出 positive。
+  - 码位 0/1/2/3/4 与历史 chunk-001 兼容; 旧脚本已 drop 末15(≈COAST_TRIM), 故旧数据可 relabel-only 补 preintv。
 
-裁留/打标原则 (Sirius RSS 2023 / IJRR 2025; IWR Mandlekar 2020; ℓ=round(0.75*FPS)):
+裁留/打标原则 (Sirius RSS 2023 / IJRR 2025; IWR Mandlekar 2020):
   ┌────────────────────────┬──────────┬────────────────────────────────┐
   │ 段                     │ class    │ 做法                            │
   ├────────────────────────┼──────────┼────────────────────────────────┤
   │ 犯错前 robot 段        │ 0 robot  │ 留                              │
-  │ 停下点前 ℓ 帧 (真失败) │ 2 preintv│ 留+标记 (失败先兆; 正训归零/转负)│
-  │ 停下点→接管 静止前奏   │ 4 statl  │ 物理裁掉 (静止, 非失败动态)      │
+  │ 接管前真实尾巴 ℓ 帧    │ 2 preintv│ 留+标记 (失败先兆,动/静不限;归零/转负)│
+  │ inf 尾 COAST_TRIM 滑行 │ 4 statl  │ 物理裁掉 (execute=false 后伪影)  │
   │ 接管后犹豫低速段       │ 3 hesit  │ 物理裁掉 (静态遥操伪影)          │
   │ 摇操果断核心           │ 1 intv   │ 留, 上采样                      │
   │ dag 末静止段           │ 4 statl  │ 物理裁掉 (静态遥操伪影)          │
@@ -86,7 +87,10 @@ GRIP_DIMS = [6, 13]
 # preintv 窗长是【时间尺度】, 随 FPS 变: Sirius ℓ=15 @20Hz = 0.75s 人反应时间;
 # 本数据 30 FPS → 同样 0.75s 需 round(0.75*30)=22 帧 (照抄 15 只有 0.5s, 偏短 1.5×)。
 REACTION_TIME_S = 0.75      # Sirius 人反应时间 (15帧@20Hz)
-PREINTV_MARGIN = round(REACTION_TIME_S * FPS)   # =22 @30fps; preintv = 机器人"停下点"之前这么多帧
+PREINTV_MARGIN = round(REACTION_TIME_S * FPS)   # =22 @30fps; preintv 标注窗 = 裁掉滑行后再往前这么多帧
+# inference 在第一个 freedrive(冻结)键时关闭: _do_takeover 发 execute=false → sleep(0.5) →
+# close, 期间 writer 仍写 ~0.5s 帧。故 inf 尾 COAST_TRIM 帧 = execute=false 后的滑行伪影 → 裁。
+COAST_TRIM = round(0.5 * FPS)   # =15; 与 _do_takeover 的 sleep(0.5) 对应
 # 迟疑检测: velocity 连续超过此阈值 N 帧 → 迟疑结束
 HESITATION_THR = 5e-3        # rad/frame — 低于此视为迟疑/慢速起手 (arm)
 GRIP_HESITATION_THR = 0.01   # gripper 迟疑阈值 — 夹爪慢速 vs 果断抓放
@@ -226,12 +230,11 @@ def classify_segment(states: np.ndarray, seg_type: str,
     返回 full-length int8 数组, 取值 {robot(0), intv_core(1), preintv(2), hesitation(3),
     stationary_tail(4)}。stitch 用它: (a) 落盘 dagger_frame_class 列; (b) keep = class∉TRIM_CLASSES。
 
-    inf 段 (接管前): 采集流程是"打断→机器人停住→人接管", 实测接管前末 15 帧 90% 是静止
-    (静止前奏中位 0.5s / p90 ~0.9s)。故 **不能** 直接把末 PREINTV_MARGIN 帧当 preintv —
-    那落在静止前奏里, 是伪影不是失败动态。正确切法:
-      · 找"停下点" = 最后一个 arm_vel>STATIONARY_THR 的帧;
-      · 停下点【之后】(静止前奏) → stationary_tail(4), 物理裁掉;
-      · 停下点【之前】PREINTV_MARGIN 帧 → preintv(2), 真失败先兆 (实测≈正常速);
+    inf 段 (接管前): inference 在第一个 freedrive(冻结)键关闭 (_do_takeover: execute=false →
+    sleep(0.5) → close)。故:
+      · 尾 COAST_TRIM(=15,0.5s) 帧 = execute=false 后的滑行伪影 → stationary_tail(4), 裁掉;
+      · 其前 PREINTV_MARGIN 帧 = 模型接管前【真实行为】→ preintv(2)。**不分动静**: 卡死型
+        (模型冻结/任务未完成人打断) 的静止帧正是负样本, 不能用运动停下点误删。
       · 更早 → robot(0)。
     dag 段: 全 intv_core, 首部低速标 hesitation, 尾部静止标 stationary_tail。
     """
@@ -242,12 +245,10 @@ def classify_segment(states: np.ndarray, seg_type: str,
     if seg_type == "inf":
         classes = np.full(n, CLASS_ROBOT, dtype=np.int8)
         if next_seg_type == "dag":
-            moving = arm_vel > STATIONARY_THR
-            if moving.any():
-                stop = int(np.max(np.where(moving)[0]))   # 机器人停下点 (最后运动帧)
-                classes[stop + 1:] = CLASS_STATIONARY_TAIL  # 静止前奏 → 裁 (TRIM_CLASSES)
-                lo = max(0, stop + 1 - PREINTV_MARGIN)
-                classes[lo:stop + 1] = CLASS_PREINTV        # 停下点前 ℓ 帧 → 失败先兆
+            cut = max(0, n - COAST_TRIM)             # 固定裁末 COAST_TRIM 帧 = 后halt滑行伪影
+            classes[cut:] = CLASS_STATIONARY_TAIL     # → 裁 (TRIM_CLASSES)
+            lo = max(0, cut - PREINTV_MARGIN)
+            classes[lo:cut] = CLASS_PREINTV           # 接管前真实尾巴 → preintv (动/静不限)
             # moving 全 False (整段静止) → 全 robot, 交由后续无 preintv (退化但安全)
         return classes
 
