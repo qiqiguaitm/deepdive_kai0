@@ -1265,6 +1265,45 @@ _CONFIGS = [
         num_workers=8, batch_size=128, fsdp_devices=8,
     ),
 
+    # A2 北京(North-E)版: rebalance —— 上海 East-H20 4臂过载, A2 移北京 North-H20 分流.
+    # North-E 路径; hint.npz 从 cnsh 同步过来 (563M). datasets_yaml 复用 A1 的北京 domain_ids yaml.
+    TrainConfig(
+        name="pi05_libero_a2_prefix_bj",
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=8, max_token_len=200,
+                                   lmwm_hint_dim=1152, lmwm_hint_len=1, lmwm_hint_target="prefix"),
+        data=LeRobotLiberoLocalDataConfig(
+            repo_id="libero_4suites",
+            datasets_yaml="/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/src/openpi/training/libero_4suites_hint_northe.yaml",
+            base_config=DataConfig(prompt_from_task=True),
+            assets=AssetsConfig(asset_id="libero_4suites"),
+            lmwm_hint_path="/vePFS-North-E/vis_robot/workspace/deepdive_kai0/lmvla/lmwm/data/pi05_hint/libero_so400m/hint.npz",
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS-North-E/vis_robot/base_init_ckpts/extracted/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30_000, decay_lr=2.5e-6),
+        ema_decay=0.999, num_train_steps=30_000, keep_period=10_000, save_interval=5_000,
+        num_workers=8, batch_size=128, fsdp_devices=8,
+    ),
+    TrainConfig(
+        name="pi05_libero_a2_suffix_bj",
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32, action_horizon=8, max_token_len=200,
+                                   lmwm_hint_dim=1152, lmwm_hint_len=1, lmwm_hint_target="suffix"),
+        data=LeRobotLiberoLocalDataConfig(
+            repo_id="libero_4suites",
+            datasets_yaml="/vePFS-North-E/vis_robot/workspace/deepdive_kai0/kai0/src/openpi/training/libero_4suites_hint_northe.yaml",
+            base_config=DataConfig(prompt_from_task=True),
+            assets=AssetsConfig(asset_id="libero_4suites"),
+            lmwm_hint_path="/vePFS-North-E/vis_robot/workspace/deepdive_kai0/lmvla/lmwm/data/pi05_hint/libero_so400m/hint.npz",
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vePFS-North-E/vis_robot/base_init_ckpts/extracted/pi05_base/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30_000, decay_lr=2.5e-6),
+        ema_decay=0.999, num_train_steps=30_000, keep_period=10_000, save_interval=5_000,
+        num_workers=8, batch_size=128, fsdp_devices=8,
+    ),
+
     # AWBC Advantage Estimator (RECAP Stage 1, PyTorch) — registered so eval.py / eval_adv_est.py can
     # get_config() to rebuild the model arch for the trained ckpt
     # kai0/checkpoints/ADVANTAGE_TORCH_KAI0_FLATTEN_FOLD/adv_est_v1 (metadata: pi05 / gemma_2b /
