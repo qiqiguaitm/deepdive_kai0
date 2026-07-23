@@ -1,0 +1,117 @@
+# pi05 LIBERO eval: A0(pi05_libero_a0_bj @29999) 4卡×4路并行(变 EVAL_SEED 防随机性).
+#   为最大可比性: 复用 wp577 的 libero env/adapter/obs/episodes.jsonl, 只把 policy 换 openpi(serve_policy + eval_libero_openpi).
+#   4 路各: GPU i, PORT=base+i, EVAL_SEED=i, libero_10 全 10 任务 × 50 trials. t6=判据.
+#   server+client 都在 kai0/.venv(jax serve + libero rollout); 运行时 pip install libero deps.
+# Submit: gf0 VOLC_AK/SK kai0/.venv/bin/python submit_yaml.py pi05_libero_eval_a0_x4.yaml
+TaskName: "pi05-libero-eval-a0-x4"
+Description: "pi05 A0(29999) LIBERO libero_10 eval, 4路变seed, North-H20 8卡用4卡"
+Tags: []
+
+ImageUrl: "dvs-cr-cn-beijing.cr.volces.com/vis_robot/kai:kai0-gf1"
+ResourceQueueName: "Robot-North-H20"
+Framework: "PyTorch"
+Preemptible: false
+
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 1
+    Flavor: "ml.hpcpni3ln.45xlarge"   # 8×H20 整节点(队列无4卡档); 用 GPU 0-3 跑4路
+
+ActiveDeadlineSeconds: 43200
+EnableTensorBoard: false
+
+Storages:
+  - Type: "Vepfs"
+    VepfsId: "vepfs-cnbj875793a96d6b"
+    MountPath: "/vePFS-North-E/vis_robot"
+    SubPath: "/vis_robot"
+
+CacheType: "Cloudfs"
+
+Envs:
+  - Name: MUJOCO_GL
+    Value: "egl"
+  - Name: PYOPENGL_PLATFORM
+    Value: "egl"
+  - Name: HF_HUB_OFFLINE
+    Value: "1"
+  - Name: TRANSFORMERS_OFFLINE
+    Value: "1"
+  - Name: XLA_PYTHON_CLIENT_MEM_FRACTION
+    Value: "0.4"
+  - Name: XLA_PYTHON_CLIENT_PREALLOCATE
+    Value: "false"
+
+Entrypoint: |
+  set -uo pipefail
+  STAMP=$(date -u +%Y%m%d_%H%M%S)
+  REPO=/vePFS-North-E/vis_robot/workspace/deepdive_kai0
+  LOG_DIR=$REPO/lmvla/lmwm/logs; mkdir -p "$LOG_DIR"
+  MAIN="$LOG_DIR/pi05_libero_eval_a0_x4_${STAMP}.log"
+  exec >> "$MAIN" 2>&1
+  echo "=== pi05 A0 libero eval start $(date) (4路) ==="
+  set -x
+  nvidia-smi -L
+  cd "$REPO/kai0"
+  source .venv/bin/activate
+  export PYTHON=$REPO/kai0/.venv/bin/python
+  # libero env
+  export LIBERO_HOME=$REPO/lmvla/LIBERO
+  export LIBERO_CONFIG_PATH=$LIBERO_HOME/libero
+  export PYTHONPATH="$REPO/kai0/src:$REPO/lmvla/lawam:$LIBERO_HOME:${PYTHONPATH:-}"
+  # 运行时装 libero client deps(与 wp577 一致)
+  $PYTHON -m pip install -q -i https://mirrors.aliyun.com/pypi/simple/ 'robosuite==1.4.1' mujoco opencv-python-headless websockets msgpack msgpack-numpy 2>&1 | tail -2 || echo "pip best-effort"
+
+  CKPT=$REPO/kai0/checkpoints/pi05_libero_a0_bj/pi05_libero_a0/29999
+  [ -f "$CKPT/assets/libero_4suites/norm_stats.json" ] || { echo "FATAL: ckpt norm 缺 $CKPT" >&2; exit 13; }
+  # preflight: libero + openpi_client 可导入 + benchmark dict 有 libero_10
+  $PYTHON - <<'PYEOF' || { echo "FATAL: libero/openpi_client 导入失败" >&2; exit 13; }
+  import openpi_client, numpy  # noqa
+  from libero.libero import benchmark
+  ts = benchmark.get_benchmark_dict()["libero_10"]()
+  print("PREFLIGHT OK libero_10 n_tasks=", ts.n_tasks)
+  PYEOF
+
+  OUT=$REPO/lmvla/lmwm/data/pi05_libero_eval/a0_${STAMP}
+  pids=""
+  for i in 0 1 2 3; do
+    PORT=$((8100 + i))
+    ( CUDA_VISIBLE_DEVICES=$i $PYTHON scripts/serve_policy.py --policy.config pi05_libero_a0_bj --policy.dir "$CKPT" --port $PORT > "$LOG_DIR/eval_a0_server${i}_${STAMP}.log" 2>&1 ) &
+    sleep 5
+    ( # 等 server 起 + 跑 client
+      for w in $(seq 1 120); do $PYTHON -c "import socket;socket.create_connection(('127.0.0.1',$PORT),2)" 2>/dev/null && break; sleep 5; done
+      CUDA_VISIBLE_DEVICES=$i MUJOCO_EGL_DEVICE_ID=$i $PYTHON $REPO/lmvla/lawam/examples/LIBERO/eval_files/eval_libero_openpi.py \
+        --host 127.0.0.1 --port $PORT --task-suite-name libero_10 --num-trials-per-task 50 --seed $i \
+        --replan-steps 5 --output-dir "$OUT/seed${i}" > "$LOG_DIR/eval_a0_client${i}_${STAMP}.log" 2>&1
+    ) &
+    pids="$pids $!"
+    sleep 10
+  done
+  for p in $pids; do wait $p; done
+  echo "=== 4路 eval 完成, 聚合 ==="
+  $PYTHON - "$OUT" <<'PYEOF'
+  import sys, os, json, glob, statistics
+  out=sys.argv[1]; per_seed={}
+  for sd in sorted(glob.glob(os.path.join(out,"seed*"))):
+      s=os.path.basename(sd)
+      f=os.path.join(sd,"suites","libero_10","summary.json")
+      if os.path.exists(f): per_seed[s]=json.load(open(f))
+  if not per_seed: print("NO RESULTS"); sys.exit()
+  tasks=sorted({int(t) for v in per_seed.values() for t in v["per_task_SR"]})
+  print("=== per-task SR (4 seed 均值±std) ===")
+  for t in tasks:
+      vals=[v["per_task_SR"].get(str(t), v["per_task_SR"].get(t)) for v in per_seed.values()]
+      vals=[x for x in vals if x is not None]
+      m=statistics.mean(vals); sd=statistics.pstdev(vals) if len(vals)>1 else 0
+      mark=" <== t6 判据" if t==6 else ""
+      print(f"  t{t}: {m*100:.1f} ± {sd*100:.1f}{mark}")
+  aggs=[v["aggregate_SR"] for v in per_seed.values()]
+  print(f"=== 聚合 SR: {statistics.mean(aggs)*100:.2f} ± {(statistics.pstdev(aggs) if len(aggs)>1 else 0)*100:.2f} (n={len(aggs)} seed) ===")
+  PYEOF
+  echo "=== done $(date) ==="
+
+RetryOptions:
+    EnableRetry: true
+    MaxRetryTimes: 3
+
+AccessType: "Public"
