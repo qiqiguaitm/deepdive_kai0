@@ -39,8 +39,8 @@ print(f"frames={len(img)} ({len(img)/1e6:.2f}M)", flush=True)
 
 t0 = time.time()
 img = l2(img)
-pca = PCA(n_components=128, svd_solver="randomized", random_state=0).fit(img)   # 全帧拟合, 零降采样
-fq = np.empty((len(img), 128), np.float32)
+pca = PCA(n_components=int(os.environ.get("PCA_DIM","128")), svd_solver="randomized", random_state=0).fit(img)   # 全帧拟合, 零降采样
+fq = np.empty((len(img), int(os.environ.get("PCA_DIM","128"))), np.float32)
 for i in range(0, len(img), 200000):
     fq[i:i+200000] = pca.transform(img[i:i+200000]).astype(np.float32)
 fq = l2(fq); del img
